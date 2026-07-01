@@ -1,0 +1,161 @@
+version: 1
+name: canon-quill-book-writing
+initial_state: setup
+terminal_states:
+  - complete
+  - cancelled
+global:
+  max_state_retries: 3
+  state_dir: .canon-quill/state
+  logs_dir: .canon-quill/logs
+  artifacts_dir: .canon-quill/artifacts
+  target_staging_dir: .canon-quill/target-staging
+  user_review_required_states:
+    - preflight_review
+    - user_chapter_review
+    - book_final_review
+states:
+  setup:
+    agent: book-00-setup
+    description: Verify local installation, build status, OpenSpec availability, and Drive MCP readiness.
+    on_success: intake
+    on_failure: setup_repair
+  setup_repair:
+    agent: book-00-setup
+    description: Repair missing install/build prerequisites when possible, otherwise produce exact blocker report.
+    on_success: intake
+    on_failure: cancelled
+  intake:
+    agent: book-01-intake
+    description: Ask project-level questions before any reference extraction.
+    requires_user_input: true
+    on_success: drive_selection
+    on_incomplete: intake
+    on_failure: intake
+  drive_selection:
+    agent: book-02-drive-selection
+    description: Collect reference folders/files and target folder through visual picker or URL fallback.
+    requires_user_input: true
+    on_success: reference_extraction
+    on_incomplete: drive_selection
+    on_failure: drive_selection
+  reference_extraction:
+    agent: book-03-reference-extraction
+    description: Read selected references and produce source inventory, extracted facts, constraints, and style samples.
+    on_success: preparation
+    on_failure: reference_extraction
+  preparation:
+    agent: book-04-preparation
+    description: Build project bible, plot bible, character bible, style guide, AI-isms policy, and chapter plan.
+    on_success: preflight_review
+    on_failure: preparation
+  preflight_review:
+    agent: book-05-preflight-review
+    description: Stop for user review of preparation docs before drafting begins.
+    requires_user_review: true
+    transitions:
+      approved: chapter_mode_select
+      corrections_requested: corrections
+      cancelled: cancelled
+    on_failure: preflight_review
+  corrections:
+    agent: book-06-corrections
+    description: Apply user-requested changes to preparation docs, then return to preflight review.
+    on_success: preflight_review
+    on_failure: corrections
+  chapter_mode_select:
+    agent: book-01-intake
+    description: Confirm chapter-by-chapter default or optional book-by-book generation before writing starts.
+    requires_user_input: true
+    transitions:
+      chapter_by_chapter: chapter_drafting
+      book_by_book: chapter_drafting
+    on_failure: chapter_mode_select
+  chapter_drafting:
+    agent: book-07-chapter-drafting
+    description: Draft the next chapter from approved preparation and continuity state. No user questions here.
+    on_success: chapter_editing
+    on_failure: chapter_drafting
+  chapter_editing:
+    agent: book-08-chapter-editing
+    description: Rewrite the draft phrase by phrase for voice, clarity, pacing, specificity, and anti-AI-ism cleanup.
+    on_success: chapter_validation
+    on_failure: chapter_editing
+  chapter_validation:
+    agent: book-09-chapter-validation
+    description: Read-only final check against constraints, canon, plot, style, POV, intimacy, and quality gates.
+    transitions:
+      pass_chapter_by_chapter: user_chapter_review
+      pass_full_book: continuity_update
+      fail: chapter_editing
+      critical_fail: chapter_drafting
+    on_failure: chapter_validation
+  user_chapter_review:
+    agent: book-10-user-review
+    description: Present validated chapter to user and gather approval or feedback.
+    requires_user_review: true
+    transitions:
+      approved: final_post
+      feedback: chapter_drafting
+      cancelled: cancelled
+    on_failure: user_chapter_review
+  final_post:
+    agent: book-11-final-post
+    description: Write approved chapter to target Drive folder and local manifest without overwriting by default.
+    transitions:
+      success: continuity_update
+      write_failed: final_post_repair
+    on_failure: final_post_repair
+  final_post_repair:
+    agent: book-11-final-post
+    description: Diagnose and repair safe target posting failures.
+    on_success: continuity_update
+    on_failure: user_chapter_review
+  continuity_update:
+    agent: book-12-continuity-update
+    description: Promote approved or internally validated chapter into canon, timeline, unresolved threads, and next-chapter context.
+    transitions:
+      next_chapter: chapter_drafting
+      book_complete: book_finalization
+    on_failure: continuity_update
+  book_finalization:
+    agent: book-13-book-finalization
+    description: Compile manuscript, consistency report, unresolved threads report, and final user review package.
+    on_success: book_final_review
+    on_failure: book_finalization
+  book_final_review:
+    agent: book-10-user-review
+    description: Final user review of complete book package.
+    requires_user_review: true
+    transitions:
+      approved: docx_generation
+      feedback: book_finalization
+      cancelled: cancelled
+  docx_generation:
+    agent: book-14-docx-generation
+    description: Generate final DOCX from approved manuscript markdown.
+    on_success: final_package_post
+    on_failure: docx_generation
+  final_package_post:
+    agent: book-15-final-package-post
+    description: Push final DOCX and final reports to target Drive folder.
+    transitions:
+      success: project_archive
+      write_failed: final_package_post_repair
+    on_failure: final_package_post_repair
+  final_package_post_repair:
+    agent: book-15-final-package-post
+    description: Diagnose and repair safe final package posting failures.
+    on_success: project_archive
+    on_failure: book_final_review
+  project_archive:
+    agent: book-16-project-archive
+    description: Archive completed project artifacts and reset local state for a fresh new book.
+    on_success: complete
+    on_failure: project_archive
+  complete:
+    agent: book-orchestrator
+    description: Terminal success state.
+  cancelled:
+    agent: book-orchestrator
+    description: Terminal cancelled state.

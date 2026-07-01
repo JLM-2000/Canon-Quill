@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "book-orchestrator",
+  "share": "disabled",
+  "autoupdate": "notify",
+  "snapshot": true,
+  "watcher": {
+    "ignore": ["node_modules/**", "dist/**", ".canon-quill/**", ".git/**"]
+  },
+  "mcp": {
+    "canon_drive": {
+      "type": "local",
+      "command": ["node", "dist/mcp/drive-server.js"],
+      "enabled": false,
+      "environment": {
+        "GOOGLE_OAUTH_CLIENT_JSON": "{env:GOOGLE_OAUTH_CLIENT_JSON}",
+        "CANON_QUILL_DRIVE_SCOPES": "{env:CANON_QUILL_DRIVE_SCOPES}",
+        "CANON_QUILL_ALLOW_OVERWRITE": "{env:CANON_QUILL_ALLOW_OVERWRITE}"
+      },
+      "timeout": 30000
+    }
+  },
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "*": "ask",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "npm test": "allow",
+      "npm run build": "allow",
+      "npm run validate:workflow": "allow"
+    },
+    "webfetch": "ask",
+    "websearch": "ask"
+  },
+  "compaction": {
+    "auto": true,
+    "tail_turns": 6
+  },
+  "tool_output": {
+    "max_lines": 1200,
+    "max_bytes": 50000
+  }
+}

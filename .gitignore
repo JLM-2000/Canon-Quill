@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.canon-quill/
+.canon-quill-archives/
+coverage/
+*.log
+credentials.json
+token.json
+*.secret.*
+*.local.*

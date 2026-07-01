@@ -1,0 +1,31 @@
+name: book-agentic
+version: 1
+description: Spec-driven workflow for Canon Quill book-writing agent systems.
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Why the workflow change is needed and what will change.
+    template: proposal.md
+    instruction: Create a proposal focused on user value, Drive safety, and writing-quality impact.
+    requires: []
+  - id: specs
+    generates: specs/book-workflow/spec.md
+    description: Requirements and scenarios for the workflow change.
+    template: spec.md
+    instruction: Create SHALL requirements with scenarios for success, failure, and review gates.
+    requires: [proposal]
+  - id: design
+    generates: design.md
+    description: Technical and agent design.
+    template: design.md
+    instruction: Explain agents, permissions, workflow transitions, Drive scope, and validation strategy.
+    requires: [proposal, specs]
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist.
+    template: tasks.md
+    instruction: Create ordered tasks including tests, docs, security review, and workflow validation.
+    requires: [design]
+apply:
+  requires: [tasks]
+  tracks: tasks.md

@@ -1,0 +1,16 @@
+schema: book-agentic
+
+context: |
+  Canon Quill is an OpenCode workflow package for agentic book writing from Google Drive references.
+  It uses phase agents, narrow subagents, safe Drive tools, and explicit user-review gates.
+  No root AGENTS.md is used. Agent instructions live in .opencode/agents/*.md.
+
+rules:
+  proposal:
+    - Include security implications and Drive scope impact.
+    - Identify affected agents and workflow states.
+  specs:
+    - Use SHALL requirements and Given/When/Then scenarios.
+    - Include failure paths and user-review gates.
+  tasks:
+    - Include validation and security audit tasks.
