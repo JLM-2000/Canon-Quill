@@ -66,7 +66,7 @@ What it looks for instead is sameness, which is what actually gives a machine aw
 
 **Connect Drive.** Narrow permissions, only the files you pick.
 
-**Select sources.** Browse your Drive, mark the folders to read, choose where finished chapters get written back.
+**Select sources.** Browse your Drive, mark the folders and files to read, and choose where finished chapters get written back. Both are required before analysis will run.
 
 **Analyse and group.** Every document is read and sorted into series books, references, characters, timeline, worldbuilding, plot, and notes. You correct anything in the wrong place by clicking the labels, and a document can belong to several groups at once, which is common: one file often holds a timeline, an outline and loose notes.
 

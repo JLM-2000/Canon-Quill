@@ -1011,19 +1011,27 @@ function viewSources() {
     <div class="row">${chosen || '<span class="hint">Nothing yet. Press <b>Reference</b> on a folder or file above.</span>'}</div>
 
     <div style="margin-top:16px"><label>Target folder</label>
-      <div class="hint" style="margin-bottom:6px">Finished chapters are written here. Canon Quill only ever
-      creates files; it never overwrites without being told to. A folder can be both a reference and the
-      target.</div>
+      <div class="hint" style="margin-bottom:6px">Required. Finished chapters are written here, and Canon
+      Quill only ever creates files: it never overwrites without being told to. A folder can be both a
+      reference and the target.</div>
       <div class="row">${target
         ? chip(target.name, "clearTarget()")
         : '<span class="hint">Nothing yet. Press <b>Target</b> on a folder above.</span>'}</div>
     </div>
 
-    <div class="row" style="margin-top:16px">
-      <button ${picked.size ? "" : "disabled"} onclick="analyseSources(this)">
-        Analyse ${picked.size ? plural(picked.size, "source") : "sources"}</button>
-    </div>
-    ${picked.size && !target ? '<div class="hint" style="margin-top:8px;color:var(--warn)">No target folder set. You can still write the book, but finished chapters will not be uploaded anywhere.</div>' : ""}
+    ${(() => {
+      const missing = [];
+      if (!picked.size) missing.push("reference material");
+      if (!target) missing.push("a target folder");
+      const ready = missing.length === 0;
+      return `<div class="row" style="margin-top:16px">
+        <button ${ready ? "" : "disabled"} onclick="analyseSources(this)">
+          Analyse ${ready ? plural(picked.size, "source") : "sources"}</button>
+      </div>
+      ${ready ? "" : `<div class="hint" style="margin-top:8px;color:var(--warn)">Still need ${
+        missing.length === 2 ? `${missing[0]} and ${missing[1]}` : missing[0]
+      }. Use the buttons on the folders above.</div>`}`;
+    })()}
     <div class="hint" style="margin-top:8px">Reads every document and sorts it into groups. This can take a
     few minutes for a large folder.</div>
   </div>`;

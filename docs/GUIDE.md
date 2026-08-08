@@ -297,7 +297,10 @@ The reason this comes first is that these answers change what gets extracted fro
 
 ### Drive selection
 
-You pick reference folders and a target folder. Folders are walked recursively, and pagination is followed, so a folder with more than a thousand files is read completely.
+You pick reference material and a target folder. Both are required: a book with
+nowhere to be delivered is not much use, and discovering the gap after it is
+written is worse than being stopped now. The Analyse button says which of the two
+is still missing. Folders are walked recursively, and pagination is followed, so a folder with more than a thousand files is read completely.
 
 ### Source analysis
 

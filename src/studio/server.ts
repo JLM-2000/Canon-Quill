@@ -384,7 +384,10 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const state = await loadState(slug);
     if (state.drive.referenceRoots.length === 0) {
-      throw new HttpError(400, "Select at least one reference folder first.");
+      throw new HttpError(400, "Select at least one reference folder or file first.");
+    }
+    if (!state.drive.targetFolderId) {
+      throw new HttpError(400, "Choose a target folder. Finished chapters have to go somewhere, and picking it now avoids discovering the gap after the book is written.");
     }
 
     const found: Array<{ source: SelectedSource; text: string }> = [];

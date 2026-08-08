@@ -540,3 +540,22 @@ describe("directions", () => {
     expect((await call("/api/directions", { method: "POST", body: { text: "x".repeat(5000) } })).status).toBe(400);
   });
 });
+
+describe("target folder is required", () => {
+  it("refuses to index without one", async () => {
+    await call("/api/drive/roots", { method: "POST", body: { roots: ["1AAAAAAAAAAAAAAAAAAAAAAAAAAA"] } });
+    const { status, body } = await call("/api/sources/index", { method: "POST" });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/target folder/i);
+  });
+
+  it("still refuses when a target exists but nothing was selected to read", async () => {
+    await call("/api/drive/roots", {
+      method: "POST",
+      body: { roots: [], targetFolderId: "1BBBBBBBBBBBBBBBBBBBBBBBBBBB" }
+    });
+    const { status, body } = await call("/api/sources/index", { method: "POST" });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/reference folder or file/i);
+  });
+});
