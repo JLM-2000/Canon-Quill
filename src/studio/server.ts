@@ -38,6 +38,7 @@ import {
 import { workspacePaths } from "../workspace/paths.js";
 import { appendLog } from "../project/logs.js";
 import { checkCredentials, defaultModels, loadCatalog, type ProviderId } from "./engine.js";
+import { applyUpdate, getVersionInfo } from "./updates.js";
 import { deleteApiKey, maskKey, readApiKey, saveApiKey, verifyApiKey } from "./credentials.js";
 import { loadDotEnv } from "../config/env.js";
 
@@ -88,43 +89,36 @@ export function createStudioApp() {
     res.status(500).type("text").send("Studio UI not found. Run npm run build.");
   }));
 
+  app.get("/api/version", route(async (req, res) => {
+    // Checking the remote costs a network round trip, so the UI asks for it
+    // only when it opens the panel or on a slow timer.
+    res.json(await getVersionInfo(req.query.remote === "1"));
+  }));
+
+  app.post("/api/version/update", route(async (_req, res) => {
+    res.json(await applyUpdate());
+  }));
+
   /**
-   * Whether the running process is older than the code on disk.
+   * Restart into the updated code.
    *
-   * The UI file is read per request so it is always current, but everything
-   * else is loaded once at startup. Editing a source file while the Studio is
-   * running therefore produces a half-updated app, which is confusing enough
-   * to be worth detecting rather than leaving people to guess.
+   * The process cannot reload its own modules, so it spawns a detached
+   * replacement and exits once that has had time to bind the port. The client
+   * polls /api/version until the new process answers.
    */
-  app.get("/api/health", route(async (_req, res) => {
-    const { readdir, stat } = await import("node:fs/promises");
-    let newest = 0;
-
-    const walk = async (dir: string, depth = 0): Promise<void> => {
-      if (depth > 4) return;
-      let entries;
-      try {
-        entries = await readdir(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) await walk(full, depth + 1);
-        else if (/\.(ts|mjs|yaml)$/.test(entry.name)) {
-          const info = await stat(full).catch(() => undefined);
-          if (info && info.mtimeMs > newest) newest = info.mtimeMs;
-        }
-      }
-    };
-
-    await Promise.all([walk(path.join(process.cwd(), "src")), walk(path.join(process.cwd(), "config"))]);
-
-    res.json({
-      startedAt: new Date(startedAt).toISOString(),
-      stale: newest > startedAt,
-      newestChange: newest ? new Date(newest).toISOString() : null
-    });
+  app.post("/api/version/restart", route(async (_req, res) => {
+    res.json({ restarting: true });
+    setTimeout(() => {
+      const child = spawn(process.argv[0], [process.argv[1]], {
+        cwd: process.cwd(),
+        env: { ...process.env, CANON_QUILL_NO_OPEN: "1" },
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
+      // Give the replacement a moment to start before releasing the port.
+      setTimeout(() => process.exit(0), 1500);
+    }, 250);
   }));
 
   // --- Projects -------------------------------------------------------------

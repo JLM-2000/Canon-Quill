@@ -135,11 +135,24 @@ export async function loadState(slug: string): Promise<StudioState> {
     const parsed = JSON.parse(await readFile(workspacePaths(slug).stateFile, "utf8")) as Partial<StudioState>;
     // Merged onto a fresh default so a file written by an older version gains
     // new fields rather than leaving them undefined at the call site.
-    return { ...emptyState(slug, parsed.projectName ?? "Untitled Book"), ...parsed, slug, version: 3 };
+    const merged = { ...emptyState(slug, parsed.projectName ?? "Untitled Book"), ...parsed, slug, version: 3 as const };
+    return { ...merged, sources: migrateSources(merged.sources) };
   } catch (error) {
     if (isMissing(error)) return emptyState(slug);
     throw error;
   }
+}
+
+/**
+ * Sources used to carry a single `kind`. Carry those forward rather than
+ * leaving an existing project with every document ungrouped.
+ */
+function migrateSources(sources: SelectedSource[]): SelectedSource[] {
+  return (sources ?? []).map((source) => {
+    if (Array.isArray(source.kinds)) return source;
+    const legacy = (source as unknown as { kind?: SourceKind }).kind;
+    return { ...source, kinds: legacy ? [legacy] : [] };
+  });
 }
 
 export async function saveState(state: StudioState): Promise<StudioState> {

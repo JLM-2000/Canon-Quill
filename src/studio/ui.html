@@ -58,6 +58,9 @@
   .navitem .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
   .navitem.done .dot { background: var(--good); }
   .navitem.current .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .navitem.locked { opacity: .42; cursor: not-allowed; }
+  .navitem.locked:hover { background: none; color: var(--muted); }
+  .navitem .lock { margin-left: auto; width: 11px; height: 11px; color: var(--faint); flex: none; }
   .navitem .badge {
     margin-left: auto; background: var(--bad); color: #fff; font-size: 10px;
     font-weight: 700; padding: 1px 6px; border-radius: 999px;
@@ -67,9 +70,21 @@
 
   /* --- main --- */
   main { padding: 26px 32px 80px; max-width: 1080px; }
-  .stale { background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid var(--warn);
-    color: var(--text); border-radius: var(--radius); padding: 11px 14px; margin-bottom: 18px; font-size: 13px; }
-  .stale b { color: var(--warn); }
+  .verline { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .ver { color: var(--faint); font-size: 10.5px; font-family: var(--mono); }
+  .newver { background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700; padding: 1px 5px;
+    border-radius: 999px; cursor: pointer; border: none; letter-spacing: .02em; }
+  .newver:hover { filter: brightness(1.12); }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60; display: flex;
+    align-items: center; justify-content: center; padding: 20px; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    max-width: 640px; width: 100%; max-height: 82vh; overflow-y: auto; padding: 20px; }
+  .modal h3 { margin: 0 0 4px; font-size: 16px; }
+  .commit { border-left: 2px solid var(--border); padding: 4px 0 4px 10px; margin: 6px 0; font-size: 12.5px; }
+  .commit code { font-size: 11px; }
+  .steplog { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-word;
+    max-height: 180px; overflow-y: auto; margin-top: 6px; }
   h1 { font-size: 21px; margin: 0 0 3px; letter-spacing: -0.02em; }
   h2 { font-size: 15px; margin: 26px 0 10px; letter-spacing: -0.01em; }
   .sub { color: var(--muted); margin: 0 0 22px; max-width: 68ch; }
@@ -193,7 +208,7 @@
 
   .empty { color: var(--faint); text-align: center; padding: 34px 16px; }
   .toast {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
     padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 50;
     box-shadow: 0 8px 28px rgba(0,0,0,.35); max-width: 90vw;
@@ -217,14 +232,16 @@
       <svg class="quill" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M20 4C11 5 7 10 6 16l-2 4"/><path d="M13 5c3 3 4 7 3 11-3 1-7 0-10-3"/>
       </svg>
-      <div><b>Canon Quill</b><span id="proj">Studio</span></div>
+      <div><b>Canon Quill</b>
+        <div class="verline"><span class="ver" id="ver"></span><span id="verbadge"></span></div>
+      </div>
     </div>
     <nav id="nav"></nav>
     <div style="margin-top:auto;padding:10px 8px 0">
       <button class="ghost sm" style="width:100%" onclick="reload()">Refresh</button>
     </div>
   </aside>
-  <main><div id="stale"></div><div id="view"></div></main>
+  <main id="view"></main>
 </div>
 
 <script>
@@ -275,16 +292,95 @@ function toast(msg, isError) {
   setTimeout(() => el.remove(), isError ? 6000 : 3000);
 }
 
-async function checkStale() {
-  try {
-    const h = await api("/api/health");
-    const el = document.getElementById("stale");
-    if (el) el.innerHTML = h.stale
-      ? `<div class="stale"><b>This Studio is running older code.</b> Source files changed after it
-         started, so what you see may not match what is on disk. Stop it with Ctrl+C and run
-         <code>npm run studio</code> again.</div>`
+let VERSION = null;
+let updating = false;
+let updateResult = null;
+
+async function loadVersion(remote) {
+  try { VERSION = await api(`/api/version${remote ? "?remote=1" : ""}`); renderVersion(); }
+  catch { /* version display is advisory */ }
+}
+
+function renderVersion() {
+  const v = document.getElementById("ver");
+  const badge = document.getElementById("verbadge");
+  if (!v || !badge) return;
+  if (!VERSION) { v.textContent = ""; badge.innerHTML = ""; return; }
+  v.textContent = `v${VERSION.version}${VERSION.commit ? " · " + VERSION.commit : ""}`;
+  // Running stale local code is the more urgent of the two, and the more
+  // confusing to hit blind: requests fail against fields the process predates.
+  badge.innerHTML = VERSION.localStale
+    ? `<button class="newver" style="background:var(--warn);color:#1a1205" onclick="openUpdate()">RESTART</button>`
+    : VERSION.behind > 0
+      ? `<button class="newver" onclick="openUpdate()">UPDATE</button>`
       : "";
-  } catch { /* health is advisory */ }
+}
+
+function openUpdate() { updateResult = null; render(); renderModal(); }
+function closeUpdate() { document.getElementById("modal")?.remove(); }
+
+function renderModal() {
+  closeUpdate();
+  const v = VERSION;
+  if (!v) return;
+  const wrap = document.createElement("div");
+  wrap.id = "modal";
+  wrap.className = "modal-bg";
+  wrap.onclick = (e) => { if (e.target === wrap && !updating) closeUpdate(); };
+
+  const commits = v.pending.map((c) => `
+    <div class="commit"><code>${esc(c.sha)}</code> ${esc(c.subject)}
+      <div style="color:var(--faint);font-size:11px">${new Date(c.date).toLocaleString()}</div></div>`).join("");
+
+  const steps = (updateResult?.steps || []).map((st) => `
+    <div style="margin-top:10px"><b style="font-size:12.5px;color:var(--${st.ok ? "good" : "bad"})">
+      ${st.ok ? "✓" : "✗"} ${esc(st.label)}</b>
+      ${st.output ? `<div class="steplog">${esc(st.output)}</div>` : ""}</div>`).join("");
+
+  wrap.innerHTML = `<div class="modal">
+    <h3>${plural(v.behind, "update")} available</h3>
+    <p class="hint" style="margin:0 0 14px">You are on <code>${esc(v.commit || "?")}</code> of
+      <code>${esc(v.branch || "?")}</code>. Updating pulls, reinstalls dependencies and rebuilds.</p>
+
+    ${v.blocked ? `<div class="info warn"><svg class="ic" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/>
+        <path d="M12 8v5M12 16.5v.01"/></svg><div><b>Cannot update automatically</b>
+        <p>${esc(v.blocked)}</p></div></div>` : ""}
+
+    ${updateResult ? `<div style="margin-bottom:14px">
+        <b style="font-size:13px">${updateResult.ok ? "Update applied" : "Update failed"}</b>${steps}
+        ${updateResult.ok ? `<p class="hint" style="margin-top:12px">Restart to run the new code.
+          The page reconnects on its own.</p>` : ""}
+      </div>` : `<div style="max-height:220px;overflow-y:auto;margin-bottom:14px">${commits}</div>`}
+
+    <div class="row">
+      ${updateResult?.ok
+        ? `<button onclick="restartStudio(this)">Restart now</button>`
+        : `<button ${v.blocked || updating ? "disabled" : ""} onclick="runUpdate(this)">
+             ${updating ? '<span class="spin"></span> Updating…' : "Download and install"}</button>`}
+      <button class="ghost" ${updating ? "disabled" : ""} onclick="closeUpdate()">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+
+async function runUpdate(btn) {
+  updating = true; renderModal();
+  try { updateResult = await api("/api/version/update", { method: "POST" }); }
+  catch (e) { updateResult = { ok: false, steps: [{ label: "Request", ok: false, output: e.message }] }; }
+  updating = false; renderModal();
+}
+
+async function restartStudio(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Restarting…';
+  try { await api("/api/version/restart", { method: "POST" }); } catch { /* the process exits mid-request */ }
+  // Poll until the replacement answers, then reload the page.
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try { await api("/api/version"); location.reload(); return; } catch { /* still down */ }
+  }
+  btn.disabled = false; btn.textContent = "Restart now";
+  toast("The Studio did not come back. Check the terminal.", true);
 }
 
 async function reload() {
@@ -340,16 +436,19 @@ function renderNav() {
     let group = "";
     for (const p of PHASES) {
       if (p.group !== group) { group = p.group; html += `<div class="navgroup">${group}</div>`; }
-      const done = isDone(p.id);
-      const cur = S.phase === p.id;
-      html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""}"
-        onclick="go('${p.id}')"><span class="dot"></span>${p.label}${
-        p.id === "questions" && blocking ? `<span class="badge">${blocking}</span>` : ""}</button>`;
+      const locked = isLocked(p.id);
+      const done = !locked && isDone(p.id);
+      const cur = !locked && PHASE_ORDER[furthestReached()] === p.id;
+      html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""} ${locked ? "locked" : ""}"
+        onclick="go('${p.id}')" ${locked ? 'title="Finish the earlier steps first"' : ""}>
+        <span class="dot"></span>${p.label}${
+        p.id === "questions" && blocking ? `<span class="badge">${blocking}</span>` : ""}${
+        locked ? `<svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+          <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>` : ""}</button>`;
     }
   }
   nav.innerHTML = html;
-  // The book name lives in the picker above, so the brand block stays static.
-  document.getElementById("proj").textContent = "Studio";
+  renderVersion();
 }
 
 function isDone(id) {
@@ -361,13 +460,38 @@ function isDone(id) {
     case "analyze":   return S.sources.length > 0 && S.sourcesReviewed;
     case "intake":    return !!S.shape && !!S.draftingMode;
     case "style":     return S.styleCorpus.built;
-    case "questions": return !(S.questions || []).some((q) => q.blocking && q.answer === undefined);
+    // Green means "done", so an untouched step with no questions is not green.
+    case "questions": return (S.questions || []).length > 0
+      && !S.questions.some((q) => q.blocking && q.answer === undefined);
     case "chapters":  return S.chapters.length > 0 && S.chapters.every((c) => c.status === "approved");
   }
   return false;
 }
 
+/** Steps in order. You may revisit anything reached, but not skip ahead. */
+const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "style", "questions", "chapters"];
+
+function furthestReached() {
+  if (!S) return 0;
+  const map = { engine: "engine", connect: "connect", sources: "sources", analyze: "analyze",
+    intake: "intake", preparation: "style", preflight: "questions", writing: "chapters",
+    review: "chapters", export: "chapters", complete: "chapters" };
+  const current = map[S.phase] || "engine";
+  return Math.max(PHASE_ORDER.indexOf(current), 0);
+}
+
+function isLocked(id) {
+  const i = PHASE_ORDER.indexOf(id);
+  return i > furthestReached();
+}
+
 function go(r) {
+  if (isLocked(r)) {
+    const need = PHASE_ORDER[furthestReached()];
+    const label = PHASES.find((p) => p.id === need)?.label || need;
+    toast(`Finish ${label} first.`, true);
+    return;
+  }
   route = r; render();
   if (r === "sources") loadBrowse(browse.folderId);   // always re-fetch: the grant may have changed
   if (r === "engine") loadEngine();
@@ -839,7 +963,7 @@ function viewAnalyze() {
   ${docs}
 
   <div class="row" style="margin-top:18px">
-    <button onclick="finishReview(this)">Looks right, continue</button>
+    <button onclick="finishReview(this)">Continue</button>
     <button class="ghost" onclick="go('sources')">Back to sources</button>
   </div>`;
 }
@@ -1044,8 +1168,10 @@ async function setStatus(number, status) {
 // --- boot ------------------------------------------------------------------
 (async function () {
   await reload();
-  checkStale();
-  setInterval(checkStale, 30000);
+  loadVersion(false);
+  // A remote check is a network round trip, so it runs rarely.
+  loadVersion(true);
+  setInterval(() => loadVersion(true), 10 * 60 * 1000);
   if (S) {
     route = PHASES.find((p) => p.id === S.phase)?.id || "connect";
     render();
