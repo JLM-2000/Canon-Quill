@@ -9,8 +9,8 @@
 import { dialogueSpans, splitParagraphs, words } from "../style/text.js";
 
 export type SourceKind =
-  | "past_book"        // an earlier book by this author in this series
-  | "reference_book"   // someone else's book, held as style/genre reference
+  | "past_book"        // prose by this author: the style corpus and canon
+  | "reference_book"   // prose by someone else, held as reference
   | "characters"       // character sheets, cast lists, bibles
   | "timeline"         // chronology, event ordering
   | "world"            // setting, magic system, geography, factions
@@ -40,8 +40,11 @@ export interface ClassifyInput {
 export const reviewThreshold = 0.6;
 
 export const sourceKindLabels: Record<SourceKind, string> = {
-  past_book: "Past series book",
-  reference_book: "Reference book",
+  // The ids stay as they are; these are what the author reads. "Book" was
+  // wrong twice over: a style source is often a short story or a draft, and a
+  // first-time author has no past series at all.
+  past_book: "Your writing",
+  reference_book: "Reference writing",
   characters: "Characters",
   timeline: "Timeline",
   world: "Worldbuilding",

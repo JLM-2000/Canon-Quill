@@ -68,9 +68,11 @@ What it looks for instead is sameness, which is what actually gives a machine aw
 
 **Select sources.** Browse your Drive, mark the folders to read, choose where finished chapters get written back.
 
-**Analyse and group.** Every document is read and sorted into past series books, reference books, characters, timeline, worldbuilding, plot, and notes. You correct anything in the wrong place by clicking the labels, and a document can belong to several groups at once, which is common: one file often holds a timeline, an outline and loose notes.
+**Analyse and group.** Every document is read and sorted into your writing, reference writing, characters, timeline, worldbuilding, plot, and notes. You correct anything in the wrong place by clicking the labels, and a document can belong to several groups at once, which is common: one file often holds a timeline, an outline and loose notes.
 
-This step matters more than it looks. Only *past series books* feed your style corpus and your canon, so mark your own books that way even if you also use them as general reference. Another author's novel in that pile would pull your writing toward their voice, which is the one thing this is built to prevent.
+This step matters more than it looks. Only *your writing* feeds the style corpus and your canon, so mark anything you wrote that way, whether it is a finished novel, a short story or an old draft. Another author's work in that pile would pull your prose toward their voice, which is the one thing this is built to prevent.
+
+Writing your first book and have nothing of your own? Mark what you want to write *like* as reference writing and the corpus is built from that instead. The Studio tells you when it does: the result reads like whoever wrote those pages rather than like you.
 
 **Project shape.** Standalone or part of a series. Series books inherit canon from the earlier volumes and are held to it.
 

@@ -556,6 +556,7 @@ function go(r) {
   if (r === "sources") loadBrowse(browse.folderId);   // always re-fetch: the grant may have changed
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
+  if (r === "analyze") loadCheck();
 }
 
 // --- views -----------------------------------------------------------------
@@ -973,6 +974,7 @@ async function runAnalysis(btn) {
     await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target?.id || "" } });
     S = await api("/api/sources/index", { method: "POST" });
     indexing = false;
+    await loadCheck();
     toast(`Indexed ${plural(S.sources.length, "document")}.`);
   } catch (e) {
     indexing = false;
@@ -1038,13 +1040,22 @@ function viewAnalyze() {
   labels. A document can belong to several groups at once, which is common: one file often holds a
   timeline, an outline and loose notes.</p>
 
-  <div class="info">
+  <div class="info ${check?.ok ? "ok" : "warn"}">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
-    <div><b>Past series book is the one that matters</b>
-      <p>Only documents marked <b>Past series book</b> feed your style corpus and canon. Mark your own
-      books that way even if you also use them as general reference; the two are not exclusive. Another
-      author's novel should be <b>Reference book</b> only, or it will pull your writing toward their voice.</p>
+      ${check?.ok ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+    </svg>
+    <div><b>Which writing sets the style</b>
+      <p>Canon Quill learns how to write from the documents you mark as <b>Your writing</b>. That is the
+      whole point: it measures your prose and holds the drafting to it. Mark anything you wrote, whether
+      it is a finished novel, a short story or an old draft.</p>
+      <p style="margin-top:6px">If you have not written anything yet, mark what you want to write
+      <i>like</i> as <b>Reference writing</b> and it will learn from that instead. The result will read
+      like whoever wrote it rather than like you, which is a real trade and worth making on purpose.</p>
+      <p style="margin-top:6px">${check
+        ? check.ok
+          ? `<b style="color:var(--good)">${plural(check.documents, "document")}, ${plural(check.words, "word", null, check.words.toLocaleString())}.</b> Enough to measure.${check.fromReference ? " Using reference writing." : ""}`
+          : `<b style="color:var(--warn)">${esc(check.reason)}</b>`
+        : ""}</p>
     </div></div>
 
   <div class="counts">${Object.entries(KINDS).map(([k, label]) =>
@@ -1055,9 +1066,16 @@ function viewAnalyze() {
   ${docs}
 
   <div class="row" style="margin-top:18px">
-    <button onclick="finishReview(this)">Continue</button>
+    <button ${check && !check.ok ? "disabled" : ""} onclick="finishReview(this)">Continue</button>
     <button class="ghost" onclick="go('sources')">Back to sources</button>
   </div>`;
+}
+
+let check = null;
+
+async function loadCheck() {
+  try { check = await api("/api/sources/check"); if (route === "analyze") render(); }
+  catch { /* advisory */ }
 }
 
 async function toggleKind(driveId, kind) {
@@ -1067,8 +1085,10 @@ async function toggleKind(driveId, kind) {
   kinds.has(kind) ? kinds.delete(kind) : kinds.add(kind);
   src.kinds = [...kinds];          // optimistic: the board stays responsive
   render();
-  try { S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kinds: src.kinds } }); }
-  catch (e) { toast(e.message, true); await reload(); }
+  try {
+    S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kinds: src.kinds } });
+    await loadCheck();
+  } catch (e) { toast(e.message, true); await reload(); }
 }
 
 async function removeSource(driveId) {
@@ -1085,7 +1105,7 @@ async function removeSource(driveId) {
 
 async function confirmRemoveSource(driveId) {
   closeModal();
-  try { S = await api(`/api/sources/${driveId}`, { method: "DELETE" }); render(); toast("Removed."); }
+  try { S = await api(`/api/sources/${driveId}`, { method: "DELETE" }); await loadCheck(); render(); toast("Removed."); }
   catch (e) { toast(e.message, true); }
 }
 
@@ -1146,7 +1166,9 @@ async function setProject(patch) {
 
 function viewStyle() {
   const sc = S.styleCorpus;
-  const books = S.sources.filter((s) => s.kind === "past_book");
+  const books = S.sources.filter((s) => (s.kinds || []).includes("past_book"));
+  const refs = S.sources.filter((s) => (s.kinds || []).includes("reference_book"));
+  const usingReference = books.length === 0 && refs.length > 0;
   return `
   <h1>Style corpus</h1>
   <p class="sub">This is what stops the writing sounding generic. Canon Quill cuts your past books
@@ -1155,9 +1177,13 @@ function viewStyle() {
   scored against your measured fingerprint, not against a generic idea of good writing.</p>
 
   <div class="card spread">
-    <div><b>${books.length === 0 ? "No past books indexed yet" : plural(books.length, "past book") + " available"}</b>
-      <div class="hint">${books.map((b) => esc(b.name)).join(", ") || "Group at least one of your own books as a past series book on the Analyse screen."}</div></div>
-    <button ${books.length ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild" : "Build corpus"}</button>
+    <div><b>${books.length
+        ? plural(books.length, "document") + " of your writing"
+        : usingReference ? plural(refs.length, "document") + " of reference writing" : "Nothing to learn from"}</b>
+      <div class="hint">${(books.length ? books : refs).map((b) => esc(b.name)).join(", ")
+        || "Mark something as Your writing on the Analyse screen."}</div>
+      ${usingReference ? '<div class="hint" style="color:var(--warn);margin-top:4px">No writing of your own is marked, so this will learn from reference writing. The book will read like its author rather than like you.</div>' : ""}</div>
+    <button ${books.length || usingReference ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild" : "Build corpus"}</button>
   </div>
 
   ${sc.built ? `<div class="card">
@@ -1170,7 +1196,11 @@ function viewStyle() {
 
 async function buildStyle(btn) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Building…';
-  try { S = await api("/api/style/build", { method: "POST" }); toast("Style corpus built."); render(); loadFingerprint(); }
+  try {
+    const books = S.sources.filter((x) => (x.kinds || []).includes("past_book"));
+    S = await api("/api/style/build", { method: "POST", body: { useReference: books.length === 0 } });
+    toast("Style corpus built."); render(); loadFingerprint();
+  }
   catch (e) { toast(e.message, true); render(); }
 }
 

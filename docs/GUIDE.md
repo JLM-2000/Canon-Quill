@@ -305,15 +305,19 @@ Every document is read and sorted into one of seven groups:
 
 | Group | What it is | What it feeds |
 |---|---|---|
-| **Past series book** | your own earlier books | style corpus **and** canon |
-| **Reference book** | comparison titles, research, anything not your own series | held for reference; never feeds the corpus |
+| **Your writing** | anything you wrote: a novel, a short story, an old draft | style corpus **and** canon |
+| **Reference writing** | comparison titles, research, anything by someone else | held for reference |
 | **Characters** | cast lists, sheets, bibles | character canon |
 | **Timeline** | chronology, dates, eras | timeline canon |
 | **Worldbuilding** | setting, magic, factions | world canon |
 | **Plot** | outlines, synopses, beat sheets | chapter plan |
 | **Notes** | everything else | nothing automatic |
 
-**Check this step.** Only *past series books* feed your voice and your canon. If someone else's novel lands in that pile, you get a book that sounds like them and contradicts itself.
+**Check this step.** Only *Your writing* feeds your voice and your canon. If someone else's novel lands in that pile, you get a book that sounds like them and contradicts itself.
+
+**If you have not written anything yet**, mark what you want to write *like* as **Reference writing** and the corpus is built from that instead. The Studio says so plainly when it does: the result will read like whoever wrote those pages rather than like you. That is a legitimate way to start, but it should be a decision rather than an accident.
+
+**At least one style source is required**, and it has to be long enough to measure: roughly 2,000 words. Below that, sentence-length spread and dialogue share are noise, and a fingerprint built on noise steers the drafting toward nothing in particular. Continue stays disabled until there is enough.
 
 Click the labels on any document to change its groups. A document can be in several at once, which is normal: one file often holds a timeline, an outline and loose notes, and your own past books are usually both style corpus and general reference.
 

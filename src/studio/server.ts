@@ -451,24 +451,40 @@ export function createStudioApp() {
 
   app.post("/api/sources/reviewed", route(async (_req, res) => {
     const slug = await requireSlug();
+    const state = await loadState(slug);
+    const check = styleSourceCheck(state.sources);
+    if (!check.ok) throw new HttpError(400, check.reason);
     res.json(withDerived(await updateState(slug, (current) => void (current.sourcesReviewed = true))));
   }));
 
+  app.get("/api/sources/check", route(async (_req, res) => {
+    const state = await loadState(await requireSlug());
+    res.json(styleSourceCheck(state.sources));
+  }));
+
   // --- Style ----------------------------------------------------------------
-  app.post("/api/style/build", route(async (_req, res) => {
+  app.post("/api/style/build", route(async (req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
-    const pastBooks = state.sources.filter((source) => source.kinds.includes("past_book"));
+    const own = state.sources.filter((source) => source.kinds.includes("past_book"));
+    const reference = state.sources.filter((source) => source.kinds.includes("reference_book"));
 
-    if (pastBooks.length === 0) {
+    // Someone else's prose is a valid style target when the author has none of
+    // their own yet, but it is a different thing and has to be asked for.
+    const useReference = req.body?.useReference === true;
+    const chosen = own.length > 0 ? own : useReference ? reference : [];
+
+    if (chosen.length === 0) {
       throw new HttpError(
         400,
-        "No sources are grouped as a past series book. The corpus is built only from your own prose, so at least one is required."
+        reference.length > 0
+          ? "Nothing is marked as your writing. You can build the corpus from your reference writing instead, but the book will read like whoever wrote it rather than like you."
+          : "Nothing is marked as your writing or your reference writing, so there is no prose to learn from. Group at least one document on the previous screen."
       );
     }
 
     const documents: CorpusDocument[] = [];
-    for (const source of pastBooks) {
+    for (const source of chosen) {
       const text = await readCached(slug, source.driveId);
       if (text) documents.push({ source: source.name, text });
     }
@@ -489,11 +505,12 @@ export function createStudioApp() {
         label: corpus.label,
         passageCount: corpus.passages.length,
         wordCount: corpus.fingerprint.wordCount,
-        builtAt: corpus.builtAt
+        builtAt: corpus.builtAt,
+        fromReference: own.length === 0
       };
     });
 
-    res.json({ ...withDerived(next), fingerprint: corpus.fingerprint });
+    res.json({ ...withDerived(next), fingerprint: corpus.fingerprint, fromReference: own.length === 0 });
   }));
 
   app.get("/api/style/fingerprint", route(async (_req, res) => {
@@ -705,6 +722,46 @@ class HttpError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
   }
+}
+
+/**
+ * Below this the fingerprint is noise: sentence-length spread and dialogue
+ * share need a few thousand words before they mean anything, and the whole
+ * point of the corpus is that its numbers are trustworthy.
+ */
+const minimumStyleWords = 2000;
+
+/** Is there enough prose to build a style corpus from? */
+export function styleSourceCheck(sources: SelectedSource[]): {
+  ok: boolean;
+  reason: string;
+  words: number;
+  documents: number;
+  fromReference: boolean;
+} {
+  const own = sources.filter((source) => source.kinds?.includes("past_book"));
+  const reference = sources.filter((source) => source.kinds?.includes("reference_book"));
+  const chosen = own.length > 0 ? own : reference;
+  const words = chosen.reduce((total, source) => total + (source.wordCount ?? 0), 0);
+
+  const base = { words, documents: chosen.length, fromReference: own.length === 0 && reference.length > 0 };
+
+  if (chosen.length === 0) {
+    return {
+      ...base,
+      ok: false,
+      reason:
+        "Mark at least one document as Your writing, or as Reference writing if you have none of your own yet. Without prose to measure there is no style to match."
+    };
+  }
+  if (words < minimumStyleWords) {
+    return {
+      ...base,
+      ok: false,
+      reason: `Only ${words.toLocaleString()} words are marked as style sources. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by. Add more, or mark a longer document.`
+    };
+  }
+  return { ...base, ok: true, reason: "" };
 }
 
 function withDerived(state: StudioState) {

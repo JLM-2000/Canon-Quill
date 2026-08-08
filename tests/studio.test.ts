@@ -170,10 +170,10 @@ describe("studio api", () => {
     expect(await response.text()).toContain("Opening contract");
   });
 
-  it("refuses to build a style corpus with no past books", async () => {
+  it("refuses to build a style corpus with no prose at all", async () => {
     const { status, body } = await call("/api/style/build", { method: "POST" });
     expect(status).toBe(400);
-    expect(body.error).toMatch(/past series book/i);
+    expect(body.error).toMatch(/no prose to learn from/i);
   });
 
   it("validates a chapter and records flow and style results", async () => {
@@ -390,5 +390,66 @@ describe("legacy source migration", () => {
 
     const reloaded = await load("test-book");
     expect(reloaded.sources[0].kinds).toEqual(["past_book"]);
+  });
+});
+
+describe("style source requirement", () => {
+  async function seed(sources: any[]) {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.sources = sources;
+    state.sourcesReviewed = false;
+    await save(state);
+  }
+  const doc = (id: string, kinds: string[], wordCount: number) =>
+    ({ driveId: id, name: id, path: `/${id}`, mimeType: "text/plain", isFolder: false, kinds, wordCount });
+
+  it("refuses to continue with nothing marked as a style source", async () => {
+    await seed([doc("a", ["notes"], 50000)]);
+    const { status, body } = await call("/api/sources/reviewed", { method: "POST" });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/at least one document/i);
+  });
+
+  it("refuses to continue when the prose is too short to measure", async () => {
+    await seed([doc("a", ["past_book"], 300)]);
+    const { status, body } = await call("/api/sources/reviewed", { method: "POST" });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/too noisy/i);
+  });
+
+  it("accepts the author's own writing once it is long enough", async () => {
+    await seed([doc("a", ["past_book"], 40000)]);
+    const { status } = await call("/api/sources/reviewed", { method: "POST" });
+    expect(status).toBe(200);
+  });
+
+  it("accepts reference writing when the author has none of their own", async () => {
+    await seed([doc("a", ["reference_book"], 40000)]);
+    const check = await call("/api/sources/check");
+    expect(check.body.ok).toBe(true);
+    expect(check.body.fromReference).toBe(true);
+    expect((await call("/api/sources/reviewed", { method: "POST" })).status).toBe(200);
+  });
+
+  it("prefers the author's own writing when both exist", async () => {
+    await seed([doc("mine", ["past_book"], 40000), doc("theirs", ["reference_book"], 90000)]);
+    const { body } = await call("/api/sources/check");
+    expect(body.fromReference).toBe(false);
+    expect(body.words).toBe(40000);
+  });
+
+  it("counts a document that is both", async () => {
+    await seed([doc("both", ["past_book", "reference_book"], 40000)]);
+    const { body } = await call("/api/sources/check");
+    expect(body.ok).toBe(true);
+    expect(body.documents).toBe(1);
+  });
+
+  it("refuses to build a corpus from reference writing unless asked", async () => {
+    await seed([doc("a", ["reference_book"], 40000)]);
+    const { status, body } = await call("/api/style/build", { method: "POST" });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/read like whoever wrote it/i);
   });
 });

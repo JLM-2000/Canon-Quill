@@ -102,6 +102,8 @@ export interface StudioState {
     passageCount: number;
     wordCount: number;
     builtAt: string | null;
+    /** Built from reference prose because the author had none of their own. */
+    fromReference?: boolean;
   };
   createdAt: string;
   updatedAt: string;
