@@ -151,7 +151,7 @@ export interface ExistingManuscript {
 }
 
 export interface StudioState {
-  version: 5;
+  version: 6;
   slug: string;
   projectName: string;
   phase: PhaseId;
@@ -172,6 +172,8 @@ export interface StudioState {
   sourcesReviewed: boolean;
   questions: OpenQuestion[];
   conversation: ConversationMessage[];
+  /** Set when the author opens the intake gate for the agent. */
+  conversationStartedAt: string | null;
   chapters: ChapterRecord[];
   /** Null when starting from scratch. */
   manuscript: ExistingManuscript | null;
@@ -198,7 +200,7 @@ export interface StudioState {
 export function emptyState(slug: string, projectName = "Untitled Book"): StudioState {
   const now = new Date().toISOString();
   return {
-    version: 5,
+    version: 6,
     slug,
     projectName,
     phase: "engine",
@@ -218,6 +220,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     sourcesReviewed: false,
     questions: [],
     conversation: [],
+    conversationStartedAt: null,
     chapters: [],
     manuscript: null,
     manuscriptReviewed: false,
@@ -241,7 +244,7 @@ export async function loadState(slug: string): Promise<StudioState> {
       ...base,
       ...parsed,
       slug,
-      version: 5 as const,
+      version: 6 as const,
       intake,
       drive: { ...base.drive, ...(parsed.drive ?? {}) },
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),

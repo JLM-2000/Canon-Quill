@@ -183,6 +183,12 @@ describe("studio api", () => {
     expect(result.body.conversation[0].role).toBe("author");
   });
 
+  it("opens the agent-led intake conversation", async () => {
+    const result = await call("/api/conversation/start", { method: "POST" });
+    expect(result.status).toBe(200);
+    expect(result.body.conversationStartedAt).toBeTruthy();
+  });
+
   it("records starting without an existing draft", async () => {
     const result = await call("/api/manuscript/skip", { method: "POST" });
     expect(result.status).toBe(200);

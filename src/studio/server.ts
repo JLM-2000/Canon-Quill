@@ -694,7 +694,20 @@ export function createStudioApp() {
   // --- Questions ------------------------------------------------------------
   app.get("/api/questions", route(async (_req, res) => {
     const state = await loadState(await requireSlug());
-    res.json({ questions: state.questions, conversation: state.conversation, blocking: blockingQuestions(state) });
+    res.json({
+      questions: state.questions,
+      conversation: state.conversation,
+      conversationStartedAt: state.conversationStartedAt,
+      blocking: blockingQuestions(state)
+    });
+  }));
+
+  app.post("/api/conversation/start", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.conversationStartedAt ??= new Date().toISOString();
+    });
+    res.json(withDerived(state));
   }));
 
   app.post("/api/questions", route(async (req, res) => {
@@ -715,6 +728,7 @@ export function createStudioApp() {
       blocking: body.blocking === true
     };
     const state = await updateState(slug, (current) => {
+      current.conversationStartedAt ??= question.askedAt;
       current.questions.push(question);
       current.conversation.push({
         id: randomUUID(),

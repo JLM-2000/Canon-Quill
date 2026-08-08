@@ -304,6 +304,7 @@ let draftPicker = false;
 let indexError = null;
 let draftAnalysisLoading = false;
 let selectionSave = Promise.resolve();
+let questionPoll = null;
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
@@ -682,7 +683,8 @@ function go(r) {
   if (r === "analyze") loadCheck();
   if (r === "intake") loadSuggestions();
   if (r === "style" && S.styleCorpus.built) loadFingerprint();
-  if (r === "questions") loadQuestions();
+  if (r === "questions") { loadQuestions(); startQuestionPolling(); }
+  else stopQuestionPolling();
   if (r === "draft" && S.manuscript) loadDraftAnalysis();
 }
 
@@ -1703,6 +1705,7 @@ function viewQuestions() {
   const conversation = S.conversation || [];
   const open = qs.filter((q) => q.answer === undefined);
   const done = qs.filter((q) => q.answer !== undefined);
+  const started = Boolean(S.conversationStartedAt || qs.length || conversation.length);
   const card = (q) => `<div class="card q ${q.answer !== undefined ? "answered" : ""}">
     <div class="meta">${esc(q.askedBy)} · ${esc(q.phase)}${q.blocking ? ' · <span style="color:var(--bad)">blocking</span>' : ""}</div>
     <div class="text">${esc(q.question)}</div>
@@ -1721,23 +1724,13 @@ function viewQuestions() {
   <h1>Questions</h1>
   <p class="sub">When an agent hits a decision only you can make, it asks here instead of guessing
   and burying the assumption in a document. Blocking questions hold the pipeline.</p>
-  <div class="row" style="margin-bottom:12px">
-    <button class="ghost sm" onclick="loadQuestions()">Refresh conversation</button>
-    <span class="hint">Questions and answers are recorded in this book's project log.</span>
-  </div>
-  <div class="card">
-    <label>Conversation with the writing agent</label>
-    ${conversation.length ? `<div style="display:grid;gap:7px;margin:8px 0 12px">
-      ${conversation.map((message) => `<div class="answer-box" style="border-left:3px solid var(--${message.role === "author" ? "good" : "accent"})">
-        <b>${message.role === "author" ? "You" : "Agent"}</b> · ${new Date(message.createdAt).toLocaleString()}<br>${esc(message.text)}
-      </div>`).join("")}
-    </div>` : '<div class="empty" style="padding:12px">The conversation starts here.</div>'}
-    <textarea id="conversation-message" rows="3" placeholder="Tell the agent what matters about this book..."></textarea>
-    <div class="row" style="margin-top:8px"><button onclick="sendConversation(this)">Send message</button></div>
-  </div>
-  ${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}`
-    : '<div class="card empty">Nothing waiting. Agents will post questions here as they work.</div>'}
-  ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}`;
+  ${!started ? `<div class="card">
+    <b>Ready to begin intake</b>
+    <p class="sub" style="margin:6px 0 12px">Start the agent-led conversation. It will ask the first question here instead of asking you to open with a message.</p>
+    <button onclick="beginIntake(this)">Begin intake</button>
+  </div>` : `${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}` : ""}
+    ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}
+    ${!open.length && !done.length ? '<div class="card empty"><span class="spin"></span><br><br>Waiting for the intake agent to post its first question.</div>' : ""}`}`;
 }
 
 async function loadQuestions() {
@@ -1745,23 +1738,32 @@ async function loadQuestions() {
     const r = await api("/api/questions");
     if (S) S.questions = r.questions || [];
     if (S) S.conversation = r.conversation || S.conversation || [];
+    if (S) S.conversationStartedAt = r.conversationStartedAt || S.conversationStartedAt || null;
     if (route === "questions") render();
   } catch { /* the state already contains the last known conversation */ }
 }
 
-async function sendConversation(btn) {
-  const box = document.getElementById("conversation-message");
-  const text = box?.value?.trim();
-  if (!text) { toast("Write the message first.", "warn"); return; }
+async function beginIntake(btn) {
   btn.disabled = true;
   try {
-    S = await api("/api/conversation", { method: "POST", body: { text } });
+    S = await api("/api/conversation/start", { method: "POST" });
     render();
-    toast("Message recorded.");
+    startQuestionPolling();
   } catch (e) {
     toast(e.message, "error");
     btn.disabled = false;
   }
+}
+
+function startQuestionPolling() {
+  if (questionPoll) return;
+  questionPoll = setInterval(loadQuestions, 3000);
+}
+
+function stopQuestionPolling() {
+  if (!questionPoll) return;
+  clearInterval(questionPoll);
+  questionPoll = null;
 }
 
 async function answer(id, text) {
@@ -1944,7 +1946,7 @@ async function setStatus(number, status) {
     if (route === "connect") loadDrive();
     if (route === "draft" && S.manuscript) loadDraftAnalysis();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
-    if (route === "questions") loadQuestions();
+    if (route === "questions") { loadQuestions(); startQuestionPolling(); }
   }
 })();
 </script>

@@ -14,6 +14,8 @@ instead of leaving it only in chat. Include the phase, rationale, options and
 `blocking: true` when the pipeline must wait. The author's answers are recorded
 through the matching answer endpoint, so the Questions screen is the durable
 conversation transcript.
+When `conversationStartedAt` is set, begin the agent-led intake by posting the
+first needed question. Do not wait for the author to send an opening message.
 
 Initial intake must cover:
 - Standalone, series, novella, short story, or unknown.
