@@ -1,5 +1,5 @@
-// Sorts a pile of Drive documents into past series books, other authors'
-// reference titles, character sheets, timelines, outlines and notes.
+// Sorts a pile of Drive documents into the author's own writing, references
+// by other people, character sheets, timelines, outlines and notes.
 //
 // Getting this wrong is expensive: another author's novel filed as a past
 // series book feeds their prose into the style fingerprint and their facts into
@@ -39,17 +39,34 @@ export interface ClassifyInput {
 /** Classifications below this confidence should be confirmed by the author. */
 export const reviewThreshold = 0.6;
 
+/**
+ * The category name, used on the group chips. The ids stay as they are; these
+ * are what the author reads. "Book" was wrong twice over: a style source is
+ * often a short story or a draft, and a first-time author has no past series.
+ */
 export const sourceKindLabels: Record<SourceKind, string> = {
-  // The ids stay as they are; these are what the author reads. "Book" was
-  // wrong twice over: a style source is often a short story or a draft, and a
-  // first-time author has no past series at all.
   past_book: "Your writing",
-  reference_book: "Reference writing",
+  reference_book: "References",
   characters: "Characters",
   timeline: "Timeline",
   world: "Worldbuilding",
   plot: "Plot & outline",
   notes: "Notes"
+};
+
+/**
+ * How to name a count of documents in each group. Several of these are mass
+ * nouns that read the same either way, so the pair is explicit rather than
+ * derived by appending an s.
+ */
+export const sourceKindCounts: Record<SourceKind, { one: string; many: string }> = {
+  past_book: { one: "Your writing", many: "Your writing" },
+  reference_book: { one: "Reference", many: "References" },
+  characters: { one: "Character sheet", many: "Character sheets" },
+  timeline: { one: "Timeline", many: "Timelines" },
+  world: { one: "Worldbuilding", many: "Worldbuilding" },
+  plot: { one: "Plot & outline", many: "Plot & outlines" },
+  notes: { one: "Note", many: "Notes" }
 };
 
 /** Filename and folder-path keywords, weighted per kind. */

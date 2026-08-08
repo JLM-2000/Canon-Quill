@@ -306,7 +306,7 @@ Every document is read and sorted into one of seven groups:
 | Group | What it is | What it feeds |
 |---|---|---|
 | **Your writing** | anything you wrote: a novel, a short story, an old draft | style corpus **and** canon |
-| **Reference writing** | comparison titles, research, anything by someone else | held for reference |
+| **References** | comparison titles, research, anything by someone else | held for reference |
 | **Characters** | cast lists, sheets, bibles | character canon |
 | **Timeline** | chronology, dates, eras | timeline canon |
 | **Worldbuilding** | setting, magic, factions | world canon |
@@ -315,9 +315,16 @@ Every document is read and sorted into one of seven groups:
 
 **Check this step.** Only *Your writing* feeds your voice and your canon. If someone else's novel lands in that pile, you get a book that sounds like them and contradicts itself.
 
-**If you have not written anything yet**, mark what you want to write *like* as **Reference writing** and the corpus is built from that instead. The Studio says so plainly when it does: the result will read like whoever wrote those pages rather than like you. That is a legitimate way to start, but it should be a decision rather than an accident.
+**If you have not written anything yet**, mark what you want to write *like* as **References** and the corpus is built from that instead. The Studio says so plainly when it does: the result will read like whoever wrote those pages rather than like you. That is a legitimate way to start, but it should be a decision rather than an accident.
 
-**At least one style source is required**, and it has to be long enough to measure: roughly 2,000 words. Below that, sentence-length spread and dialogue share are noise, and a fingerprint built on noise steers the drafting toward nothing in particular. Continue stays disabled until there is enough.
+**Two things are required before you can continue**, shown as a pair of cards at the top of the board:
+
+| | Needs | Why |
+|---|---|---|
+| **Your writing** | 1 document, ~2,000 words | Sets how the book sounds. Below that, sentence-length spread and dialogue share are noise, and a fingerprint built on noise steers toward nothing. |
+| **References** | 1 document, ~1,000 words | Sets what the book is about. A voice with no material to write about is not a book. |
+
+One document can satisfy both, and usually does when you are continuing your own series: anything classified as **Your writing** is automatically marked as **References** too, since your past books are your canon as well as your voice. Continue stays disabled until both are met.
 
 Click the labels on any document to change its groups. A document can be in several at once, which is normal: one file often holds a timeline, an outline and loose notes, and your own past books are usually both style corpus and general reference.
 
@@ -484,7 +491,7 @@ A low score is not automatically bad. If you deliberately wrote a chapter in a d
 
 **A folder does not show up when browsing.** The `drive.file` scope only exposes files you have selected or that Canon Quill created. This is the intended trade-off.
 
-**"No sources are grouped as a past series book."** The style corpus is built only from your own prose. Move at least one of your books into that pile on the grouping board.
+**"Nothing is marked as your writing."** The style corpus is built from your own prose, so mark at least one document as **Your writing** on the grouping board. If you have not written anything yet, mark what you want to write like as **References** and build from that instead; the Studio will say that the result reads like its author rather than like you.
 
 **A chapter keeps failing style.** Read which metrics are drifting. If they are all the same direction, the drafting prompt is probably missing the fingerprint. If the score is fine but the prose feels wrong, the corpus may be too small or built from the wrong documents.
 

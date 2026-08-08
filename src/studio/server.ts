@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
-import { classifySource, sourceKindLabels, type SourceKind } from "../analysis/classify.js";
+import { classifySource, sourceKindCounts, sourceKindLabels, type SourceKind } from "../analysis/classify.js";
 import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
 import { scoreAgainstFingerprint } from "../style/score.js";
 import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
@@ -160,10 +160,16 @@ export function createStudioApp() {
   app.get("/api/state", route(async (_req, res) => {
     const slug = await activeSlug();
     if (!slug) {
-      res.json({ state: null, projects: await listProjects() });
+      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts });
       return;
     }
-    res.json({ state: withDerived(await loadState(slug)), projects: await listProjects() });
+    res.json({
+      state: withDerived(await loadState(slug)),
+      projects: await listProjects(),
+      // Sent with the state so the client never keeps its own copy to drift.
+      kinds: sourceKindLabels,
+      kindCounts: sourceKindCounts
+    });
   }));
 
   app.patch("/api/project", route(async (req, res) => {
@@ -381,7 +387,13 @@ export function createStudioApp() {
             path: node.path,
             mimeType: node.mimeType,
             isFolder: false,
-            kinds: [classification.kind],
+            // Your own past book is both the style corpus and canon material,
+            // so it starts in both groups rather than making you add the
+            // second one by hand on every book you have ever written.
+            kinds:
+              classification.kind === "past_book"
+                ? ["past_book", "reference_book"]
+                : [classification.kind],
             wordCount: computeMetrics(text).wordCount
           },
           text
@@ -452,14 +464,16 @@ export function createStudioApp() {
   app.post("/api/sources/reviewed", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
-    const check = styleSourceCheck(state.sources);
-    if (!check.ok) throw new HttpError(400, check.reason);
+    const check = sourcesCheck(state.sources);
+    if (!check.ok) {
+      throw new HttpError(400, [check.style.reason, check.references.reason].filter(Boolean).join(" "));
+    }
     res.json(withDerived(await updateState(slug, (current) => void (current.sourcesReviewed = true))));
   }));
 
   app.get("/api/sources/check", route(async (_req, res) => {
     const state = await loadState(await requireSlug());
-    res.json(styleSourceCheck(state.sources));
+    res.json(sourcesCheck(state.sources));
   }));
 
   // --- Style ----------------------------------------------------------------
@@ -725,43 +739,83 @@ class HttpError extends Error {
 }
 
 /**
- * Below this the fingerprint is noise: sentence-length spread and dialogue
- * share need a few thousand words before they mean anything, and the whole
- * point of the corpus is that its numbers are trustworthy.
+ * Style needs enough prose for the fingerprint to mean anything: sentence
+ * length spread and dialogue share are noise below a few thousand words.
  */
 const minimumStyleWords = 2000;
 
-/** Is there enough prose to build a style corpus from? */
-export function styleSourceCheck(sources: SelectedSource[]): {
+/**
+ * References are what the book is *about*, as opposed to how it sounds, so a
+ * smaller amount is still useful: a character sheet and a timeline carry a lot
+ * of canon in very few words.
+ */
+const minimumReferenceWords = 1000;
+
+export interface SourceRequirement {
   ok: boolean;
-  reason: string;
-  words: number;
   documents: number;
+  words: number;
+  minWords: number;
+  reason: string;
+}
+
+export interface SourcesCheck {
+  ok: boolean;
+  style: SourceRequirement;
+  references: SourceRequirement;
+  /** Style is being learned from someone else's prose. */
   fromReference: boolean;
-} {
+}
+
+/**
+ * Two separate requirements, reported separately.
+ *
+ * Style decides how the book sounds; references decide what is in it. One
+ * document can satisfy both, and for an author continuing their own series it
+ * usually does: mark it as Your writing and References together.
+ */
+export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
   const own = sources.filter((source) => source.kinds?.includes("past_book"));
-  const reference = sources.filter((source) => source.kinds?.includes("reference_book"));
-  const chosen = own.length > 0 ? own : reference;
-  const words = chosen.reduce((total, source) => total + (source.wordCount ?? 0), 0);
+  const references = sources.filter((source) => source.kinds?.includes("reference_book"));
+  const styleSources = own.length > 0 ? own : references;
+  const fromReference = own.length === 0 && references.length > 0;
 
-  const base = { words, documents: chosen.length, fromReference: own.length === 0 && reference.length > 0 };
+  const words = (list: SelectedSource[]) => list.reduce((total, s) => total + (s.wordCount ?? 0), 0);
 
-  if (chosen.length === 0) {
-    return {
-      ...base,
-      ok: false,
-      reason:
-        "Mark at least one document as Your writing, or as Reference writing if you have none of your own yet. Without prose to measure there is no style to match."
-    };
-  }
-  if (words < minimumStyleWords) {
-    return {
-      ...base,
-      ok: false,
-      reason: `Only ${words.toLocaleString()} words are marked as style sources. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by. Add more, or mark a longer document.`
-    };
-  }
-  return { ...base, ok: true, reason: "" };
+  const styleWords = words(styleSources);
+  const style: SourceRequirement = {
+    documents: styleSources.length,
+    words: styleWords,
+    minWords: minimumStyleWords,
+    ok: styleSources.length > 0 && styleWords >= minimumStyleWords,
+    reason:
+      styleSources.length === 0
+        ? "Nothing is marked as Your writing. Mark whatever you wrote, or mark what you want to write like as References and it will learn from that."
+        : styleWords < minimumStyleWords
+          ? `Only ${styleWords.toLocaleString()} words to learn the voice from. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by.`
+          : ""
+  };
+
+  const referenceWords = words(references);
+  const referenceRequirement: SourceRequirement = {
+    documents: references.length,
+    words: referenceWords,
+    minWords: minimumReferenceWords,
+    ok: references.length > 0 && referenceWords >= minimumReferenceWords,
+    reason:
+      references.length === 0
+        ? "Nothing is marked as References. The book needs material to be about, not just a voice to be in. If you are continuing your own series, mark your past books as References as well as Your writing."
+        : referenceWords < minimumReferenceWords
+          ? `Only ${referenceWords.toLocaleString()} words of reference material. Below about ${minimumReferenceWords.toLocaleString()} there is little for the book to draw on.`
+          : ""
+  };
+
+  return {
+    ok: style.ok && referenceRequirement.ok,
+    style,
+    references: referenceRequirement,
+    fromReference
+  };
 }
 
 function withDerived(state: StudioState) {

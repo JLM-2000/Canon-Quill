@@ -142,6 +142,17 @@
   .ico.folder { color: var(--accent); }
 
   /* grouping board */
+  .reqs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .req { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); }
+  .req.ok { border-color: color-mix(in srgb, var(--good) 55%, var(--border)); }
+  .req.todo { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 5%, var(--surface)); }
+  .req-h { display: flex; align-items: center; gap: 7px; }
+  .req.ok .req-h svg { color: var(--good); }
+  .req.todo .req-h svg { color: var(--warn); }
+  .req-h b { font-size: 13px; }
+  .req-n { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .req p { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+  .req.todo p { color: var(--warn); }
   .counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 18px; }
   .count { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 10px 12px; }
@@ -179,7 +190,9 @@
   .info .ic { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--faint); }
   .info.ok .ic { color: var(--good); }
   .info.warn .ic { color: var(--warn); }
-  .info b { display: block; font-size: 12.5px; margin-bottom: 2px; }
+  /* Only the leading title is a block. Scoping this to every bold turned any
+     emphasis inside a sentence into its own line. */
+  .info > div > b:first-child { display: block; font-size: 12.5px; margin-bottom: 2px; }
   .info p { margin: 0; color: var(--muted); font-size: 12.5px; }
   .info code { font-size: 11.5px; }
   .sectionlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
@@ -262,11 +275,9 @@ let target = null;         // {id, name} of the folder finished chapters go to
 let indexing = false;
 let indexError = null;
 
-const KINDS = {
-  past_book: "Past series book", reference_book: "Reference book",
-  characters: "Characters", timeline: "Timeline", world: "Worldbuilding",
-  plot: "Plot & outline", notes: "Notes"
-};
+// Filled from /api/state so there is only ever one definition of these.
+let KINDS = {};
+let KIND_COUNTS = {};
 
 const PHASES = [
   { id: "engine",      label: "Writing engine", group: "Set up" },
@@ -456,6 +467,7 @@ async function reload() {
   try {
     const r = await api("/api/state");
     S = r.state; PROJECTS = r.projects || [];
+    KINDS = r.kinds || KINDS; KIND_COUNTS = r.kindCounts || KIND_COUNTS;
     render();
   } catch (e) { toast(e.message, true); }
 }
@@ -1040,26 +1052,38 @@ function viewAnalyze() {
   labels. A document can belong to several groups at once, which is common: one file often holds a
   timeline, an outline and loose notes.</p>
 
-  <div class="info ${check?.ok ? "ok" : "warn"}">
-    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      ${check?.ok ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
-    </svg>
-    <div><b>Which writing sets the style</b>
-      <p>Canon Quill learns how to write from the documents you mark as <b>Your writing</b>. That is the
-      whole point: it measures your prose and holds the drafting to it. Mark anything you wrote, whether
-      it is a finished novel, a short story or an old draft.</p>
-      <p style="margin-top:6px">If you have not written anything yet, mark what you want to write
-      <i>like</i> as <b>Reference writing</b> and it will learn from that instead. The result will read
-      like whoever wrote it rather than like you, which is a real trade and worth making on purpose.</p>
-      <p style="margin-top:6px">${check
-        ? check.ok
-          ? `<b style="color:var(--good)">${plural(check.documents, "document")}, ${plural(check.words, "word", null, check.words.toLocaleString())}.</b> Enough to measure.${check.fromReference ? " Using reference writing." : ""}`
-          : `<b style="color:var(--warn)">${esc(check.reason)}</b>`
-        : ""}</p>
-    </div></div>
+  ${check ? `<div class="reqs">
+    ${[["Your writing", check.style, "sets how the book sounds"],
+       ["References", check.references, "sets what the book is about"]].map(([title, r, purpose]) => `
+      <div class="req ${r.ok ? "ok" : "todo"}">
+        <div class="req-h">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
+            style="width:14px;height:14px;flex:none">
+            ${r.ok ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+          </svg>
+          <b>${title}</b>
+          <span class="req-n">${r.documents ? `${plural(r.documents, "document")} · ${r.words.toLocaleString()} words` : "none yet"}</span>
+        </div>
+        <p>${r.ok
+          ? `Enough. This ${purpose}.`
+          : esc(r.reason)}</p>
+      </div>`).join("")}
+  </div>
 
-  <div class="counts">${Object.entries(KINDS).map(([k, label]) =>
-    `<div class="count ${counts[k] ? "" : "zero"}"><b>${counts[k]}</b><span>${label}</span></div>`).join("")}</div>
+  ${check.fromReference && check.style.ok ? `<div class="info warn">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
+    <div><b>Learning the voice from someone else</b>
+      <p>Nothing is marked as <b>Your writing</b>, so the style will be learned from your references. The
+      book will read like whoever wrote those pages rather than like you. That is a legitimate way to start
+      a first book, but it should be a decision rather than an accident.</p></div></div>` : ""}` : ""}
+
+  <div class="counts">${Object.entries(KINDS).map(([k, label]) => {
+    const n = counts[k];
+    const forms = KIND_COUNTS[k];
+    const name = forms ? (n === 1 ? forms.one : forms.many) : label;
+    return `<div class="count ${n ? "" : "zero"}"><b>${n}</b><span>${esc(name)}</span></div>`;
+  }).join("")}</div>
 
   <h2>${plural(S.sources.length, "document")}</h2>
   ${unassigned ? `<div class="hint" style="margin-bottom:8px;color:var(--warn)">${plural(unassigned, "document")} ${verb(unassigned, "has", "have")} no group, highlighted below.</div>` : ""}
