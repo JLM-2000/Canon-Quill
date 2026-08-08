@@ -1,42 +1,203 @@
-words:
-  - palpable
-  - tangible
-  - delve
-  - tapestry
-  - symphony
-  - intricate
-  - ethereal
-  - luminous
-  - resonance
-  - reverberated
-  - testament
-  - unwavering
-  - enigmatic
-  - danced
-  - flickered
-  - shimmered
-  - glinting
-  - racing heart
-  - sent shivers down
-  - weight of
-  - unspoken
-  - voice hitched
-  - breath caught
-adverbs:
-  - softly
-  - gently
-  - slightly
-  - suddenly
-  - completely
-  - utterly
-  - truly
-  - barely above a whisper
-patterns:
-  - "a testament to"
-  - "could not help but"
-  - "in that moment"
-  - "something shifted"
-  - "the air between them"
-  - "a chill ran down"
-  - "her heart skipped a beat"
-  - "his jaw clenched"
+# ---------------------------------------------------------------------------
+# AI-ism policy
+#
+# This file used to be a ban list of about 200 words -- "whispered", "ache",
+# "shattered", "silence", "afraid", "slowly". That approach was wrong in both
+# directions at once:
+#
+#   False positives. Plenty of real novelists write "whispered" and "ache".
+#     Flagging them punishes an author for their own voice and pushes the
+#     editing pass to replace natural prose with thesaurus prose, which is
+#     how the output got stiff and airless.
+#
+#   False negatives. A model can avoid every listed word and still be
+#     obviously machine-written, because what actually gives it away is not
+#     vocabulary but UNIFORMITY: every sentence the same length, every
+#     paragraph the same shape, every character the same register, every
+#     emotion named instead of shown.
+#
+# So detection now works in two layers:
+#
+#   1. MEASURED  (src/style/) -- the draft's shape is compared against the
+#      author's own corpus. Deviation from *this author* is the signal. A word
+#      is only suspicious when the author does not use it at that rate. This
+#      layer needs no list and is where the real enforcement happens.
+#
+#   2. ADVISORY  (this file) -- constructions that are weak for structural
+#      reasons rather than lexical ones. These are prompts for a human or a
+#      model to look closer. Nothing here is auto-rejected, and anything the
+#      author's corpus does at a comparable rate is automatically exempt.
+#
+# Calibration against the author's corpus always wins over this file.
+# ---------------------------------------------------------------------------
+
+version: 2
+
+policy:
+  # Never flag a construction the author's own corpus uses at a similar rate.
+  # `tolerance` is how much more often the draft may use it before it counts.
+  calibrate_against_corpus: true
+  corpus_tolerance: 1.5
+  # Below this many corpus words the fingerprint is too noisy to calibrate on,
+  # and the advisory lists below are treated as weak hints only.
+  min_corpus_words: 2000
+  # A construction is only worth reporting when it recurs. One instance of
+  # almost anything on this page is fine.
+  min_occurrences: 2
+
+# ---------------------------------------------------------------------------
+# Structural tells. These are about how a sentence is built, not which words
+# it uses, so they survive paraphrase and are much harder to game.
+# ---------------------------------------------------------------------------
+structural_tells:
+  - id: negation_pivot
+    pattern: "Not X, but Y" / "It wasn't X. It was Y."
+    why: >
+      Defines a thing by what it is not. Cheap profundity; reads as insight
+      without supplying any. Damning in clusters.
+    fix: State what it is. Cut the negated half.
+    severity_when_repeated: blocker
+
+  - id: abstract_resolution
+    pattern: An abstraction (silence, weight, understanding) resolves the scene's main beat.
+    why: >
+      The emotional turn is asserted rather than dramatised. This is the single
+      most common reason a chapter reads as hollow.
+    fix: Replace with what a character does, says, chooses, or physically notices.
+    severity_when_repeated: blocker
+
+  - id: uniform_cadence
+    pattern: Consecutive sentences of near-identical length and structure.
+    why: >
+      Human prose varies its rhythm with tension. Flat cadence is the clearest
+      machine fingerprint and is measured directly by `sentence.stdevWords`.
+    fix: Break the pattern -- a two-word sentence, then a long one.
+    severity_when_repeated: blocker
+
+  - id: summary_ending
+    pattern: A closing paragraph that restates the chapter's meaning.
+    why: Explains the story to a reader who just read it. Kills subtext.
+    fix: End on an image, an action, or a line of dialogue. Trust the reader.
+    severity_when_repeated: blocker
+
+  - id: emotion_label
+    pattern: Naming a feeling (afraid, overwhelmed, devastated) with no evidence on the page.
+    why: Tells rather than shows. Reader is informed of emotion, not made to feel it.
+    fix: Render behaviour, physical detail, or a decision. Cut the label.
+    severity_when_repeated: major
+
+  - id: symmetrical_dialogue
+    pattern: Every character speaks in the same sentence length and register.
+    why: >
+      Real people have idiolects. Uniform dialogue is why exchanges read as one
+      voice talking to itself. Measured via dialogue line-length spread.
+    fix: Give at least two characters a distinct register -- clipped, rambling, formal, profane.
+    severity_when_repeated: blocker
+
+  - id: therapy_speak
+    pattern: Characters articulating their own psychology with clinical fluency.
+    why: >
+      People in conflict are evasive, defensive, and inarticulate. Fluent
+      self-diagnosis is a model explaining the scene through a character.
+    fix: Let them deflect, lie, change the subject, or say the wrong thing.
+    severity_when_repeated: major
+
+  - id: filtered_perception
+    pattern: "She saw / he felt / they noticed" before the actual detail.
+    why: Inserts a camera between reader and scene, weakening close POV.
+    fix: Delete the filter and render the detail directly.
+    severity_when_repeated: minor
+
+  - id: decorative_metaphor
+    pattern: An image that does not reveal character, advance plot, or sharpen atmosphere.
+    why: Ornament in place of meaning; usually drawn from outside the POV's knowledge.
+    fix: Cut it, or re-source the image from what this character would actually reach for.
+    severity_when_repeated: major
+
+  - id: hedged_action
+    pattern: "seemed to", "almost as if", "something like" attached to concrete events.
+    why: Refuses to commit. Drains the scene of consequence.
+    fix: Let the thing happen definitely.
+    severity_when_repeated: minor
+
+# ---------------------------------------------------------------------------
+# Advisory phrases. Recurring constructions worth a second look -- NOT banned.
+# Each is exempt automatically when the author's corpus uses it comparably.
+# ---------------------------------------------------------------------------
+advisory_phrases:
+  # Bodily reactions that have become genre wallpaper.
+  autonomic_cliche:
+    - "let out a breath (he|she|they) didn't know (he|she|they) w(as|ere) holding"
+    - "breath caught"
+    - "heart skipped a beat"
+    - "a chill ran down (his|her|their) spine"
+    - "stomach dropped"
+    - "throat tightened"
+    - "swallowed hard"
+    - "jaw clenched"
+    - "blood roared"
+
+  # Container nouns that stand in for a rendered feeling.
+  quantum_of_emotion:
+    - "a wave of"
+    - "a surge of"
+    - "a pang of"
+    - "a flicker of"
+    - "a rush of"
+    - "a spark of"
+
+  # Time-dilation filler used to signal significance.
+  portentous_time:
+    - "for a long moment"
+    - "in that moment"
+    - "time seemed to slow"
+    - "for what felt like forever"
+    - "the silence stretched"
+
+  # Essayistic connectives that rarely belong in close-POV fiction.
+  essay_connectives:
+    - "however"
+    - "moreover"
+    - "furthermore"
+    - "nevertheless"
+    - "it was clear that"
+    - "at the end of the day"
+
+  # Lines that exist to deliver exposition to the reader.
+  exposition_dialogue:
+    - "as you know"
+    - "you don't understand"
+    - "this changes everything"
+    - "let me explain"
+    - "i had no choice"
+
+  # Register markers that read as machine-lyrical when clustered.
+  purple_cluster:
+    - "tapestry"
+    - "symphony"
+    - "kaleidoscope"
+    - "testament to"
+    - "palpable"
+    - "ineffable"
+    - "liminal"
+
+# ---------------------------------------------------------------------------
+# Explicit protections. These exist because the previous version's damage was
+# mostly in what it wrongly removed.
+# ---------------------------------------------------------------------------
+never_flag:
+  - Any construction present in the author's reference corpus at a comparable rate.
+  - Dialogue that is deliberately stilted because the character is stilted.
+  - Genre conventions the author's references establish (romance beats, noir cadence, epistolary form).
+  - Repetition used deliberately as a motif, when the chapter plan declares it.
+  - Profanity, bluntness, or plainness. Plain prose is a style, not a defect.
+  - Words that are simply common. Frequency alone is never evidence.
+
+rewrite_principles:
+  - Replace an asserted feeling with behaviour, choice, or physical detail.
+  - Prefer one exact verb to a verb plus an adverb.
+  - Vary sentence length deliberately; let rhythm follow tension.
+  - Keep subtext. Never let dialogue explain what the scene already shows.
+  - Give each character a register and hold it.
+  - When cutting a flagged phrase, cut it -- do not swap in a rarer synonym.
+  - If a fix would make the prose less like the author's corpus, do not make it.

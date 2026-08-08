@@ -1,424 +1,156 @@
 # Canon Quill
 
-Canon Quill is a guided OpenCode workflow for writing books from Google Drive references. It helps an author prepare the book, write it in the selected style, validate every chapter, generate the final DOCX, upload the final package, archive the finished project, and reset for the next book.
+An agentic book-writing workflow that grounds drafting in **the author's own past prose**, then gates every chapter on canon, continuity and measured style fidelity.
 
-The workflow is conversation-first. You do not need to memorize commands. After setup, open OpenCode, switch to the `book-orchestrator` agent, and talk normally.
-
-## Quick Start
-
-1. Clone the repo.
+The hard part of getting an LLM to write a novel is not producing text. It is producing text that sounds like *you* wrote it, and that chapter 12 still agrees with chapter 3. Canon Quill treats both as engineering problems with measurements attached, rather than as instructions in a prompt.
 
 ```bash
-git clone <repo-url> Canon-Quill
+npm run setup && npm run studio
 ```
 
-2. Enter the folder.
+---
+
+## The two problems this exists to solve
+
+### "It has no soul"
+
+The usual approach hands the model a *description* of the author's style — "short sentences, dry humour, close third person" — and asks it to imitate that. A description of prose is not prose. Given one, the model falls back on its own default register, and the result is fluent, competent and completely anonymous.
+
+Canon Quill keeps the actual paragraphs. Past books are cut into passages, each tagged by the kind of narrative beat it carries (dialogue, action, interiority, description, transition). Before a chapter is drafted, the passages that are the closest precedent for its beats are retrieved and put in the prompt. The model writes *next to* real examples of how this author handles an argument, a corridor, a gut-punch.
+
+Then the draft is measured against the author's fingerprint and the deviations are named:
+
+| Metric | Author | Draft | Drift | Severity |
+|---|---:|---:|---:|---|
+| mean sentence length | 13.6 | 24.1 | +77% | blocker |
+| dialogue share | 0.34 | 0.11 | −68% | blocker |
+| plain dialogue tag share | 0.81 | 0.34 | −58% | major |
+| abstract nouns / 1k | 4.2 | 11.7 | +179% | blocker |
+
+The editing agent works from that table. Not from taste.
+
+### "The chapters don't flow"
+
+The previous version had a continuity phase that wrote a markdown summary the next agent was asked to "read and respect". Nothing checked that it did. So chapter 7 could open with a character in a city chapter 6 had just watched them leave.
+
+Continuity is now a typed contract. Each chapter emits a **handoff**: ending location, per-character state (where, what they know, physical condition, emotional register), timeline position, threads touched, and the open question the next chapter must engage. The next chapter is validated against it in code:
+
+- a character relocating with no travel shown and no reference to where they were → **blocker**
+- someone acting on a fact the book never showed them learning → **major**
+- in-world time running backwards without a declared flashback → **blocker**
+- a thread past its `mustResolveBy` chapter → **blocker**
+- a setup planted in chapter 2 still unpaid with two chapters left → **major**
+
+---
+
+## Why the AI-ism detector had to be rebuilt
+
+The old `config/ai-isms.yaml` was a list of ~200 banned words: *whispered*, *ache*, *shattered*, *silence*, *afraid*, *slowly*. That is wrong in both directions at once.
+
+**False positives.** Plenty of real novelists write "whispered". Flagging it punishes an author for their own voice, and pushes the editing pass to swap natural prose for thesaurus prose — which is how the output got stiff.
+
+**False negatives.** A model can avoid every listed word and still be obviously machine-written, because what gives it away is not vocabulary but **uniformity**: every sentence the same length, every paragraph the same shape, every character the same register, every emotion named rather than shown.
+
+So detection is calibrated against the author's own corpus. A word is only suspicious when *this author* does not use it at that rate. What is actually enforced is structural: repeated sentence openers, repeated 4-grams, paragraph lengths with no spread, dialogue lines that all run the same length. The remaining list is advisory, and anything the corpus does at a comparable rate is exempt by policy.
+
+---
+
+## Canon Quill Studio
+
+`npm run studio` → <http://127.0.0.1:4180>
+
+A local web UI, loopback-only, no build step. It replaces a wizard that was previously one textarea for pasting Drive URLs.
+
+1. **Connect Drive** — narrow `drive.file` scope; only files you pick.
+2. **Select sources** — browse Drive, mark reference folders, set the target folder.
+3. **Analyse & group** — every document is read and classified into *past series books · reference books · characters · timeline · worldbuilding · plot · notes*, with a confidence and the evidence behind it. Low-confidence guesses are surfaced for confirmation, and anything can be re-assigned.
+
+   This grouping matters more than it looks: **only past series books feed the style corpus and canon.** A reference book by another author filed wrongly would pull the writing toward someone else's voice — the exact failure the system exists to prevent.
+4. **Project shape** — standalone or series; chapter-by-chapter or whole book.
+5. **Style corpus** — build the fingerprint and see your own measured targets.
+6. **Questions** — when an agent hits a decision only you can make, it posts it here instead of guessing and burying the assumption. Blocking questions hold the pipeline.
+7. **Chapters** — the board, with live style-fidelity and flow verdicts per chapter.
+
+---
+
+## The two drafting modes
+
+Chosen once, before writing starts. **The only difference is where you approve. Every quality gate runs identically in both.**
+
+| | Chapter by chapter | Whole book |
+|---|---|---|
+| **Loop** | draft → edit → validate → **you approve** → next | draft → edit → validate → next, for every chapter |
+| **You are asked** | after each chapter | once, on the finished manuscript |
+| **Style + flow gates** | every chapter | every chapter |
+| **Best for** | catching a drift in voice or plot at chapter 2 rather than chapter 20 | getting a complete draft to react to without supervising it |
+| **Trade-off** | you need to be present throughout | a systematic problem surfaces only after the whole book is written |
+
+---
+
+## Architecture
+
+```
+src/style/         the fidelity engine
+  text.ts          tokenisation: sentences, paragraphs, dialogue spans, tags
+  metrics.ts       the quantitative fingerprint (18 comparable measures)
+  corpus.ts        past books → beat-tagged passages + fingerprint
+  retrieve.ts      scene brief → matched exemplars → prompt block
+  score.ts         draft vs fingerprint → named deviations + repetition findings
+
+src/continuity/    chapter-to-chapter flow
+  ledger.ts        typed state: character states, threads, promises, timeline
+  flow.ts          opening contracts + validation of a draft against the handoff
+
+src/analysis/
+  classify.ts      Drive documents → source kinds, with confidence and evidence
+
+src/studio/        the local UI and its API
+src/drive/         OAuth + a Drive client that paginates and walks recursively
+```
+
+Style scoring and flow validation are pure functions over text and typed state, which is why they can be tested — **84 tests**, no network, no model calls.
+
+---
+
+## Setup
+
+Requires Node `20.19.0+`.
 
 ```bash
-cd Canon-Quill
+npm run setup     # checks Node, installs OpenCode + OpenSpec, builds, validates
+npm run studio    # the UI
+opencode          # the agent workflow; Tab to book-orchestrator
 ```
 
-3. Run the installer.
+For Drive, create an OAuth **Desktop app** client, download the JSON, and point `.env` at it:
 
-```bash
-npm run setup
 ```
-
-The installer checks Node, installs OpenCode if missing, installs OpenSpec if missing, installs project dependencies, builds the project, validates the workflow, and initializes the local book workspace.
-
-4. Open OpenCode from this folder.
-
-```bash
-opencode
-```
-
-5. Press `Tab` until the active agent is `book-orchestrator`.
-
-6. Say something natural, for example:
-
-```text
-Begin.
-```
-
-or:
-
-```text
-I want to start a new book. Use these Drive folders as references and this Drive folder as the target.
-```
-
-## Requirements
-
-Canon Quill expects Node.js `20.19.0+`.
-
-If setup says your Node version is too old, upgrade Node, then run the installer again:
-
-```bash
-npm run setup
-```
-
-Recommended with `nvm`:
-
-```bash
-nvm install 20
-nvm use 20
-```
-
-## What The Installer Does
-
-`npm run setup` runs `scripts/install.sh`.
-
-It performs these steps:
-
-- Confirms Node.js is new enough.
-- Installs OpenCode if the `opencode` command is missing.
-- Installs OpenSpec if the `openspec` command is missing.
-- Installs this project’s npm dependencies.
-- Builds the local TypeScript tools.
-- Validates the book workflow YAML.
-- Creates `.canon-quill/` local state, logs, and artifact folders.
-
-If any step fails, the installer prints the blocker and stops before the writing workflow begins.
-
-## Starting The Workflow
-
-After setup, open OpenCode and select `book-orchestrator` with `Tab`.
-
-Then speak normally. Good starting phrases:
-
-```text
-Begin.
-```
-
-```text
-Start a new book project.
-```
-
-```text
-Here are the reference folders and the target folder. Start preparation.
-```
-
-The orchestrator reads the workflow state and routes you to the correct phase.
-
-## Natural Conversation Examples
-
-Continue work:
-
-```text
-Continue.
-```
-
-```text
-Continue with the next chapter.
-```
-
-Choose chapter-by-chapter review:
-
-```text
-Let's do this chapter by chapter.
-```
-
-Choose full-book mode:
-
-```text
-Do the whole book yourself and only ask me when the full manuscript is ready.
-```
-
-Approve a chapter:
-
-```text
-The chapter is good.
-```
-
-Request changes:
-
-```text
-Make the dialogue sharper and less explanatory.
-```
-
-Approve the final book:
-
-```text
-The book is good. Generate the DOCX, upload it, and archive the project.
-```
-
-## Review Modes
-
-Canon Quill asks all setup questions before writing begins. Once writing starts, it does not interrupt you in the middle of the drafting loop.
-
-`chapter_by_chapter` mode:
-
-- Draft one chapter.
-- Edit it.
-- Validate it.
-- Ask you to approve that chapter.
-- Upload the approved chapter.
-- Continue to the next chapter.
-
-`book_by_book` mode:
-
-- Draft every chapter.
-- Edit every chapter.
-- Validate every chapter.
-- Update continuity internally.
-- Ask you for review only when the whole manuscript package is ready.
-
-## Google Drive Setup
-
-Canon Quill can read selected references and write approved outputs to a selected target folder in Google Drive.
-
-You need a Google OAuth Desktop credentials JSON file.
-
-High-level setup:
-
-1. Create or choose a Google Cloud project.
-2. Enable the Google Drive API.
-3. Create an OAuth Client ID with application type `Desktop app`.
-4. Download the credentials JSON.
-5. Run the installer. It creates a local `.env` file for you.
-
-```bash
-npm run setup
-```
-
-6. Open `.env` and fill in this value:
-
-```text
 GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/credentials.json
 ```
 
-The default Drive scope is:
+Then enable the Drive MCP server by setting `canon_drive.enabled` to `true` in `opencode.json` and restarting OpenCode.
 
-```text
-https://www.googleapis.com/auth/drive.file
-```
-
-This keeps Drive access narrow and user-selected.
-
-## Enable Drive Tools
-
-The Drive MCP server is disabled by default so a fresh clone never tries to start Drive tooling before setup.
-
-After `npm run setup`, open `opencode.json` and change the `canon_drive` MCP server from:
-
-```json
-"enabled": false
-```
-
-to:
-
-```json
-"enabled": true
-```
-
-Then restart OpenCode.
-
-## Workflow Phases
-
-The workflow lives at:
-
-```text
-workflows/book-writing.workflow.yaml
-```
-
-The main phases are:
-
-1. `setup`: check local readiness.
-2. `intake`: ask all project questions before writing.
-3. `drive_selection`: choose references and target.
-4. `reference_extraction`: extract source facts and style.
-5. `preparation`: create bibles, plans, style guides, and validation rubrics.
-6. `preflight_review`: user approves the starting point.
-7. `corrections`: update prep docs if needed.
-8. `chapter_drafting`: draft chapters.
-9. `chapter_editing`: revise phrase by phrase.
-10. `chapter_validation`: validate canon, style, plot, boundaries, and proofread quality.
-11. `user_chapter_review`: chapter approval gate only in chapter-by-chapter mode.
-12. `final_post`: upload approved chapter.
-13. `continuity_update`: update canon and next-chapter context.
-14. `book_finalization`: compile full manuscript and reports.
-15. `book_final_review`: user reviews the complete book.
-16. `docx_generation`: generate the final DOCX.
-17. `final_package_post`: upload DOCX and final reports.
-18. `project_archive`: archive completed work and reset for a fresh book.
-
-## Agents
-
-Canon Quill uses one phase agent per phase:
-
-```text
-.opencode/agents/book-00-setup.md
-.opencode/agents/book-01-intake.md
-.opencode/agents/book-02-drive-selection.md
-.opencode/agents/book-03-reference-extraction.md
-.opencode/agents/book-04-preparation.md
-.opencode/agents/book-05-preflight-review.md
-.opencode/agents/book-06-corrections.md
-.opencode/agents/book-07-chapter-drafting.md
-.opencode/agents/book-08-chapter-editing.md
-.opencode/agents/book-09-chapter-validation.md
-.opencode/agents/book-10-user-review.md
-.opencode/agents/book-11-final-post.md
-.opencode/agents/book-12-continuity-update.md
-.opencode/agents/book-13-book-finalization.md
-.opencode/agents/book-14-docx-generation.md
-.opencode/agents/book-15-final-package-post.md
-.opencode/agents/book-16-project-archive.md
-```
-
-There are also focused subagents for Drive indexing, reference parsing, style analysis, character canon, plot, dialogue, AI-isms, continuity, spice boundaries, proofreading, security, and workflow YAML audits.
-
-## Logs And State
-
-Canon Quill records structured JSON state and logs under `.canon-quill/`.
-
-Current state:
-
-```text
-.canon-quill/state/current.json
-.canon-quill/state/current-phase.json
-```
-
-Logs:
-
-```text
-.canon-quill/logs/phase-log.json
-.canon-quill/logs/errors-log.json
-.canon-quill/logs/audit-log.json
-```
-
-Each log entry includes timestamps, stage IDs, stage names, agent names, events, messages, and optional data.
-
-Book artifacts:
-
-```text
-.canon-quill/artifacts/
-.canon-quill/artifacts/chapters/
-.canon-quill/artifacts/continuity/
-.canon-quill/artifacts/final/
-```
-
-Finished projects are archived under:
-
-```text
-.canon-quill-archives/<timestamp>/
-```
-
-The active `.canon-quill/` folder is reset after archive so the next book starts fresh.
-
-## Pretty Review Preview
-
-When Canon Quill shows a chapter or full book for review, it can open a local browser preview automatically.
-
-The review agent uses:
+## Commands
 
 ```bash
-npm run preview -- --detach --file <markdown-file> --title "Chapter Title"
+npm run studio            # Canon Quill Studio
+npm run check             # build + workflow validation + tests
+npm run preview -- --file <md>   # book-style reading preview
+npm run docx              # generate the final DOCX
+npm run archive:project   # archive and reset for the next book
 ```
 
-The preview opens on localhost and formats the manuscript in a clean book-style reading view. If the referenced style implies a specific format, the review agent should match that format as closely as the available style notes allow. If the browser cannot open automatically, OpenCode still shows the local preview URL and file path.
+## Your book is never in this repo
 
-## Final Book Output
+Everything generated — references pulled from Drive, extracted style corpora, bibles, drafts, chapters, exports — lives under `.canon-quill/` and `.canon-quill-archives/`, both gitignored, with pattern-level rules behind them as defence in depth. The repo holds the engine, never the book.
 
-When the full book is approved, Canon Quill generates:
+## Limitations
 
-```text
-.canon-quill/artifacts/final/manuscript.docx
-```
+- Exemplar retrieval is lexical and structural, not embedding-based. Deterministic, needs no API key, and adequate for "same beat, these characters" — but it will not catch a thematic match phrased in entirely different words.
+- The fingerprint needs roughly 2,000+ words of the author's prose to be stable. Below that, deviations are reported as advisory and the UI says so.
+- Flow validation is deliberately conservative. It reports what it can prove from structured state and stays quiet where only a human can judge; a gate that cries wolf gets switched off.
+- Character-name detection is capitalisation-based and will over-match on prose with heavy proper-noun use.
 
-It also keeps:
+## Licence
 
-```text
-.canon-quill/artifacts/final/manuscript.md
-.canon-quill/artifacts/final/continuity-report.md
-.canon-quill/artifacts/final/style-report.md
-.canon-quill/artifacts/final/open-threads-report.md
-.canon-quill/artifacts/final/final-proofread-report.md
-```
-
-Manual DOCX generation is available if needed:
-
-```bash
-npm run docx
-```
-
-Manual archive/reset is available if needed:
-
-```bash
-npm run archive:project
-```
-
-## Writing Quality
-
-Canon Quill is built to avoid generic AI writing.
-
-It checks for:
-
-- User/reference style fidelity.
-- Character voice and physicality consistency.
-- Plot causality and open loops.
-- POV, tense, and narrative distance.
-- Dialogue subtext and voice separation.
-- Overexplaining.
-- Empty poetic phrasing.
-- Repeated AI-isms.
-- Target audience fit.
-- Romance/spice boundary compliance.
-- Final proofread issues.
-
-The writing rubric is here:
-
-```text
-docs/writing-rubric.md
-```
-
-The AI-isms list is here:
-
-```text
-config/ai-isms.yaml
-```
-
-## Local Validation
-
-Run all project checks:
-
-```bash
-npm run check
-```
-
-Run individual checks:
-
-```bash
-npm run build
-npm run validate:workflow
-npm test
-```
-
-## Troubleshooting
-
-### OpenCode does not show `book-orchestrator`
-
-Restart OpenCode from the `Canon-Quill` folder. OpenCode reads agent files at startup.
-
-### Setup says Node is too old
-
-Install Node.js `20.19.0+`, then rerun:
-
-```bash
-npm run setup
-```
-
-### Drive tools are not available
-
-Make sure `canon_drive.enabled` is `true` in `opencode.json`, then restart OpenCode.
-
-### Drive OAuth does not open
-
-Check that `GOOGLE_OAUTH_CLIENT_JSON` points to your OAuth Desktop credentials JSON.
-
-### Target file already exists
-
-Canon Quill refuses overwrites by default. Rename the target output or enable overwrite intentionally:
-
-```bash
-export CANON_QUILL_ALLOW_OVERWRITE=true
-```
+MIT

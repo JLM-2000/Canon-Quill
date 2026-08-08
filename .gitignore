@@ -1,11 +1,61 @@
-node_modules/
-dist/
-.env
+# ---------------------------------------------------------------------------
+# Canon Quill ignore rules
+#
+# Rule of thumb: the repo holds the *engine* only. Every byte of an author's
+# book -- references pulled from Drive, extracted style corpora, bibles,
+# drafts, chapters, exports, archives -- lives under a generated directory and
+# must never be committed. Generated content is confined to `.canon-quill/`
+# (active project) and `.canon-quill-archives/` (finished projects) so a single
+# pair of rules covers anything added in the future.
+# ---------------------------------------------------------------------------
+
+# --- Generated book content (NEVER commit) ---------------------------------
 .canon-quill/
 .canon-quill-archives/
-coverage/
-*.log
+
+# Defence in depth: catch generated content even if it escapes the dirs above.
+**/artifacts/
+**/chapters/
+**/manuscript.*
+**/style-corpus/
+**/drive-cache/
+*.docx
+*.epub
+
+# --- Secrets and credentials -----------------------------------------------
+.env
+.env.*
+!.env.example
 credentials.json
+client_secret*.json
 token.json
+*token*.json
+*.pem
+*.key
 *.secret.*
 *.local.*
+
+# --- Build output and dependencies -----------------------------------------
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# --- Test and tooling output -----------------------------------------------
+coverage/
+.nyc_output/
+.vitest/
+
+# --- Logs and scratch ------------------------------------------------------
+*.log
+npm-debug.log*
+tmp/
+.tmp/
+
+# --- OS / editor noise -----------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createDriveAuth, type DriveAuth } from "./auth.js";
-import type { DriveFileSummary, UploadBinaryFileInput, WriteTextFileInput } from "./types.js";
+import type { DriveFileSummary, DriveTreeNode, UploadBinaryFileInput, WriteTextFileInput } from "./types.js";
 
 const driveApiBase = "https://www.googleapis.com/drive/v3/";
 const driveUploadBase = "https://www.googleapis.com/upload/drive/v3/";
@@ -12,6 +12,7 @@ interface DriveApiFile {
   name?: string | null;
   mimeType?: string | null;
   modifiedTime?: string | null;
+  size?: string | null;
   capabilities?: {
     canDownload?: boolean | null;
   };
@@ -20,23 +21,90 @@ interface DriveApiFile {
 export class SafeDriveClient {
   private authPromise: Promise<DriveAuth> | undefined;
 
+  /**
+   * List a folder's immediate children, following pagination.
+   *
+   * Drive caps `pageSize` at 1000 and returns a `nextPageToken` for the rest.
+   * Ignoring that token silently truncates large reference folders, which is
+   * the worst possible failure here: the book would be written against a
+   * partial view of the author's canon with nothing reporting a problem.
+   */
   async listFolder(folderId: string): Promise<DriveFileSummary[]> {
-    const response = await this.requestJson<{ files?: DriveApiFile[] }>(
-      driveUrl("files", {
-        q: `'${escapeDriveQueryValue(folderId)}' in parents and trashed = false`,
-        fields: "files(id,name,mimeType,modifiedTime)",
-        pageSize: 1000,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true
+    const files: DriveFileSummary[] = [];
+    let pageToken: string | undefined;
+
+    do {
+      const response = await this.requestJson<{ files?: DriveApiFile[]; nextPageToken?: string }>(
+        driveUrl("files", {
+          q: `'${escapeDriveQueryValue(folderId)}' in parents and trashed = false`,
+          fields: "nextPageToken,files(id,name,mimeType,modifiedTime,size)",
+          pageSize: 1000,
+          orderBy: "folder,name",
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+          ...(pageToken ? { pageToken } : {})
+        })
+      );
+
+      for (const file of response.files ?? []) files.push(toSummary(file));
+      pageToken = response.nextPageToken;
+    } while (pageToken);
+
+    return files;
+  }
+
+  /**
+   * Walk a folder recursively.
+   *
+   * Bounded by `maxDepth` and `maxFiles` so a mistakenly selected Drive root
+   * cannot turn into an unbounded crawl. Cycles are impossible in Drive's
+   * folder graph via `in parents`, but shortcuts can produce repeats, so
+   * visited ids are tracked.
+   */
+  async walkFolder(
+    folderId: string,
+    options: { maxDepth?: number; maxFiles?: number } = {}
+  ): Promise<DriveTreeNode[]> {
+    const maxDepth = options.maxDepth ?? 6;
+    const maxFiles = options.maxFiles ?? 5000;
+    const visited = new Set<string>();
+    let count = 0;
+
+    const walk = async (id: string, depth: number, path: string): Promise<DriveTreeNode[]> => {
+      if (depth > maxDepth || count >= maxFiles || visited.has(id)) return [];
+      visited.add(id);
+
+      const children = await this.listFolder(id);
+      const nodes: DriveTreeNode[] = [];
+
+      for (const child of children) {
+        if (count >= maxFiles) break;
+        count += 1;
+        const childPath = `${path}/${child.name}`;
+        const isFolder = child.mimeType === googleFolderMime;
+        nodes.push({
+          ...child,
+          path: childPath,
+          isFolder,
+          children: isFolder ? await walk(child.id, depth + 1, childPath) : undefined
+        });
+      }
+
+      return nodes;
+    };
+
+    return walk(folderId, 0, "");
+  }
+
+  /** Fetch metadata for a single file or folder. */
+  async getMetadata(fileId: string): Promise<DriveFileSummary> {
+    const file = await this.requestJson<DriveApiFile>(
+      driveUrl(`files/${encodeURIComponent(fileId)}`, {
+        fields: "id,name,mimeType,modifiedTime,size",
+        supportsAllDrives: true
       })
     );
-
-    return (response.files ?? []).map((file) => ({
-      id: requireId(file.id),
-      name: file.name ?? "Untitled",
-      mimeType: file.mimeType ?? "application/octet-stream",
-      modifiedTime: file.modifiedTime ?? undefined
-    }));
+    return toSummary(file);
   }
 
   async readFileText(fileId: string): Promise<string> {
@@ -219,10 +287,12 @@ function requireId(id: string | null | undefined): string {
 }
 
 function toSummary(file: DriveApiFile): DriveFileSummary {
+  const size = file.size ? Number(file.size) : undefined;
   return {
     id: requireId(file.id),
     name: file.name ?? "Untitled",
     mimeType: file.mimeType ?? "application/octet-stream",
-    modifiedTime: file.modifiedTime ?? undefined
+    modifiedTime: file.modifiedTime ?? undefined,
+    size: Number.isFinite(size) ? size : undefined
   };
 }

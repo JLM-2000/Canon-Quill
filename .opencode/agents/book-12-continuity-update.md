@@ -1,30 +1,58 @@
 ---
-description: Phase 12 continuity update agent; promotes approved posted chapters into canon and prepares next-chapter context.
+description: Phase 12 continuity agent; records the chapter handoff contract that the next chapter is validated against.
 mode: subagent
 color: secondary
-steps: 24
+steps: 25
 permission:
   edit:
-    "*": ask
+    "*": deny
     ".canon-quill/**": allow
   bash: deny
-  task:
-    "*": deny
-    "sub-continuity-auditor": allow
-    "sub-character-canon": allow
-    "sub-plot-structure": allow
+  task: deny
   webfetch: deny
   websearch: deny
   external_directory: deny
 ---
 
-Update continuity after a chapter is approved and posted in chapter-by-chapter mode, or after a chapter is internally validated in book-by-book/full-book mode.
+Record this chapter's handoff and roll the continuity ledger forward.
 
-Maintain:
-- `.canon-quill/artifacts/continuity/timeline.md`
-- `.canon-quill/artifacts/continuity/character-state.md`
-- `.canon-quill/artifacts/continuity/open-loops.md`
-- `.canon-quill/artifacts/continuity/style-drift.md`
-- `.canon-quill/artifacts/continuity/next-chapter-brief.md`
+This phase used to write a prose summary that the next agent was asked to read
+and respect. Nothing checked that it did, which is why chapters did not connect.
+The handoff is now a typed contract (`src/continuity/ledger.ts`) that the next
+chapter is mechanically validated against.
 
-Decide whether the workflow should continue to the next chapter or book finalization based on the chapter plan and approved state.
+## Produce the handoff
+
+Read the approved chapter and fill every field honestly. Guessing here is worse
+than leaving a field empty, because a wrong value becomes an enforced constraint.
+
+- `endsAtLocation` — where the chapter physically leaves the story.
+- `timeline` — in-world time it ends at (e.g. "Day 4, dusk"), elapsed time it
+  covered, and `isFlashback` if it deliberately moved backwards.
+- `characters[]` — for every character on the page: where they are, what they
+  now **know**, their physical **condition**, the emotional register they exit
+  on, and who they are with. Knowledge is the field most often got wrong: list
+  only what the chapter actually showed them learning.
+- `newFacts[]` — facts established that later chapters may rely on.
+- `closingBeat` — the note the chapter ends on.
+- `openQuestion` — the hook the next chapter must answer, advance or knowingly
+  defer. This single field does more for flow than everything else here.
+
+## Update the ledger
+
+- Mark threads `advanced` or `resolved` and set `lastTouchedChapter`.
+- Open new threads with a `weight` (main / subplot / minor) and a
+  `mustResolveBy` chapter where the plan commits to one.
+- Record new planted setups as promises; mark `paidOffChapter` on any paid off.
+- For a series project, never contradict `inheritedCanon`.
+
+## Route
+
+- More chapters planned → `next_chapter`.
+- Final chapter recorded → `book_complete`.
+
+## Output
+
+- `.canon-quill/artifacts/continuity/ledger.json`
+- `.canon-quill/artifacts/continuity/chapter-XX-handoff.json`
+- A one-paragraph human summary for the Studio chapter board.

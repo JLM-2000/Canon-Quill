@@ -1,161 +1,299 @@
-version: 1
+version: 2
 name: canon-quill-book-writing
 initial_state: setup
 terminal_states:
   - complete
   - cancelled
+
 global:
   max_state_retries: 3
   state_dir: .canon-quill/state
   logs_dir: .canon-quill/logs
   artifacts_dir: .canon-quill/artifacts
   target_staging_dir: .canon-quill/target-staging
+
+  # Every gate that stops for the author. Nothing else may block on input --
+  # the pipeline used to interrupt mid-draft to ask questions it could have
+  # asked during intake, which broke the writing flow for no benefit.
   user_review_required_states:
     - preflight_review
     - user_chapter_review
     - book_final_review
+
+  # ---------------------------------------------------------------------------
+  # The two drafting modes. Chosen once at `mode_select`, and the ONLY thing
+  # that differs between them is where the author is asked to approve.
+  # Every quality gate runs identically in both.
+  # ---------------------------------------------------------------------------
+  drafting_modes:
+    chapter_by_chapter:
+      label: Chapter by chapter
+      summary: >
+        Draft one chapter, edit it, validate it, then stop and wait for the
+        author's approval before starting the next. The author's notes shape
+        every subsequent chapter.
+      approval_gate: user_chapter_review
+      best_for: Full control; catching a drift in voice or plot at chapter 2 rather than chapter 20.
+      tradeoff: Requires the author present throughout.
+    whole_book:
+      label: Whole book
+      summary: >
+        Draft, edit and validate every chapter in one continuous pass, then
+        present the complete manuscript for a single review. Continuity and
+        style gates still run on every chapter; only the human approval is
+        deferred to the end.
+      approval_gate: book_final_review
+      best_for: Getting a complete draft to react to without supervising it.
+      tradeoff: A systematic problem is only caught after the whole book is written.
+
+  # Quality gates that run on EVERY chapter regardless of mode.
+  chapter_gates:
+    - id: style_fidelity
+      implementation: src/style/score.ts
+      description: Draft is measured against the author's own corpus fingerprint.
+      fails_below: 60
+      revises_below: 80
+    - id: chapter_flow
+      implementation: src/continuity/flow.ts
+      description: >
+        Chapter is checked against the previous chapter's handoff contract --
+        character locations, knowledge, conditions, timeline direction, open
+        threads and unpaid setups.
+      fails_on: any blocker issue
+    - id: canon_consistency
+      description: Facts asserted must not contradict the character, world or plot bibles.
+    - id: boundary_compliance
+      description: Intimacy level, audience and content constraints from intake.
+
 states:
+  # --- Set up ---------------------------------------------------------------
   setup:
     agent: book-00-setup
-    description: Verify local installation, build status, OpenSpec availability, and Drive MCP readiness.
+    description: Verify Node, build, OpenSpec, Drive credentials, and Studio availability.
     on_success: intake
     on_failure: setup_repair
+
   setup_repair:
     agent: book-00-setup
-    description: Repair missing install/build prerequisites when possible, otherwise produce exact blocker report.
+    description: Repair missing prerequisites where possible, otherwise report exact blockers.
     on_success: intake
     on_failure: cancelled
+
   intake:
     agent: book-01-intake
-    description: Ask project-level questions before any reference extraction.
+    description: >
+      Ask every project-level question before any reference is read: standalone
+      or series, audience, POV and tense, intimacy boundary, mystery policy.
+      Questions are posted to the Studio question inbox.
     requires_user_input: true
     on_success: drive_selection
     on_incomplete: intake
     on_failure: intake
+
   drive_selection:
     agent: book-02-drive-selection
-    description: Collect reference folders/files and target folder through visual picker or URL fallback.
+    description: >
+      Author selects reference folders and the target folder in the Studio Drive
+      browser. Folders are walked recursively with pagination followed.
     requires_user_input: true
-    on_success: reference_extraction
+    on_success: source_analysis
     on_incomplete: drive_selection
     on_failure: drive_selection
+
+  # --- Analyse --------------------------------------------------------------
+  source_analysis:
+    agent: sub-drive-indexer
+    description: >
+      Read every selected document and classify it into past series books,
+      reference books by other authors, characters, timeline, worldbuilding,
+      plot and notes. Low-confidence guesses are surfaced for confirmation.
+    transitions:
+      needs_confirmation: source_confirmation
+      confident: style_corpus_build
+    on_failure: source_analysis
+
+  source_confirmation:
+    agent: book-02-drive-selection
+    description: Author confirms or corrects the grouping in the Studio board.
+    requires_user_input: true
+    on_success: style_corpus_build
+    on_failure: source_confirmation
+
+  style_corpus_build:
+    agent: sub-style-fingerprint
+    description: >
+      Build the exemplar corpus from PAST SERIES BOOKS ONLY, segment it into
+      beat-tagged passages, and compute the author's quantitative fingerprint.
+      Reference books by other authors are deliberately excluded -- including
+      them would pull the fingerprint toward another writer's voice.
+    on_success: reference_extraction
+    on_failure: style_corpus_build
+
   reference_extraction:
     agent: book-03-reference-extraction
-    description: Read selected references and produce source inventory, extracted facts, constraints, and style samples.
+    description: >
+      Extract canon facts, character detail, timeline and constraints from the
+      grouped sources. Series projects also inherit prior-book canon.
     on_success: preparation
     on_failure: reference_extraction
+
+  # --- Prepare --------------------------------------------------------------
   preparation:
     agent: book-04-preparation
-    description: Build project bible, plot bible, character bible, style guide, AI-isms policy, and chapter plan.
+    description: >
+      Build the project brief, world/plot/character bibles, style guide, chapter
+      plan and validation rubric. Every chapter in the plan declares its beats,
+      POV, the thread it advances and the question it must close on.
     on_success: preflight_review
     on_failure: preparation
+
   preflight_review:
     agent: book-05-preflight-review
-    description: Stop for user review of preparation docs before drafting begins.
+    description: Author reviews the preparation package before any prose is written.
     requires_user_review: true
     transitions:
-      approved: chapter_mode_select
+      approved: mode_select
       corrections_requested: corrections
       cancelled: cancelled
     on_failure: preflight_review
+
   corrections:
     agent: book-06-corrections
-    description: Apply user-requested changes to preparation docs, then return to preflight review.
+    description: Apply requested changes to the preparation documents.
     on_success: preflight_review
     on_failure: corrections
-  chapter_mode_select:
+
+  mode_select:
     agent: book-01-intake
-    description: Confirm chapter-by-chapter default or optional book-by-book generation before writing starts.
+    description: >
+      Confirm the drafting mode before writing starts. This is the last
+      interactive decision until a gate is reached; both branches enter the same
+      drafting loop and differ only in where the author approves.
     requires_user_input: true
     transitions:
       chapter_by_chapter: chapter_drafting
-      book_by_book: chapter_drafting
-    on_failure: chapter_mode_select
+      whole_book: chapter_drafting
+    on_failure: mode_select
+
+  # --- Write ----------------------------------------------------------------
   chapter_drafting:
     agent: book-07-chapter-drafting
-    description: Draft the next chapter from approved preparation and continuity state. No user questions here.
+    description: >
+      Draft the next chapter. The prompt carries the opening contract from the
+      previous chapter's handoff plus retrieved exemplar passages of the
+      author's own prose matched to each beat. No questions are asked here.
     on_success: chapter_editing
     on_failure: chapter_drafting
+
   chapter_editing:
     agent: book-08-chapter-editing
-    description: Rewrite the draft phrase by phrase for voice, clarity, pacing, specificity, and anti-AI-ism cleanup.
+    description: >
+      Revise against the measured style report. Fixes are driven by named
+      deviations from the author's fingerprint, never by a generic polish pass.
     on_success: chapter_validation
     on_failure: chapter_editing
+
   chapter_validation:
     agent: book-09-chapter-validation
-    description: Read-only final check against constraints, canon, plot, style, POV, intimacy, and quality gates.
+    description: >
+      Read-only gate. Runs style fidelity, chapter flow, canon consistency and
+      boundary compliance. Routes on the mode chosen at mode_select.
     transitions:
       pass_chapter_by_chapter: user_chapter_review
-      pass_full_book: continuity_update
+      pass_whole_book: continuity_update
       fail: chapter_editing
       critical_fail: chapter_drafting
     on_failure: chapter_validation
+
   user_chapter_review:
     agent: book-10-user-review
-    description: Present validated chapter to user and gather approval or feedback.
+    description: >
+      CHAPTER-BY-CHAPTER MODE ONLY. Present the validated chapter with its style
+      and flow scores and wait for approval. Never reached in whole-book mode.
     requires_user_review: true
     transitions:
       approved: final_post
       feedback: chapter_drafting
       cancelled: cancelled
     on_failure: user_chapter_review
+
   final_post:
     agent: book-11-final-post
-    description: Write approved chapter to target Drive folder and local manifest without overwriting by default.
+    description: Write the approved chapter to the target Drive folder. Never overwrites by default.
     transitions:
       success: continuity_update
       write_failed: final_post_repair
     on_failure: final_post_repair
+
   final_post_repair:
     agent: book-11-final-post
-    description: Diagnose and repair safe target posting failures.
+    description: Diagnose and repair a failed target write.
     on_success: continuity_update
     on_failure: user_chapter_review
+
   continuity_update:
     agent: book-12-continuity-update
-    description: Promote approved or internally validated chapter into canon, timeline, unresolved threads, and next-chapter context.
+    description: >
+      Record this chapter's handoff -- ending location, per-character state,
+      knowledge gained, timeline position, threads touched and the question it
+      closes on. This contract is what the next chapter is validated against.
     transitions:
       next_chapter: chapter_drafting
       book_complete: book_finalization
     on_failure: continuity_update
+
+  # --- Finish ---------------------------------------------------------------
   book_finalization:
     agent: book-13-book-finalization
-    description: Compile manuscript, consistency report, unresolved threads report, and final user review package.
+    description: >
+      Compile the manuscript and the whole-book reports: continuity, style
+      fidelity across chapters, unresolved threads and unpaid setups.
     on_success: book_final_review
     on_failure: book_finalization
+
   book_final_review:
     agent: book-10-user-review
-    description: Final user review of complete book package.
+    description: >
+      Final review of the complete book. In whole-book mode this is the FIRST
+      and only approval gate; in chapter-by-chapter mode every chapter was
+      already approved and this confirms the assembled whole.
     requires_user_review: true
     transitions:
       approved: docx_generation
       feedback: book_finalization
       cancelled: cancelled
+    on_failure: book_final_review
+
   docx_generation:
     agent: book-14-docx-generation
-    description: Generate final DOCX from approved manuscript markdown.
+    description: Generate the final DOCX from the approved manuscript.
     on_success: final_package_post
     on_failure: docx_generation
+
   final_package_post:
     agent: book-15-final-package-post
-    description: Push final DOCX and final reports to target Drive folder.
+    description: Upload the DOCX and final reports to the target Drive folder.
     transitions:
       success: project_archive
       write_failed: final_package_post_repair
     on_failure: final_package_post_repair
+
   final_package_post_repair:
     agent: book-15-final-package-post
-    description: Diagnose and repair safe final package posting failures.
+    description: Diagnose and repair a failed final package write.
     on_success: project_archive
     on_failure: book_final_review
+
   project_archive:
     agent: book-16-project-archive
-    description: Archive completed project artifacts and reset local state for a fresh new book.
+    description: Archive the completed project and reset local state for the next book.
     on_success: complete
     on_failure: project_archive
+
   complete:
     agent: book-orchestrator
     description: Terminal success state.
+
   cancelled:
     agent: book-orchestrator
     description: Terminal cancelled state.

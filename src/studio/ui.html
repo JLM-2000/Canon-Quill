@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Canon Quill Studio</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --surface: #151a22;
+    --surface-2: #1c222c;
+    --border: #2a323f;
+    --text: #e6eaf0;
+    --muted: #97a3b6;
+    --faint: #6b7688;
+    --accent: #7aa2f7;
+    --accent-dim: #2a3a5c;
+    --good: #7bd88f;
+    --warn: #e5c07b;
+    --bad: #f07178;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #dde1e8;
+      --text: #16191f; --muted: #5c6675; --faint: #8b95a5; --accent: #3355cc;
+      --accent-dim: #dce4fb; --good: #1a7f3c; --warn: #8a6416; --bad: #c0392b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 14px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+
+  /* --- sidebar --- */
+  aside {
+    background: var(--surface); border-right: 1px solid var(--border);
+    padding: 18px 12px; display: flex; flex-direction: column; gap: 4px;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 14px; }
+  .brand b { font-size: 15px; letter-spacing: -0.01em; }
+  .brand span { color: var(--faint); font-size: 11px; display: block; font-weight: 400; }
+  .quill { width: 22px; height: 22px; flex: none; color: var(--accent); }
+  .navitem {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border-radius: 8px; cursor: pointer; color: var(--muted); border: none;
+    background: none; width: 100%; text-align: left; font: inherit;
+  }
+  .navitem:hover { background: var(--surface-2); color: var(--text); }
+  .navitem.active { background: var(--accent-dim); color: var(--text); font-weight: 600; }
+  .navitem .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
+  .navitem.done .dot { background: var(--good); }
+  .navitem.current .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .navitem .badge {
+    margin-left: auto; background: var(--bad); color: #fff; font-size: 10px;
+    font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  }
+  .navgroup { color: var(--faint); font-size: 10px; text-transform: uppercase;
+    letter-spacing: .08em; padding: 14px 10px 5px; font-weight: 700; }
+
+  /* --- main --- */
+  main { padding: 26px 32px 80px; max-width: 1080px; }
+  h1 { font-size: 21px; margin: 0 0 3px; letter-spacing: -0.02em; }
+  h2 { font-size: 15px; margin: 26px 0 10px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 22px; max-width: 68ch; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  button, .btn {
+    background: var(--accent); color: #fff; border: none; padding: 8px 14px;
+    border-radius: 7px; cursor: pointer; font: inherit; font-weight: 600;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+  button.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  button.sm { padding: 4px 9px; font-size: 12px; }
+  input, textarea, select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 10px; border-radius: 7px; font: inherit; width: 100%;
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 12.5px; }
+  .hint { color: var(--faint); font-size: 12px; margin-top: 4px; }
+
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: var(--surface-2); color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .pill.good { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+  .pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .pill.bad  { background: color-mix(in srgb, var(--bad) 18%, transparent);  color: var(--bad); }
+
+  /* choice cards */
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+  .choice {
+    border: 1.5px solid var(--border); background: var(--surface); border-radius: var(--radius);
+    padding: 14px; cursor: pointer; transition: border-color .12s, background .12s;
+  }
+  .choice:hover { border-color: var(--accent); }
+  .choice.on { border-color: var(--accent); background: var(--accent-dim); }
+  .choice b { display: block; margin-bottom: 3px; }
+  .choice p { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+  /* drive browser */
+  .crumbs { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 10px; }
+  .crumbs button { background: none; color: var(--accent); padding: 2px 4px; font-weight: 500; }
+  .fs { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .fs .item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .fs .item:last-child { border-bottom: none; }
+  .fs .item:hover { background: var(--surface-2); }
+  .fs .item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ico { width: 16px; height: 16px; flex: none; color: var(--faint); }
+  .ico.folder { color: var(--accent); }
+
+  /* grouping board */
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+  .col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+  .col h3 { font-size: 12.5px; margin: 0 0 9px; display: flex; justify-content: space-between; align-items: center; }
+  .col h3 span { color: var(--faint); font-weight: 500; }
+  .src { background: var(--surface-2); border-radius: 7px; padding: 8px 10px; margin-bottom: 6px; font-size: 12.5px; }
+  .src .n { font-weight: 600; word-break: break-word; }
+  .src .why { color: var(--faint); font-size: 11px; margin-top: 2px; }
+  .src select { margin-top: 6px; padding: 3px 6px; font-size: 11.5px; }
+
+  /* questions */
+  .q { border-left: 3px solid var(--accent); }
+  .q.answered { border-left-color: var(--good); opacity: .72; }
+  .q .meta { color: var(--faint); font-size: 11.5px; margin-bottom: 6px; }
+  .q .text { font-weight: 600; margin-bottom: 4px; font-size: 14.5px; }
+  .q .why { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  .opts { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .opt { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 11px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 500; }
+  .opt:hover, .opt.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .answer-box { background: var(--surface-2); border-radius: 7px; padding: 8px 11px; font-size: 13px; }
+  .answer-box b { color: var(--good); }
+
+  /* chapters */
+  .chap { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center;
+    padding: 11px 14px; border-bottom: 1px solid var(--border); }
+  .chap:last-child { border-bottom: none; }
+  .chap .num { font-family: var(--mono); color: var(--faint); font-size: 12px; text-align: right; }
+  .chap .t { font-weight: 600; }
+  .chap .s { color: var(--muted); font-size: 12.5px; }
+  .meter { height: 4px; background: var(--surface-2); border-radius: 999px; overflow: hidden; width: 72px; }
+  .meter i { display: block; height: 100%; background: var(--good); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--faint); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+
+  .empty { color: var(--faint); text-align: center; padding: 34px 16px; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 50;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35); max-width: 90vw;
+  }
+  .toast.err { border-color: var(--bad); color: var(--bad); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; }
+    aside { position: static; height: auto; flex-direction: row; overflow-x: auto; }
+    main { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <svg class="quill" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 4C11 5 7 10 6 16l-2 4"/><path d="M13 5c3 3 4 7 3 11-3 1-7 0-10-3"/>
+      </svg>
+      <div><b>Canon Quill</b><span id="proj">Studio</span></div>
+    </div>
+    <nav id="nav"></nav>
+    <div style="margin-top:auto;padding:10px 8px 0">
+      <button class="ghost sm" style="width:100%" onclick="reload()">Refresh</button>
+    </div>
+  </aside>
+  <main id="view"></main>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Canon Quill Studio front end.
+// Plain ES modules-free JS: no build step, so `npm run studio` just works.
+// ---------------------------------------------------------------------------
+let S = null;              // studio state from the server
+let route = "connect";
+let browse = { folderId: "root", crumbs: [{ id: "root", name: "My Drive" }], entries: [], loading: false };
+let picked = new Map();    // driveId -> name, chosen reference roots
+let target = "";
+
+const KINDS = {
+  past_book: "Past series book", reference_book: "Reference book (other author)",
+  characters: "Characters", timeline: "Timeline", world: "Worldbuilding",
+  plot: "Plot & outline", notes: "Notes"
+};
+
+const PHASES = [
+  { id: "connect",     label: "Connect Drive", group: "Set up" },
+  { id: "sources",     label: "Select sources", group: "Set up" },
+  { id: "analyze",     label: "Analyse & group", group: "Set up" },
+  { id: "intake",      label: "Project shape",  group: "Prepare" },
+  { id: "style",       label: "Style corpus",   group: "Prepare" },
+  { id: "questions",   label: "Questions",      group: "Prepare" },
+  { id: "chapters",    label: "Chapters",       group: "Write" }
+];
+
+// --- api -------------------------------------------------------------------
+async function api(path, options) {
+  const res = await fetch(path, {
+    headers: { "content-type": "application/json" },
+    ...options,
+    body: options?.body ? JSON.stringify(options.body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+function toast(msg, isError) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " err" : "");
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), isError ? 6000 : 3000);
+}
+
+async function reload() {
+  try { S = await api("/api/state"); render(); }
+  catch (e) { toast(e.message, true); }
+}
+
+// --- helpers ---------------------------------------------------------------
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function fidelityClass(v) { return v >= 80 ? "good" : v >= 60 ? "warn" : "bad"; }
+
+// --- nav -------------------------------------------------------------------
+function renderNav() {
+  const nav = document.getElementById("nav");
+  const blocking = (S?.questions || []).filter((q) => q.blocking && q.answer === undefined).length;
+  let html = "";
+  let group = "";
+  for (const p of PHASES) {
+    if (p.group !== group) { group = p.group; html += `<div class="navgroup">${group}</div>`; }
+    const done = isDone(p.id);
+    const cur = S?.phase === p.id;
+    html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""}"
+      onclick="go('${p.id}')"><span class="dot"></span>${p.label}${
+      p.id === "questions" && blocking ? `<span class="badge">${blocking}</span>` : ""}</button>`;
+  }
+  nav.innerHTML = html;
+  document.getElementById("proj").textContent = S?.projectName || "Studio";
+}
+
+function isDone(id) {
+  if (!S) return false;
+  switch (id) {
+    case "connect":   return S.drive.connected;
+    case "sources":   return S.drive.referenceRoots.length > 0;
+    case "analyze":   return S.sources.length > 0 && S.sources.every((s) => s.confirmedByUser || s.confidence >= 0.6);
+    case "intake":    return !!S.shape && !!S.draftingMode;
+    case "style":     return S.styleCorpus.built;
+    case "questions": return !(S.questions || []).some((q) => q.blocking && q.answer === undefined);
+    case "chapters":  return S.chapters.length > 0 && S.chapters.every((c) => c.status === "approved");
+  }
+  return false;
+}
+
+function go(r) { route = r; render(); if (r === "sources") loadBrowse(browse.folderId); }
+
+// --- views -----------------------------------------------------------------
+function render() {
+  if (!S) return;
+  renderNav();
+  const v = document.getElementById("view");
+  v.innerHTML = ({
+    connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
+    intake: viewIntake, style: viewStyle, questions: viewQuestions, chapters: viewChapters
+  }[route] || viewConnect)();
+}
+
+function viewConnect() {
+  const c = S.drive.connected;
+  return `
+  <h1>Connect Google Drive</h1>
+  <p class="sub">Canon Quill reads your reference material straight from Drive and writes approved
+  chapters back to a folder you choose. Access is limited to the
+  <code>drive.file</code> scope — only files you explicitly pick.</p>
+  <div class="card spread">
+    <div>
+      <div class="row"><b>Status</b>
+        <span class="pill ${c ? "good" : "bad"}">${c ? "Connected" : "Not connected"}</span></div>
+      <div class="hint">${c ? "Drive responded to a live request." : "Set GOOGLE_OAUTH_CLIENT_JSON in .env, then check again."}</div>
+    </div>
+    <button onclick="checkDrive(this)">Check connection</button>
+  </div>
+  ${c ? `<div class="card"><b>Next</b><p class="sub" style="margin:6px 0 12px">
+    Pick the folders holding your past books, character notes, timelines and references.</p>
+    <button onclick="go('sources')">Select sources →</button></div>` : ""}`;
+}
+
+async function checkDrive(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking';
+  try {
+    const r = await api("/api/drive/status");
+    toast(r.connected ? "Drive connected." : `Not connected: ${r.reason || "unknown"}`, !r.connected);
+    await reload();
+  } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = "Check connection"; }
+}
+
+function viewSources() {
+  const rows = browse.entries.map((e) => `
+    <div class="item" onclick="${e.isFolder ? `openFolder('${e.id}','${esc(e.name).replace(/'/g, "\\'")}')` : ""}">
+      <svg class="ico ${e.isFolder ? "folder" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        ${e.isFolder ? '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>'
+                     : '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>'}
+      </svg>
+      <span class="name">${esc(e.name)}</span>
+      ${e.isFolder ? `<button class="sm ghost" onclick="event.stopPropagation();pick('${e.id}','${esc(e.name).replace(/'/g, "\\'")}')">
+        ${picked.has(e.id) ? "Selected" : "Use as reference"}</button>` : '<span class="pill">file</span>'}
+    </div>`).join("");
+
+  const chosen = [...picked.entries()].map(([id, name]) =>
+    `<span class="pill" style="background:var(--accent-dim);color:var(--text)">${esc(name)}
+      <button class="sm" style="background:none;color:var(--muted);padding:0 0 0 5px"
+        onclick="unpick('${id}')">✕</button></span>`).join(" ");
+
+  return `
+  <h1>Select sources</h1>
+  <p class="sub">Browse your Drive and mark the folders Canon Quill should read. Include your past
+  books in the series — they become the style corpus the drafting model actually writes against.</p>
+
+  <div class="card">
+    <div class="crumbs">${browse.crumbs.map((c, i) =>
+      `<button onclick="jump(${i})">${esc(c.name)}</button>${i < browse.crumbs.length - 1 ? "<span style='color:var(--faint)'>/</span>" : ""}`).join("")}</div>
+    <div class="fs">${browse.loading ? '<div class="empty"><span class="spin"></span> Loading…</div>'
+      : rows || '<div class="empty">Empty folder</div>'}</div>
+  </div>
+
+  <div class="card">
+    <label>Selected reference folders</label>
+    <div class="row">${chosen || '<span class="hint">None selected yet.</span>'}</div>
+    <div style="margin-top:14px"><label>Target folder for finished chapters (Drive URL or ID)</label>
+      <input id="tgt" value="${esc(target)}" placeholder="https://drive.google.com/drive/folders/…" /></div>
+    <div class="row" style="margin-top:14px">
+      <button ${picked.size ? "" : "disabled"} onclick="saveRoots(this)">Save selection</button>
+      <button class="ghost" ${S.drive.referenceRoots.length ? "" : "disabled"} onclick="indexSources(this)">
+        Analyse ${S.drive.referenceRoots.length || ""} folder(s)</button>
+    </div>
+    <div class="hint">Analysing walks each folder, reads every document, and groups them automatically.</div>
+  </div>`;
+}
+
+async function loadBrowse(folderId) {
+  browse.loading = true; render();
+  try {
+    const r = await api(`/api/drive/browse?folderId=${encodeURIComponent(folderId)}`);
+    browse.entries = r.entries; browse.folderId = folderId;
+  } catch (e) { toast(e.message, true); browse.entries = []; }
+  browse.loading = false; render();
+}
+function openFolder(id, name) { browse.crumbs.push({ id, name }); loadBrowse(id); }
+function jump(i) { browse.crumbs = browse.crumbs.slice(0, i + 1); loadBrowse(browse.crumbs[i].id); }
+function pick(id, name) { picked.set(id, name); render(); }
+function unpick(id) { picked.delete(id); render(); }
+
+async function saveRoots(btn) {
+  btn.disabled = true;
+  target = document.getElementById("tgt")?.value || "";
+  try {
+    S = await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target } });
+    toast("Selection saved."); render();
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
+async function indexSources(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Reading Drive…';
+  try {
+    S = await api("/api/sources/index", { method: "POST" });
+    toast(`Indexed ${S.sources.length} documents.`); go("analyze");
+  } catch (e) { toast(e.message, true); render(); }
+}
+
+function viewAnalyze() {
+  if (!S.sources.length) return `<h1>Analyse &amp; group</h1>
+    <p class="sub">Nothing indexed yet.</p><button onclick="go('sources')">← Select sources</button>`;
+
+  const needsReview = S.sources.filter((s) => !s.confirmedByUser && s.confidence < 0.6);
+  const cols = Object.entries(KINDS).map(([kind, label]) => {
+    const items = S.sources.filter((s) => s.kind === kind);
+    return `<div class="col"><h3>${label}<span>${items.length}</span></h3>
+      ${items.map((s) => `<div class="src">
+        <div class="n">${esc(s.name)}</div>
+        <div class="why">${esc(s.reasons[0] || "")}${s.wordCount ? ` · ${s.wordCount.toLocaleString()} words` : ""}</div>
+        <div class="row" style="margin-top:5px">
+          <span class="pill ${s.confirmedByUser ? "good" : s.confidence >= 0.6 ? "" : "warn"}">
+            ${s.confirmedByUser ? "confirmed" : Math.round(s.confidence * 100) + "% sure"}</span>
+        </div>
+        <select onchange="regroup('${s.driveId}', this.value)">
+          ${Object.entries(KINDS).map(([k, l]) =>
+            `<option value="${k}" ${k === s.kind ? "selected" : ""}>${l}</option>`).join("")}
+        </select></div>`).join("") || '<div class="hint">Empty</div>'}
+    </div>`;
+  }).join("");
+
+  return `
+  <h1>Analyse &amp; group</h1>
+  <p class="sub">Every document was read and classified. Correct anything that landed in the wrong
+  column — this matters: only <b>Past series book</b> feeds the style corpus and canon, so a
+  reference book filed wrongly would push the writing toward another author's voice.</p>
+  ${needsReview.length ? `<div class="card" style="border-color:var(--warn)">
+    <b>${needsReview.length} document(s) need your confirmation</b>
+    <p class="hint">Low-confidence guesses: ${needsReview.map((s) => esc(s.name)).join(", ")}</p>
+    <button class="ghost sm" style="margin-top:8px" onclick="confirmAll(this)">Accept all as classified</button>
+  </div>` : ""}
+  <div class="board">${cols}</div>
+  <div class="row" style="margin-top:16px"><button onclick="go('intake')">Next: project shape →</button></div>`;
+}
+
+async function regroup(driveId, kind) {
+  try { S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kind } }); render(); }
+  catch (e) { toast(e.message, true); }
+}
+async function confirmAll(btn) {
+  btn.disabled = true;
+  try { S = await api("/api/sources/confirm-all", { method: "POST" }); render(); }
+  catch (e) { toast(e.message, true); }
+}
+
+function viewIntake() {
+  const shape = S.shape, mode = S.draftingMode;
+  return `
+  <h1>Project shape</h1>
+  <p class="sub">Two decisions drive everything downstream. Both can be changed later.</p>
+
+  <h2>Is this a standalone or part of a series?</h2>
+  <div class="choices">
+    <div class="choice ${shape === "standalone" ? "on" : ""}" onclick="setProject({shape:'standalone'})">
+      <b>Standalone</b><p>Self-contained. Canon starts empty and is built from this book alone.</p></div>
+    <div class="choice ${shape === "series" ? "on" : ""}" onclick="setProject({shape:'series'})">
+      <b>Series</b><p>Inherits canon from your past books. Prior events, character knowledge and
+      unresolved threads carry forward and are enforced.</p></div>
+  </div>
+
+  <h2>How should Canon Quill write it?</h2>
+  <div class="choices">
+    <div class="choice ${mode === "chapter_by_chapter" ? "on" : ""}" onclick="setProject({draftingMode:'chapter_by_chapter'})">
+      <b>Chapter by chapter</b>
+      <p>Drafts one chapter, edits and validates it, then <b>stops for your approval</b> before
+      continuing. Your notes shape every following chapter. Slower, far more control.</p></div>
+    <div class="choice ${mode === "whole_book" ? "on" : ""}" onclick="setProject({draftingMode:'whole_book'})">
+      <b>Whole book</b>
+      <p>Drafts, edits and validates <b>every chapter without stopping</b>, then hands you the
+      complete manuscript once. Continuity is still enforced between chapters. Fastest path to a
+      full draft; you review at the end.</p></div>
+  </div>
+
+  <h2>Details</h2>
+  <div class="card">
+    <div style="margin-bottom:12px"><label>Book title</label>
+      <input id="pname" value="${esc(S.projectName)}" onchange="setProject({projectName:this.value})" /></div>
+    ${[["audience", "Target audience", ["adult", "new adult", "young adult", "middle grade"]],
+       ["spice", "Intimacy level", ["none", "romantic", "fade to black", "open door", "explicit"]],
+       ["pov", "POV and tense", ["close third, past", "first person, past", "first person, present", "omniscient"]]]
+      .map(([k, label, opts]) => `<div style="margin-bottom:12px"><label>${label}</label>
+        <select onchange="setProject({intake:{${k}:this.value}})">
+          <option value="">—</option>
+          ${opts.map((o) => `<option ${S.intake[k] === o ? "selected" : ""}>${o}</option>`).join("")}
+        </select></div>`).join("")}
+  </div>
+  ${shape && mode ? `<button onclick="go('style')">Next: build style corpus →</button>` : ""}`;
+}
+
+async function setProject(patch) {
+  try { S = await api("/api/project", { method: "PATCH", body: patch }); render(); }
+  catch (e) { toast(e.message, true); }
+}
+
+function viewStyle() {
+  const sc = S.styleCorpus;
+  const books = S.sources.filter((s) => s.kind === "past_book");
+  return `
+  <h1>Style corpus</h1>
+  <p class="sub">This is what stops the writing sounding generic. Canon Quill cuts your past books
+  into passages, tags each by the kind of beat it carries, and measures your prose. When a chapter
+  is drafted, real passages of yours for that same beat go into the prompt — and the result is
+  scored against your measured fingerprint, not against a generic idea of good writing.</p>
+
+  <div class="card spread">
+    <div><b>${books.length} past book(s) available</b>
+      <div class="hint">${books.map((b) => esc(b.name)).join(", ") || "None grouped as past series books yet."}</div></div>
+    <button ${books.length ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild" : "Build corpus"}</button>
+  </div>
+
+  ${sc.built ? `<div class="card">
+    <div class="row" style="margin-bottom:10px"><b>Corpus built</b>
+      <span class="pill good">${sc.passageCount} passages</span>
+      <span class="pill">${sc.wordCount.toLocaleString()} words</span></div>
+    ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words — the fingerprint will be noisy. Add more of your prose.</div>' : ""}
+    <div id="fp"><span class="spin"></span></div></div>` : ""}`;
+}
+
+async function buildStyle(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Building…';
+  try { S = await api("/api/style/build", { method: "POST" }); toast("Style corpus built."); render(); loadFingerprint(); }
+  catch (e) { toast(e.message, true); render(); }
+}
+
+async function loadFingerprint() {
+  const el = document.getElementById("fp"); if (!el) return;
+  try {
+    const { fingerprint: f } = await api("/api/style/fingerprint");
+    const pct = (v) => Math.round(v * 100) + "%";
+    el.innerHTML = `<table><tr><th>Measure</th><th class="num">Your target</th></tr>
+      ${[["Mean sentence length", f.sentence.meanWords + " words"],
+         ["Sentence length variation", f.sentence.stdevWords],
+         ["Fragment rate", pct(f.sentence.fragmentRate)],
+         ["Mean paragraph length", f.paragraph.meanWords + " words"],
+         ["Dialogue share", pct(f.dialogue.wordShare)],
+         ["Mean dialogue line", f.dialogue.meanLineWords + " words"],
+         ["Plain dialogue tags", pct(f.dialogue.invisibleTagShare)],
+         ["-ly adverbs / 1k", f.texture.lyAdverbsPer1k],
+         ["Filter verbs / 1k", f.texture.filterVerbsPer1k],
+         ["Abstract nouns / 1k", f.texture.abstractNounsPer1k],
+         ["Similes / 1k", f.texture.similesPer1k],
+         ["Vocabulary variety", f.texture.typeTokenRatio]]
+        .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
+  } catch { el.innerHTML = '<div class="hint">Fingerprint unavailable.</div>'; }
+}
+
+function viewQuestions() {
+  const qs = S.questions || [];
+  const open = qs.filter((q) => q.answer === undefined);
+  const done = qs.filter((q) => q.answer !== undefined);
+  const card = (q) => `<div class="card q ${q.answer !== undefined ? "answered" : ""}">
+    <div class="meta">${esc(q.askedBy)} · ${esc(q.phase)}${q.blocking ? ' · <span style="color:var(--bad)">blocking</span>' : ""}</div>
+    <div class="text">${esc(q.question)}</div>
+    ${q.rationale ? `<div class="why">${esc(q.rationale)}</div>` : ""}
+    ${q.answer !== undefined
+      ? `<div class="answer-box"><b>Answered:</b> ${esc(q.answer)}</div>`
+      : `${q.options?.length ? `<div class="opts">${q.options.map((o) =>
+            `<button class="opt" onclick="answer('${q.id}', ${JSON.stringify(o).replace(/"/g, "&quot;")})">${esc(o)}</button>`).join("")}</div>` : ""}
+         ${q.allowFreeText ? `<div class="row">
+            <input id="a-${q.id}" placeholder="Type your answer…"
+              onkeydown="if(event.key==='Enter')answer('${q.id}', this.value)" />
+            <button onclick="answer('${q.id}', document.getElementById('a-${q.id}').value)">Answer</button></div>` : ""}`}
+  </div>`;
+
+  return `
+  <h1>Questions</h1>
+  <p class="sub">When an agent hits a decision only you can make, it asks here instead of guessing
+  and burying the assumption in a document. Blocking questions hold the pipeline.</p>
+  ${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}`
+    : '<div class="card empty">Nothing waiting. Agents will post questions here as they work.</div>'}
+  ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}`;
+}
+
+async function answer(id, text) {
+  if (!text || !String(text).trim()) return;
+  try { S = await api(`/api/questions/${id}/answer`, { method: "POST", body: { answer: String(text) } });
+    toast("Answer recorded."); render(); }
+  catch (e) { toast(e.message, true); }
+}
+
+function viewChapters() {
+  const cs = S.chapters || [];
+  const mode = S.draftingMode;
+  if (!cs.length) return `<h1>Chapters</h1>
+    <p class="sub">No chapter plan yet. The preparation phase writes one; it will appear here.</p>
+    <div class="card empty">No chapters planned.</div>`;
+
+  const approved = cs.filter((c) => c.status === "approved").length;
+  return `
+  <h1>Chapters</h1>
+  <p class="sub">${mode === "chapter_by_chapter"
+      ? "<b>Chapter-by-chapter mode.</b> Each chapter stops here for your approval before the next one starts."
+      : mode === "whole_book"
+        ? "<b>Whole-book mode.</b> All chapters are drafted and validated in one pass; you review the finished manuscript."
+        : "Pick a drafting mode under Project shape."}</p>
+
+  <div class="card spread">
+    <div><b>${approved} of ${cs.length} approved</b>
+      <div class="meter" style="width:180px;margin-top:6px"><i style="width:${cs.length ? (approved / cs.length) * 100 : 0}%"></i></div></div>
+    <span class="pill">${cs.reduce((n, c) => n + (c.wordCount || 0), 0).toLocaleString()} words</span>
+  </div>
+
+  <div class="card" style="padding:0">
+    ${cs.map((c) => `<div class="chap">
+      <div class="num">${c.number}</div>
+      <div><div class="t">${esc(c.title)}</div>
+        <div class="s">${esc(c.synopsis || "")}</div>
+        ${c.issues?.length ? `<div class="s" style="color:var(--warn);margin-top:3px">${esc(c.issues[0])}${
+          c.issues.length > 1 ? ` (+${c.issues.length - 1} more)` : ""}</div>` : ""}</div>
+      <div class="row">
+        ${c.styleFidelity !== undefined
+          ? `<span class="pill ${fidelityClass(c.styleFidelity)}">style ${c.styleFidelity}</span>` : ""}
+        ${c.flowVerdict ? `<span class="pill ${c.flowVerdict === "pass" ? "good" : c.flowVerdict === "revise" ? "warn" : "bad"}">flow ${esc(c.flowVerdict)}</span>` : ""}
+        <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
+        ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
+
+async function setStatus(number, status) {
+  try { S = await api(`/api/chapters/${number}/status`, { method: "POST", body: { status } }); render(); }
+  catch (e) { toast(e.message, true); }
+}
+
+// --- boot ------------------------------------------------------------------
+(async function () {
+  await reload();
+  if (S) { route = S.phase === "complete" ? "chapters" : (PHASES.find((p) => p.id === S.phase)?.id || "connect"); render(); }
+  if (route === "sources") loadBrowse("root");
+  if (route === "style" && S?.styleCorpus.built) loadFingerprint();
+})();
+</script>
+</body>
+</html>
