@@ -352,7 +352,7 @@ function isDone(id) {
 
 function go(r) {
   route = r; render();
-  if (r === "sources") loadBrowse(browse.folderId);
+  if (r === "sources") loadBrowse(browse.folderId);   // always re-fetch: the grant may have changed
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
 }
@@ -627,7 +627,12 @@ async function connectDrive(btn) {
     for (let i = 0; i < 90; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       const status = await api("/api/drive/status");
-      if (status.connected) { DRIVE = status; toast("Drive connected."); await reload(); render(); return; }
+      if (status.connected) {
+        DRIVE = status;
+        // The previous listing was fetched under the old grant; drop it.
+        browse.entries = []; browse.folderId = "root"; browse.crumbs = [{ id: "root", name: "My Drive" }];
+        toast("Drive connected."); await reload(); render(); return;
+      }
     }
     toast("Still waiting for authorisation. Press Check again once you have approved.", true);
   } catch (e) { toast(e.message, true); }
@@ -663,8 +668,11 @@ function viewSources() {
   books in the series. They become the style corpus the drafting model writes against.</p>
 
   <div class="card">
-    <div class="crumbs">${browse.crumbs.map((c, i) =>
-      `<button onclick="jump(${i})">${esc(c.name)}</button>${i < browse.crumbs.length - 1 ? "<span style='color:var(--faint)'>/</span>" : ""}`).join("")}</div>
+    <div class="spread" style="margin-bottom:10px">
+      <div class="crumbs" style="margin:0">${browse.crumbs.map((c, i) =>
+        `<button onclick="jump(${i})">${esc(c.name)}</button>${i < browse.crumbs.length - 1 ? "<span style='color:var(--faint)'>/</span>" : ""}`).join("")}</div>
+      <button class="ghost sm" onclick="loadBrowse(browse.folderId)">Refresh</button>
+    </div>
     <div class="fs">${browse.loading ? '<div class="empty"><span class="spin"></span> Loading…</div>'
       : rows || (browse.emptyBecauseScope
         ? `<div class="empty" style="text-align:left;padding:16px">
@@ -674,7 +682,14 @@ function viewSources() {
             showing your Drive.</p>
             <p style="margin:6px 0 0">Reconnect from <b>Connect Drive</b> to grant read access, or paste
             folder links below.</p></div>`
-        : '<div class="empty">This folder is empty</div>')}</div>
+        : (browse.folderId === "root"
+          ? `<div class="empty" style="text-align:left;padding:16px">
+              <b style="color:var(--text)">Nothing listed here</b>
+              <p style="margin:6px 0 0">If you just reconnected Google Drive, press <b>Refresh</b> above:
+              this list is fetched once when you open the screen.</p>
+              <p style="margin:6px 0 0">If it stays empty, check <b>Connect Drive</b> to confirm the grant
+              includes read access.</p></div>`
+          : '<div class="empty">This folder is empty</div>'))}</div>
   </div>
 
   <div class="card">
