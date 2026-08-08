@@ -190,6 +190,25 @@ describe("studio api", () => {
     expect(result.body.manuscriptReviewed).toBe(true);
   });
 
+  it("persists source and target selections with their labels", async () => {
+    const result = await call("/api/drive/roots", {
+      method: "POST",
+      body: {
+        roots: ["reference-folder"],
+        referenceNames: { "reference-folder": "Past books" },
+        targetFolderId: "target-folder",
+        targetFolderName: "Finished chapters"
+      }
+    });
+    expect(result.body.drive.referenceRoots).toEqual(["reference-folder"]);
+    expect(result.body.drive.referenceRootNames["reference-folder"]).toBe("Past books");
+    expect(result.body.drive.targetFolderName).toBe("Finished chapters");
+
+    const state = await call("/api/state");
+    expect(state.body.state.drive.referenceRootNames["reference-folder"]).toBe("Past books");
+    expect(state.body.state.drive.targetFolderName).toBe("Finished chapters");
+  });
+
   it("persists leaving the corpus screen for questions", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");

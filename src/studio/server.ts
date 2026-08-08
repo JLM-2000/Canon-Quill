@@ -421,10 +421,19 @@ export function createStudioApp() {
       ? raw.map((value) => extractDriveId(String(value))).filter((id): id is string => Boolean(id))
       : [];
     const target = req.body?.targetFolderId ? extractDriveId(String(req.body.targetFolderId)) : null;
+    const rawNames = req.body?.referenceNames;
+    const referenceNames = rawNames && typeof rawNames === "object" && !Array.isArray(rawNames)
+      ? Object.fromEntries(Object.entries(rawNames).map(([id, name]) => [id, String(name)]))
+      : {};
+    const targetName = typeof req.body?.targetFolderName === "string" ? req.body.targetFolderName.trim() : "";
 
     const state = await updateState(slug, (current) => {
       current.drive.referenceRoots = roots;
-      if (target) current.drive.targetFolderId = target;
+      current.drive.referenceRootNames = Object.fromEntries(
+        roots.map((id) => [id, referenceNames[id] || current.drive.referenceRootNames[id] || id])
+      );
+      current.drive.targetFolderId = target;
+      current.drive.targetFolderName = target ? targetName || current.drive.targetFolderName || target : null;
     });
     res.json(withDerived(state));
   }));

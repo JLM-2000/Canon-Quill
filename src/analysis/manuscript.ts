@@ -131,7 +131,9 @@ const backMatterContentPatterns = [
  * keeps that from matching, since prose runs longer than a heading.
  */
 function findBackMatter(text: string, lines: string[]): BackMatter | null {
-  const threshold = text.length * 0.5;
+  // Closing copy can be short and may be exported without blank lines. Keep a
+  // front-of-book guard, but do not require it to occupy the final half.
+  const threshold = text.length * 0.25;
   let offset = 0;
 
   for (const line of lines) {
@@ -148,14 +150,24 @@ function findBackMatter(text: string, lines: string[]): BackMatter | null {
   }
 
   for (const paragraph of splitParagraphs(text)) {
-    if (paragraph.offset < threshold) continue;
-    const matches = backMatterContentPatterns.filter((pattern) => pattern.test(paragraph.text));
-    const strong = matches.some((pattern) =>
-      /thank you|independent author|honest review|qr|find their audience|newsletter|also by|about the author/i.test(pattern.source)
-    );
-    if (matches.length >= 2 || strong) {
-      const heading = paragraph.text.split(/[.!?\n]/)[0].trim().slice(0, 90);
-      return { offset: paragraph.offset, heading: heading || "Closing material", wordCount: words(text.slice(paragraph.offset)).length };
+    const found = backMatterContentPatterns
+      .map((pattern) => {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(paragraph.text);
+        return match ? { pattern, index: match.index, text: match[0] } : null;
+      })
+      .filter((match): match is { pattern: RegExp; index: number; text: string } => Boolean(match));
+    const first = found.sort((a, b) => a.index - b.index)[0];
+    if (!first) continue;
+    const absolute = paragraph.offset + first.index;
+    const strong = /thank you|independent author|honest review|qr|find their audience|newsletter|also by|about the author/i.test(first.pattern.source);
+    if (absolute >= threshold && (found.length >= 2 || strong)) {
+      // Once the paragraph itself is in the closing quarter, keep its opening
+      // sentence with the closing copy. Splitting at a later signal can leave
+      // "As an" or similar connective tissue looking like unfinished story.
+      const boundary = paragraph.offset >= threshold ? paragraph.offset : absolute;
+      const heading = text.slice(boundary).split(/[.!?\n]/)[0].trim().slice(0, 90);
+      return { offset: boundary, heading: heading || "Closing material", wordCount: words(text.slice(boundary)).length };
     }
   }
   return null;

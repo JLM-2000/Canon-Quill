@@ -151,7 +151,7 @@ export interface ExistingManuscript {
 }
 
 export interface StudioState {
-  version: 4;
+  version: 5;
   slug: string;
   projectName: string;
   phase: PhaseId;
@@ -162,7 +162,9 @@ export interface StudioState {
   drive: {
     connected: boolean;
     referenceRoots: string[];
+    referenceRootNames: Record<string, string>;
     targetFolderId: string | null;
+    targetFolderName: string | null;
     lastIndexedAt: string | null;
   };
   sources: SelectedSource[];
@@ -196,7 +198,7 @@ export interface StudioState {
 export function emptyState(slug: string, projectName = "Untitled Book"): StudioState {
   const now = new Date().toISOString();
   return {
-    version: 4,
+    version: 5,
     slug,
     projectName,
     phase: "engine",
@@ -204,7 +206,14 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     shape: null,
     draftingMode: null,
     intake: {},
-    drive: { connected: false, referenceRoots: [], targetFolderId: null, lastIndexedAt: null },
+    drive: {
+      connected: false,
+      referenceRoots: [],
+      referenceRootNames: {},
+      targetFolderId: null,
+      targetFolderName: null,
+      lastIndexedAt: null
+    },
     sources: [],
     sourcesReviewed: false,
     questions: [],
@@ -232,8 +241,9 @@ export async function loadState(slug: string): Promise<StudioState> {
       ...base,
       ...parsed,
       slug,
-      version: 4 as const,
+      version: 5 as const,
       intake,
+      drive: { ...base.drive, ...(parsed.drive ?? {}) },
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       styleCorpus: { ...base.styleCorpus, ...(parsed.styleCorpus ?? {}) }
     };

@@ -303,6 +303,7 @@ let indexing = false;
 let draftPicker = false;
 let indexError = null;
 let draftAnalysisLoading = false;
+let selectionSave = Promise.resolve();
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
@@ -556,6 +557,15 @@ async function reload() {
     NARRATION_OPTIONS = r.narrationOptions || NARRATION_OPTIONS;
     POV_OPTIONS = r.povOptions || POV_OPTIONS;
     TENSE_OPTIONS = r.tenseOptions || TENSE_OPTIONS;
+    if (S) {
+      picked = new Map((S.drive.referenceRoots || []).map((id) => [id, S.drive.referenceRootNames?.[id] || id]));
+      target = S.drive.targetFolderId
+        ? { id: S.drive.targetFolderId, name: S.drive.targetFolderName || S.drive.targetFolderId }
+        : null;
+    } else {
+      picked.clear();
+      target = null;
+    }
     render();
   } catch (e) { toast(e.message, "error"); }
 }
@@ -1062,10 +1072,22 @@ async function loadBrowse(folderId) {
 }
 function openFolder(id, name) { browse.crumbs.push({ id, name }); loadBrowse(id); }
 function jump(i) { browse.crumbs = browse.crumbs.slice(0, i + 1); loadBrowse(browse.crumbs[i].id); }
-function toggleRef(id, name) { picked.has(id) ? picked.delete(id) : picked.set(id, name); render(); }
-function unpick(id) { picked.delete(id); render(); }
-function pickTarget(id, name) { target = target?.id === id ? null : { id, name }; render(); }
-function clearTarget() { target = null; render(); }
+function saveSourceSelections() {
+  const body = {
+    roots: [...picked.keys()],
+    referenceNames: Object.fromEntries(picked),
+    targetFolderId: target?.id || "",
+    targetFolderName: target?.name || ""
+  };
+  selectionSave = selectionSave.then(async () => {
+    S = await api("/api/drive/roots", { method: "POST", body });
+  }).catch((e) => toast(`Could not save source selections: ${e.message}`, "error"));
+  return selectionSave;
+}
+function toggleRef(id, name) { picked.has(id) ? picked.delete(id) : picked.set(id, name); render(); saveSourceSelections(); }
+function unpick(id) { picked.delete(id); render(); saveSourceSelections(); }
+function pickTarget(id, name) { target = target?.id === id ? null : { id, name }; render(); saveSourceSelections(); }
+function clearTarget() { target = null; render(); saveSourceSelections(); }
 
 /**
  * Analysing replaces the whole grouping, so an existing one is worth a warning:
@@ -1094,7 +1116,7 @@ async function runAnalysis(btn) {
   route = "analyze";
   render();
   try {
-    await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target?.id || "" } });
+    await saveSourceSelections();
     S = await api("/api/sources/index", { method: "POST" });
     indexing = false;
     await loadCheck();
