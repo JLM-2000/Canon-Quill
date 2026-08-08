@@ -11,6 +11,8 @@ import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
+import { detectNarration, narrationOptions } from "../style/narration.js";
+import { analyseWriting, type WritingProfile } from "../style/profile.js";
 import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
 import { scoreAgainstFingerprint } from "../style/score.js";
 import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
@@ -185,7 +187,7 @@ export function createStudioApp() {
   app.get("/api/state", route(async (_req, res) => {
     const slug = await activeSlug();
     if (!slug) {
-      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts, kindPurpose: sourceKindPurpose });
+      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts, kindPurpose: sourceKindPurpose, narrationOptions });
       return;
     }
     res.json({
@@ -194,7 +196,8 @@ export function createStudioApp() {
       // Sent with the state so the client never keeps its own copy to drift.
       kinds: sourceKindLabels,
       kindCounts: sourceKindCounts,
-      kindPurpose: sourceKindPurpose
+      kindPurpose: sourceKindPurpose,
+      narrationOptions
     });
   }));
 
@@ -423,7 +426,8 @@ export function createStudioApp() {
               classification.kind === "past_book"
                 ? ["past_book", "reference_book"]
                 : [classification.kind],
-            wordCount: computeMetrics(text).wordCount
+            wordCount: computeMetrics(text).wordCount,
+            classification
           },
           text
         });
@@ -443,6 +447,8 @@ export function createStudioApp() {
       current.sources = found.map((entry) => entry.source);
       current.sourcesReviewed = false;
       current.drive.lastIndexedAt = new Date().toISOString();
+      current.styleCorpus.built = false;
+      current.styleCorpus.continuedAt = null;
     });
 
     await appendLog(slug, "audit", {
@@ -470,7 +476,11 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       const source = current.sources.find((entry) => entry.driveId === req.params.driveId);
       // An empty list is allowed: it means "ignore this document".
-      if (source) source.kinds = kinds;
+      if (source) {
+        source.kinds = kinds;
+        current.styleCorpus.built = false;
+        current.styleCorpus.continuedAt = null;
+      }
     });
     res.json(withDerived(state));
   }));
@@ -486,6 +496,8 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const state = await updateState(slug, (current) => {
       current.sources = current.sources.filter((entry) => entry.driveId !== req.params.driveId);
+      current.styleCorpus.built = false;
+      current.styleCorpus.continuedAt = null;
     });
     res.json(withDerived(state));
   }));
@@ -525,6 +537,13 @@ export function createStudioApp() {
           : "Nothing is marked as your writing or your reference writing, so there is no prose to learn from. Group at least one document on the previous screen."
       );
     }
+    if (!state.sourcesReviewed) {
+      throw new HttpError(400, "Review the source grouping before building the style corpus.");
+    }
+    const sourceCheck = sourcesCheck(state.sources);
+    if (!sourceCheck.ok) {
+      throw new HttpError(400, [sourceCheck.style.reason, sourceCheck.references.reason].filter(Boolean).join(" "));
+    }
 
     const documents: CorpusDocument[] = [];
     for (const source of chosen) {
@@ -538,7 +557,7 @@ export function createStudioApp() {
     await writeFile(path.join(paths.artifacts, "style-corpus.json"), JSON.stringify(corpus, null, 2), "utf8");
     await writeFile(
       path.join(paths.artifacts, "style-fingerprint.md"),
-      renderFingerprint(corpus.label, corpus.fingerprint, corpus.passages.length),
+      renderFingerprint(corpus.label, corpus.fingerprint, corpus.passages.length, corpus.profile),
       "utf8"
     );
 
@@ -549,6 +568,7 @@ export function createStudioApp() {
         passageCount: corpus.passages.length,
         wordCount: corpus.fingerprint.wordCount,
         builtAt: corpus.builtAt,
+        continuedAt: null,
         fromReference: own.length === 0
       };
     });
@@ -556,10 +576,20 @@ export function createStudioApp() {
     res.json({ ...withDerived(next), fingerprint: corpus.fingerprint, fromReference: own.length === 0 });
   }));
 
+  app.post("/api/style/continue", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+    if (!state.styleCorpus.built) throw new HttpError(400, "Build the style corpus first.");
+    const next = await updateState(slug, (current) => {
+      current.styleCorpus.continuedAt ??= new Date().toISOString();
+    });
+    res.json(withDerived(next));
+  }));
+
   app.get("/api/style/fingerprint", route(async (_req, res) => {
     const corpus = await readCorpus(await requireSlug());
     if (!corpus) throw new HttpError(404, "No style corpus built yet.");
-    res.json({ label: corpus.label, fingerprint: corpus.fingerprint, passageCount: corpus.passages.length });
+    res.json({ label: corpus.label, fingerprint: corpus.fingerprint, profile: corpus.profile, passageCount: corpus.passages.length });
   }));
 
   app.post("/api/style/score", route(async (req, res) => {
@@ -609,7 +639,7 @@ export function createStudioApp() {
   // --- Questions ------------------------------------------------------------
   app.get("/api/questions", route(async (_req, res) => {
     const state = await loadState(await requireSlug());
-    res.json({ questions: state.questions, blocking: blockingQuestions(state) });
+    res.json({ questions: state.questions, conversation: state.conversation, blocking: blockingQuestions(state) });
   }));
 
   app.post("/api/questions", route(async (req, res) => {
@@ -629,7 +659,17 @@ export function createStudioApp() {
       askedAt: new Date().toISOString(),
       blocking: body.blocking === true
     };
-    const state = await updateState(slug, (current) => void current.questions.push(question));
+    const state = await updateState(slug, (current) => {
+      current.questions.push(question);
+      current.conversation.push({
+        id: randomUUID(),
+        role: "agent",
+        text: question.question,
+        questionId: question.id,
+        phase: question.phase,
+        createdAt: question.askedAt
+      });
+    });
     res.status(201).json({ question, state: withDerived(state) });
   }));
 
@@ -640,12 +680,36 @@ export function createStudioApp() {
 
     const state = await updateState(slug, (current) => {
       const question = current.questions.find((entry) => entry.id === req.params.id);
-      if (question) {
-        question.answer = answer;
-        question.answeredAt = new Date().toISOString();
-      }
+      if (!question) throw new HttpError(404, "Question not found.");
+      question.answer = answer;
+      question.answeredAt = new Date().toISOString();
+      current.conversation.push({
+        id: randomUUID(),
+        role: "author",
+        text: answer,
+        questionId: question.id,
+        phase: question.phase,
+        createdAt: question.answeredAt
+      });
     });
     res.json(withDerived(state));
+  }));
+
+  app.post("/api/conversation", route(async (req, res) => {
+    const slug = await requireSlug();
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) throw new HttpError(400, "A message is required.");
+    if (text.length > 8000) throw new HttpError(400, "Keep the message under 8,000 characters.");
+    const state = await updateState(slug, (current) => {
+      current.conversation.push({
+        id: randomUUID(),
+        role: "author",
+        text,
+        phase: "intake",
+        createdAt: new Date().toISOString()
+      });
+    });
+    res.status(201).json(withDerived(state));
   }));
 
   // --- Chapters -------------------------------------------------------------
@@ -703,6 +767,72 @@ export function createStudioApp() {
     res.json({ style, flow, state: withDerived(next) });
   }));
 
+  /**
+   * What the indexed material already implies, offered as prefills.
+   *
+   * Asking an author to type out the POV and tense of books that are sitting
+   * indexed is asking for something already known.
+   */
+  app.get("/api/intake/suggestions", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+
+    const own = state.sources.filter((source) => source.kinds?.includes("past_book"));
+    const suggestions: Record<string, { value: string; because: string; confidence?: number }> = {};
+
+    // More than one book by this author reads as a series.
+    if (own.length > 1) {
+      suggestions.shape = {
+        value: "series",
+        because: `${own.length} of your own books are indexed, which reads as a series.`,
+        confidence: 0.92
+      };
+    } else if (own.length === 1) {
+      suggestions.shape = { value: "standalone", because: "One book of yours is indexed.", confidence: 0.72 };
+    }
+
+    const corpus = await readCorpus(slug);
+    const sample = corpus
+      ? corpus.passages.slice(0, 400).map((passage) => passage.text).join("\n\n")
+      : (await Promise.all(own.slice(0, 2).map((source) => readCached(slug, source.driveId))))
+          .filter(Boolean).join("\n\n").slice(0, 200_000);
+
+    if (sample && sample.length > 500) {
+      const profile = corpus?.profile ?? analyseWriting(sample);
+      const narration = detectNarration(sample);
+      if (narration.povConfidence > 0.5) {
+        suggestions.pov = {
+          value: narration.label,
+          because: `Measured from your own prose: ${narration.pov.replace("_", " ")} POV.`,
+          confidence: narration.povConfidence
+        };
+      }
+      if (narration.tenseConfidence > 0.5) {
+        suggestions.tense = {
+          value: narration.tense,
+          because: `Measured from your own prose: ${narration.tense} tense.`,
+          confidence: narration.tenseConfidence
+        };
+      }
+      if (profile.audience.values.length > 0) {
+        suggestions.audience = {
+          value: profile.audience.values.join("|"),
+          because: profile.audience.evidence.join("; "),
+          confidence: profile.audience.confidence
+        };
+      }
+      if (profile.intimacy.value !== "None") {
+        suggestions.spice = {
+          value: profile.intimacy.value,
+          because: profile.intimacy.evidence.join("; "),
+          confidence: profile.intimacy.confidence
+        };
+      }
+    }
+
+    res.json({ suggestions, projectName: state.projectName });
+  }));
+
   // --- An existing draft ------------------------------------------------------
   /** Read a part-written book and report where it stands. */
   app.post("/api/manuscript/analyse", route(async (req, res) => {
@@ -743,6 +873,7 @@ export function createStudioApp() {
         completenessReason: analysis.completenessReason,
         analysedAt: new Date().toISOString()
       };
+      current.manuscriptReviewed = true;
     });
 
     res.json({ analysis, state: withDerived(state) });
@@ -760,9 +891,21 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
+  app.post("/api/manuscript/skip", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.manuscript = null;
+      current.manuscriptReviewed = true;
+    });
+    res.json(withDerived(state));
+  }));
+
   app.delete("/api/manuscript", route(async (_req, res) => {
     const slug = await requireSlug();
-    res.json(withDerived(await updateState(slug, (current) => void (current.manuscript = null))));
+    res.json(withDerived(await updateState(slug, (current) => {
+      current.manuscript = null;
+      current.manuscriptReviewed = false;
+    })));
   }));
 
   /** The brief a drafting agent needs to continue without a visible seam. */
@@ -1051,9 +1194,9 @@ export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
     words: styleWords,
     minWords: minimumStyleWords,
     ok: styleSources.length > 0 && styleWords >= minimumStyleWords,
-    reason:
-      styleSources.length === 0
-        ? "No series book is marked. Mark a book you wrote in this series, or mark what you want to write like as a Reference and the voice is learned from that instead."
+      reason:
+        styleSources.length === 0
+        ? "No prose source is available yet. Reference material is required, and series books are optional."
         : styleWords < minimumStyleWords
           ? `Only ${styleWords.toLocaleString()} words to learn the voice from. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by.`
           : ""
@@ -1133,7 +1276,7 @@ async function readCorpus(slug: string): Promise<StyleCorpus | undefined> {
   }
 }
 
-function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: number): string {
+function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: number, profile?: WritingProfile): string {
   const pct = (value: number) => `${Math.round(value * 100)}%`;
   return [
     `# Style fingerprint: ${label}`,
@@ -1161,6 +1304,24 @@ function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: n
     `| Similes per 1k | ${fingerprint.texture.similesPer1k} |`,
     `| Contractions per 1k | ${fingerprint.texture.contractionsPer1k} |`,
     `| Vocabulary variety | ${fingerprint.texture.typeTokenRatio} |`,
+    "",
+    "## Evidence-backed writing profile",
+    "",
+    ...(profile ? [
+      `- Narration: ${profile.narration.label} (${Math.round(profile.narration.confidence * 100)}% confidence).`,
+      `- Narrative distance: ${profile.distance.label}; filter verbs ${profile.distance.filterVerbsPer1k}/1k, interiority ${profile.distance.interiorityPer1k}/1k.`,
+      `- Sensory palette per 1k: ${Object.entries(profile.sensory).map(([key, value]) => `${key} ${value}`).join(", ")}.`,
+      `- Beat distribution: ${Object.entries(profile.beats).map(([key, value]) => `${key} ${pct(value)}`).join(", ")}.`,
+      `- Emotional rendering per 1k: explicit ${profile.emotion.explicitPer1k}, body cues ${profile.emotion.bodyCuePer1k}, thought ${profile.emotion.thoughtPer1k}.`,
+      `- Figurative language per 1k: similes ${profile.figurative.similesPer1k}, metaphor signals ${profile.figurative.metaphorSignalsPer1k}.`,
+      `- Advisory audience signals: ${profile.audience.values.join(", ") || "none strong enough to suggest"}.`,
+      `- Advisory intimacy signal: ${profile.intimacy.value} (${Math.round(profile.intimacy.confidence * 100)}% confidence).`,
+      "",
+      "Evidence:",
+      ...profile.narration.evidence.map((item) => `- ${item}`),
+      ...profile.audience.evidence.map((item) => `- ${item}`),
+      ...profile.intimacy.evidence.map((item) => `- ${item}`)
+    ] : ["No extended profile is available in this corpus artifact."]),
     ""
   ].join("\n");
 }

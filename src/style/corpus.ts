@@ -3,6 +3,7 @@
 
 import { computeMetrics, type StyleMetrics } from "./metrics.js";
 import { dialogueSpans, isSpeechParagraph, splitParagraphs, words } from "./text.js";
+import { analyseWriting, type WritingProfile } from "./profile.js";
 
 /** The kind of narrative work a passage is doing. */
 export type BeatType =
@@ -32,6 +33,7 @@ export interface StyleCorpus {
   passages: Passage[];
   /** Weighted fingerprint across every passage. */
   fingerprint: StyleMetrics;
+  profile: WritingProfile;
   builtAt: string;
 }
 
@@ -83,6 +85,10 @@ export function buildCorpus(label: string, documents: CorpusDocument[], options:
     label,
     passages,
     fingerprint: aggregate(passages),
+    profile: analyseWriting(
+      passages.map((passage) => passage.text).join("\n\n"),
+      passages.map((passage) => ({ text: passage.text, beat: passage.beat }))
+    ),
     builtAt: new Date().toISOString()
   };
 }

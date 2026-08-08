@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createStudioApp } from "../src/studio/server.js";
 import { derivePhase, emptyState, loadState } from "../src/studio/state.js";
-import { workspacesRoot } from "../src/workspace/paths.js";
+import { workspacesRoot, workspacePaths } from "../src/workspace/paths.js";
 import path from "node:path";
 import type { Server } from "node:http";
 
@@ -75,6 +75,24 @@ describe("phase derivation", () => {
     expect(derivePhase(state)).toBe("intake");
   });
 
+  it("holds at the existing-draft step until it is answered", () => {
+    const state = emptyState("x");
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.drive.connected = true;
+    state.drive.referenceRoots = ["root-1"];
+    state.sources = [{ driveId: "a", name: "book.md", path: "/book.md", mimeType: "text/plain", isFolder: false, kinds: ["past_book"] }];
+    state.sourcesReviewed = true;
+    state.shape = "standalone";
+    state.draftingMode = "chapter_by_chapter";
+    expect(derivePhase(state)).toBe("draft");
+    state.manuscriptReviewed = true;
+    expect(derivePhase(state)).toBe("preparation");
+    state.styleCorpus.built = true;
+    expect(derivePhase(state)).toBe("preparation");
+    state.styleCorpus.continuedAt = new Date().toISOString();
+    expect(derivePhase(state)).toBe("preflight");
+  });
+
   it("moves to writing once chapters exist", () => {
     const state = emptyState("x");
     state.chapters = [{ number: 1, title: "One", synopsis: "", status: "planned", issues: [] }];
@@ -144,12 +162,76 @@ describe("studio api", () => {
 
     const after = await call("/api/questions");
     expect(after.body.blocking).toHaveLength(0);
+    expect(after.body.conversation).toHaveLength(2);
   });
 
   it("rejects an empty answer", async () => {
     const created = await call("/api/questions", { method: "POST", body: { question: "Q?" } });
     const result = await call(`/api/questions/${created.body.question.id}/answer`, { method: "POST", body: { answer: "  " } });
     expect(result.status).toBe(400);
+  });
+
+  it("rejects an answer for an unknown question", async () => {
+    const result = await call("/api/questions/missing/answer", { method: "POST", body: { answer: "No" } });
+    expect(result.status).toBe(404);
+  });
+
+  it("records an author's freeform conversation message", async () => {
+    const result = await call("/api/conversation", { method: "POST", body: { text: "Keep the ending quiet." } });
+    expect(result.status).toBe(201);
+    expect(result.body.conversation[0].text).toBe("Keep the ending quiet.");
+    expect(result.body.conversation[0].role).toBe("author");
+  });
+
+  it("records starting without an existing draft", async () => {
+    const result = await call("/api/manuscript/skip", { method: "POST" });
+    expect(result.status).toBe(200);
+    expect(result.body.manuscript).toBeNull();
+    expect(result.body.manuscriptReviewed).toBe(true);
+  });
+
+  it("persists leaving the corpus screen for questions", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.drive.connected = true;
+    state.drive.referenceRoots = ["root"];
+    state.sources = [{ driveId: "source", name: "Reference", path: "/Reference", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"] }];
+    state.sourcesReviewed = true;
+    state.shape = "standalone";
+    state.draftingMode = "chapter_by_chapter";
+    state.manuscriptReviewed = true;
+    state.styleCorpus.built = true;
+    await save(state);
+    const result = await call("/api/style/continue", { method: "POST" });
+    expect(result.status).toBe(200);
+    expect(result.body.styleCorpus.continuedAt).toBeTruthy();
+    expect(result.body.phase).toBe("preflight");
+  });
+
+  it("extracts intake suggestions from indexed prose", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.sources = [{
+      driveId: "own-book",
+      name: "Book One",
+      path: "/Book One",
+      mimeType: "text/plain",
+      isFolder: false,
+      kinds: ["past_book"]
+    }];
+    await save(state);
+    await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
+    await writeFile(
+      `${workspacePaths("test-book").driveCache}/own-book.json`,
+      JSON.stringify({ text: "She walked through the rain and wondered what he knew. ".repeat(20) }),
+      "utf8"
+    );
+
+    const result = await call("/api/intake/suggestions");
+    expect(result.body.suggestions.shape.value).toBe("standalone");
+    expect(result.body.suggestions.pov.value).toMatch(/third|past/i);
+    expect(result.body.suggestions.tense.value).toBe("past");
   });
 
   it("stores a chapter plan and reports it", async () => {
@@ -408,7 +490,7 @@ describe("style source requirement", () => {
     await seed([doc("a", ["notes"], 50000)]);
     const { status, body } = await call("/api/sources/reviewed", { method: "POST" });
     expect(status).toBe(400);
-    expect(body.error).toMatch(/no series book is marked/i);
+    expect(body.error).toMatch(/reference material is required/i);
   });
 
   it("requires references as well as a style source", async () => {

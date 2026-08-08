@@ -297,12 +297,14 @@ let browse = { folderId: "root", crumbs: [{ id: "root", name: "My Drive" }], ent
 let picked = new Map();    // driveId -> name, chosen reference roots
 let target = null;         // {id, name} of the folder finished chapters go to
 let indexing = false;
+let draftPicker = false;
 let indexError = null;
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
 let KIND_COUNTS = {};
 let KIND_PURPOSE = {};
+let NARRATION_OPTIONS = [];
 
 const PHASES = [
   { id: "engine",      label: "Writing engine", group: "Set up" },
@@ -310,7 +312,7 @@ const PHASES = [
   { id: "sources",     label: "Select sources", group: "Set up" },
   { id: "analyze",     label: "Analyse & group", group: "Set up" },
   { id: "intake",      label: "Project shape",  group: "Prepare" },
-  { id: "draft",       label: "Existing draft",  group: "Prepare" },
+  { id: "draft",       label: "Existing draft", group: "Prepare" },
   { id: "style",       label: "Style corpus",   group: "Prepare" },
   { id: "questions",   label: "Questions",      group: "Prepare" },
   { id: "chapters",    label: "Chapters",       group: "Write" }
@@ -545,6 +547,7 @@ async function reload() {
     S = r.state; PROJECTS = r.projects || [];
     KINDS = r.kinds || KINDS; KIND_COUNTS = r.kindCounts || KIND_COUNTS;
     KIND_PURPOSE = r.kindPurpose || KIND_PURPOSE;
+    NARRATION_OPTIONS = r.narrationOptions || NARRATION_OPTIONS;
     render();
   } catch (e) { toast(e.message, "error"); }
 }
@@ -608,8 +611,8 @@ function isDone(id) {
     case "sources":   return S.drive.referenceRoots.length > 0;
     case "analyze":   return S.sources.length > 0 && S.sourcesReviewed;
     case "intake":    return !!S.shape && !!S.draftingMode;
+    case "draft":     return !!S.manuscriptReviewed;
     // Answered either way: a draft was picked, or starting fresh was chosen.
-    case "draft":     return !!S.manuscript || S.startingFresh === true;
     case "style":     return S.styleCorpus.built;
     // Green means "done", so an untouched step with no questions is not green.
     case "questions": return (S.questions || []).length > 0
@@ -625,7 +628,7 @@ const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "draft
 function furthestReached() {
   if (!S) return 0;
   const map = { engine: "engine", connect: "connect", sources: "sources", analyze: "analyze",
-    intake: "intake", preparation: "style", preflight: "questions", writing: "chapters",
+    intake: "intake", draft: "draft", preparation: "style", preflight: "questions", writing: "chapters",
     review: "chapters", export: "chapters", complete: "chapters" };
   const current = map[S.phase] || "engine";
   return Math.max(PHASE_ORDER.indexOf(current), 0);
@@ -648,7 +651,9 @@ function go(r) {
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
   if (r === "analyze") loadCheck();
-  if (r === "draft") loadBrowse(browse.folderId);
+  if (r === "intake") loadSuggestions();
+  if (r === "style" && S.styleCorpus.built) loadFingerprint();
+  if (r === "questions") loadQuestions();
 }
 
 // --- views -----------------------------------------------------------------
@@ -669,8 +674,8 @@ function render() {
     return;
   }
   v.innerHTML = ({
-    engine: viewEngine, draft: viewDraft, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
-    intake: viewIntake, style: viewStyle, questions: viewQuestions, chapters: viewChapters
+    engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
+    intake: viewIntake, draft: viewDraft, style: viewStyle, questions: viewQuestions, chapters: viewChapters
   }[route] || viewConnect)();
 }
 
@@ -777,7 +782,7 @@ function viewEngine() {
     <div><b>No per-token cost</b>
       <p>Writing is covered by your plan, subject to its usage limits.</p></div></div>` : ""}` : ""}
 
-  ${choice.provider && choice.authMethod ? `<button onclick="go('connect')">Next: connect Drive</button>` : ""}`;
+  ${choice.provider && choice.authMethod ? `<button onclick="go('connect')">Connect Drive</button>` : ""}`;
 }
 
 function renderEstimates(cat, provider) {
@@ -907,9 +912,9 @@ function viewConnect() {
         <code>https://www.googleapis.com/auth/drive.file</code> and restart. Browsing stops working and you
         paste folder links instead.</p></div></div>` : ""}
 
-    ${next === "ready" ? `<div class="card"><b>Next</b>
-      <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
-      notes, timelines and references.</p>
+    ${next === "ready" ? `<div class="card"><b>Select sources</b>
+       <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
+       notes, timelines and references.</p>
       <button onclick="go('sources')">Select sources</button></div>
 
     <div class="card">
@@ -1117,17 +1122,23 @@ function viewAnalyze() {
 
   const counts = Object.fromEntries(Object.keys(KINDS).map((k) =>
     [k, S.sources.filter((x) => (x.kinds || []).includes(k)).length]));
+  const ownBooks = S.sources.filter((x) => (x.kinds || []).includes("past_book"));
 
-  const docs = S.sources.map((src) => {
+  // Alphabetical: Drive's own order is arbitrary and a long board is unusable
+  // without somewhere predictable to look.
+  const sorted = [...S.sources].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const docs = sorted.map((src) => {
     const ungrouped = !(src.kinds || []).length;
     return `
     <div class="doc ${ungrouped ? "ignored" : ""}">
       <div class="doc-h">
-        <div><b>${esc(src.name)}</b>
-          <div class="doc-m">${esc(src.path || "")}${src.wordCount ? ` · ${plural(src.wordCount, "word", null, src.wordCount.toLocaleString())}` : ""}</div>
+          <div><b>${esc(src.name)}</b>
+          <div class="doc-m">${esc(src.path || "")}${src.wordCount ? ` · ${plural(src.wordCount, "word", null, src.wordCount.toLocaleString())}` : ""}${src.classification ? ` · ${Math.round(src.classification.confidence * 100)}% confidence` : ""}</div>
         </div>
         <button class="doc-x" title="Remove from this analysis" onclick="removeSource('${src.driveId}')">✕</button>
       </div>
+      ${src.classification?.reasons?.length ? `<div class="hint" style="margin-top:7px">Why: ${esc(src.classification.reasons.join("; "))}
+        ${src.classification.alternative ? ` · alternative: ${esc(KINDS[src.classification.alternative] || src.classification.alternative)}` : ""}</div>` : ""}
       <div class="chips">
         ${Object.entries(KINDS).map(([k, label]) => {
           const on = (src.kinds || []).includes(k);
@@ -1151,8 +1162,13 @@ function viewAnalyze() {
   timeline, an outline and loose notes.</p>
 
   ${check ? `<div class="reqs">
-    ${[["Series books", check.style, "your prose, so the writing sounds like you"],
-       ["References", check.references, "material the book draws on"]].map(([title, r, purpose]) => `
+    ${[["Series books (optional)", {
+         ok: true,
+         documents: ownBooks.length,
+         words: ownBooks.reduce((sum, source) => sum + (source.wordCount || 0), 0),
+         reason: "No series book is needed. Reference material is the required input; series books add your own voice and canon."
+       }, "your prose, when available"],
+       ["References (required)", check.references, "material the book draws on"]].map(([title, r, purpose]) => `
       <div class="req ${r.ok ? "ok" : "todo"}">
         <div class="req-h">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
@@ -1177,13 +1193,11 @@ function viewAnalyze() {
       research, a comparison title. References carry material, not voice, unless you have no series book at
       all, in which case the voice is learned from them instead.</p></div></div>
 
-  ${check.fromReference && check.style.ok ? `<div class="info warn">
-    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
-    <div><b>Learning the voice from someone else</b>
-      <p>No series book is marked, so the style will be learned from your references. The
-      book will read like whoever wrote those pages rather than like you. That is a legitimate way to start
-      a first book, but it should be a decision rather than an accident.</p></div></div>` : ""}` : ""}
+  ${check.fromReference && check.style.ok ? `<div class="info">
+     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+       <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+     <div><b>Style source</b>
+       <p>No series book is marked. The reference material will supply the initial writing examples.</p></div></div>` : ""}` : ""}
 
   <div class="counts">${Object.entries(KINDS).map(([k, label]) => {
     const n = counts[k];
@@ -1250,8 +1264,24 @@ async function finishReview(btn) {
   catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
+const AUDIENCES = ["Adult", "New adult", "Young adult", "Middle grade", "Children"];
+const INTIMACY = ["None", "Romantic tension only", "Fade to black", "Open door", "Explicit", "Very explicit"];
+
 function viewIntake() {
   const shape = S.shape, mode = S.draftingMode;
+  const sug = SUGGESTIONS || {};
+  const intake = S.intake || {};
+  const chosen = (field) => (intake[field] || "").split("|").filter(Boolean);
+
+  const hint = (key) => sug[key] && !intake[key] && (key !== "shape" || !shape)
+    ? `<div class="hint" style="color:var(--accent);margin-top:5px">Detected: <b>${esc(sug[key].value.replaceAll("|", ", "))}</b>.
+       ${esc(sug[key].because)} <button class="sm ghost" style="margin-left:4px"
+       onclick="applySuggestion('${key}')">Use it</button></div>` : "";
+
+  const multi = (field, options) => `<div class="chips" style="margin-top:2px">
+    ${options.map((o) => `<button class="chip ${chosen(field).includes(o) ? "on" : ""}"
+      onclick="toggleMulti('${field}','${esc(o).replace(/'/g, "\\'")}')">${esc(o)}</button>`).join("")}</div>`;
+
   return `
   <h1>Project shape</h1>
   <p class="sub">Two decisions drive everything downstream. Both can be changed later.</p>
@@ -1261,9 +1291,10 @@ function viewIntake() {
     <div class="choice ${shape === "standalone" ? "on" : ""}" onclick="setProject({shape:'standalone'})">
       <b>Standalone</b><p>Self-contained. Canon starts empty and is built from this book alone.</p></div>
     <div class="choice ${shape === "series" ? "on" : ""}" onclick="setProject({shape:'series'})">
-      <b>Series</b><p>Inherits canon from your past books. Prior events, character knowledge and
+      <b>Series</b><p>Inherits canon from your earlier books. Prior events, character knowledge and
       unresolved threads carry forward and are enforced.</p></div>
   </div>
+  ${hint("shape")}
 
   <h2>How should Canon Quill write it?</h2>
   <div class="choices">
@@ -1274,24 +1305,84 @@ function viewIntake() {
     <div class="choice ${mode === "whole_book" ? "on" : ""}" onclick="setProject({draftingMode:'whole_book'})">
       <b>Whole book</b>
       <p>Drafts, edits and validates <b>every chapter without stopping</b>, then hands you the
-      complete manuscript once. Continuity is still enforced between chapters. Fastest path to a
-      full draft; you review at the end.</p></div>
+      complete manuscript once. Continuity is still enforced between chapters.</p></div>
   </div>
 
   <h2>Details</h2>
   <div class="card">
-    <div style="margin-bottom:12px"><label>Book title</label>
-      <input id="pname" value="${esc(S.projectName)}" onchange="setProject({projectName:this.value})" /></div>
-    ${[["audience", "Target audience", ["adult", "new adult", "young adult", "middle grade"]],
-       ["spice", "Intimacy level", ["none", "romantic", "fade to black", "open door", "explicit"]],
-       ["pov", "POV and tense", ["close third, past", "first person, past", "first person, present", "omniscient"]]]
-      .map(([k, label, opts]) => `<div style="margin-bottom:12px"><label>${label}</label>
-        <select onchange="setProject({intake:{${k}:this.value}})">
+    <div style="margin-bottom:16px"><label>Book title</label>
+      <input id="pname" value="${esc(S.projectName)}" onchange="setProject({projectName:this.value})" />
+      <div class="hint">Taken from the book you created. Change it here if it has moved on.</div></div>
+
+    <div style="margin-bottom:16px"><label>POV</label>
+      <select onchange="setProject({intake:{pov:this.value}})">
+        <option value="">Not set</option>
+        ${(NARRATION_OPTIONS || []).map((o) => `<option ${intake.pov === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+      </select>
+      ${hint("pov")}
+      <div style="margin-top:8px"><label style="font-weight:500">Tense</label>
+        <select onchange="setProject({intake:{tense:this.value}})">
           <option value="">Not set</option>
-          ${opts.map((o) => `<option ${S.intake[k] === o ? "selected" : ""}>${o}</option>`).join("")}
-        </select></div>`).join("")}
+          <option ${intake.tense === "past" ? "selected" : ""}>past</option>
+          <option ${intake.tense === "present" ? "selected" : ""}>present</option>
+          <option ${intake.tense === "mixed" ? "selected" : ""}>mixed</option>
+        </select>
+        ${hint("tense")}</div></div>
+
+    <div style="margin-bottom:16px"><label>Target audience</label>
+      <div class="hint" style="margin-bottom:4px">Pick every one that applies.</div>
+      ${multi("audience", AUDIENCES)}
+      ${hint("audience")}</div>
+
+    <div><label>Intimacy level</label>
+      <div class="hint" style="margin-bottom:4px">Pick every one that applies. The highest sets the ceiling.</div>
+      ${multi("spice", INTIMACY)}
+      ${hint("spice")}
+      <div style="margin-top:10px"><label style="font-weight:500">Notes on intimacy</label>
+        <textarea rows="2" placeholder="Explicit between the leads, fade to black elsewhere. Nothing on the page involving Iselle."
+          onchange="setProject({intake:{spiceNotes:this.value}})">${esc(intake.spiceNotes || "")}</textarea>
+        <div class="hint">Anything the labels above do not capture: exceptions, characters to keep out
+        of it, how far is too far.</div></div></div>
   </div>
-  ${shape && mode ? `<button onclick="go('style')">Next: build style corpus →</button>` : ""}`;
+
+  <div class="row">
+    <button ${shape && mode ? "" : "disabled"} onclick="go('draft')">Continue</button>
+    ${!(shape && mode) ? '<span class="hint" style="color:var(--warn)">Choose the book shape and drafting mode to continue.</span>' : ""}
+  </div>`;
+}
+
+let SUGGESTIONS = null;
+
+async function loadSuggestions() {
+  try {
+    const r = await api("/api/intake/suggestions");
+    SUGGESTIONS = r.suggestions;
+    const current = S.intake || {};
+    const automatic = Object.entries(SUGGESTIONS)
+      .filter(([key, suggestion]) => !current[key] && (suggestion.confidence || 0) >= 0.8)
+      .reduce((values, [key, suggestion]) => ({ ...values, [key]: suggestion.value }), {});
+    if (Object.keys(automatic).length > 0) {
+      S = await api("/api/project", {
+        method: "PATCH",
+        body: { intake: automatic, ...(automatic.shape ? { shape: automatic.shape } : {}) }
+      });
+    }
+    if (route === "intake") render();
+  } catch { /* prefills are a convenience */ }
+}
+
+function applySuggestion(key) {
+  const s = SUGGESTIONS?.[key];
+  if (!s) return;
+  if (key === "shape") setProject({ shape: s.value });
+  else setProject({ intake: { [key]: s.value } });
+}
+
+/** Multi-value fields are stored pipe-joined so the state stays flat strings. */
+async function toggleMulti(field, value) {
+  const current = ((S.intake || {})[field] || "").split("|").filter(Boolean);
+  const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+  await setProject({ intake: { [field]: next.join("|") } });
 }
 
 async function setProject(patch) {
@@ -1299,7 +1390,7 @@ async function setProject(patch) {
   catch (e) { toast(e.message, "error"); }
 }
 
-function viewDraft() {
+function draftSection() {
   const m = S.manuscript;
 
   const rows = browse.entries.map((e) => {
@@ -1314,15 +1405,15 @@ function viewDraft() {
       <span class="name">${esc(e.name)}</span>
       ${e.isFolder ? "" : `<button class="sm ${chosen ? "" : "ghost"}"
         onclick="event.stopPropagation();useAsDraft('${e.id}','${safe}',this)">
-        ${chosen ? "Selected ✓" : "This one"}</button>`}
+        ${chosen ? "Selected ✓" : "Select"}</button>`}
     </div>`;
   }).join("");
 
   return `
-  <h1>Existing draft</h1>
-  <p class="sub">If the book is already part-written, point Canon Quill at it. It reads how far the draft
-  goes, whether the last chapter finished, and the typographic habits of the document, so anything it
-  adds is indistinguishable from what is already there.</p>
+  <h2>Existing draft</h2>
+  <p class="sub">Optional. If the book is already part-written, point Canon Quill at it: it reads how far
+  the draft goes, whether the last chapter finished, and the typographic habits of the document, so
+  anything it adds is indistinguishable from what is already there.</p>
 
   ${m ? `<div class="card" style="border-color:var(--good)">
     <div class="row" style="margin-bottom:8px">
@@ -1352,8 +1443,18 @@ function viewDraft() {
     </div>
 
     <div class="row" style="margin-top:14px">
-      <button onclick="go('style')">Continue</button>
       <button class="ghost" onclick="clearDraft(this)">Choose a different file</button>
+      <button ${m.target ? "" : "disabled"} onclick="go('style')">Continue</button>
+      ${!m.target ? '<span class="hint" style="color:var(--warn)">Choose where new chapters go first.</span>' : ""}
+    </div>
+  </div>` : (!draftPicker ? `
+  <div class="card">
+    <b>Is the book already part-written?</b>
+    <p class="sub" style="margin:6px 0 12px">Only if chapters exist somewhere already. Skip this to write
+    from the first line.</p>
+    <div class="row">
+      <button class="ghost" onclick="openDraftPicker()">Select existing draft</button>
+      <button class="ghost" onclick="skipDraft(this)">Nothing written yet</button>
     </div>
   </div>` : `
   <div class="card">
@@ -1366,12 +1467,7 @@ function viewDraft() {
       : rows || '<div class="empty">Nothing here</div>'}</div>
   </div>
 
-  <div class="card">
-    <b>Starting from nothing?</b>
-    <p class="sub" style="margin:6px 0 12px">If no chapters have been written yet, skip this. Canon Quill
-    will write the book from the first line.</p>
-    <button onclick="startFresh()">Nothing written yet</button>
-  </div>`}`;
+  <div class="row"><button class="ghost" onclick="closeDraftPicker()">Cancel</button></div>`)}`;
 }
 
 async function useAsDraft(driveId, name, btn) {
@@ -1382,7 +1478,20 @@ async function useAsDraft(driveId, name, btn) {
     toast(`Read ${plural(r.analysis.totalWords, "word", null, r.analysis.totalWords.toLocaleString())} from "${name}".`);
   } catch (e) {
     toast(e.message, "error");
-    btn.disabled = false; btn.textContent = "This one";
+    btn.disabled = false; btn.textContent = "Select";
+  }
+}
+
+async function skipDraft(btn) {
+  btn.disabled = true;
+  try {
+    S = await api("/api/manuscript/skip", { method: "POST" });
+    route = "style";
+    render();
+    toast("Starting from the first line.");
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
   }
 }
 
@@ -1397,10 +1506,11 @@ async function clearDraft(btn) {
   catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
-function startFresh() {
-  S.startingFresh = true;
-  toast("Starting from the first line.", "info");
-  go("style");
+function openDraftPicker() { draftPicker = true; loadBrowse(browse.folderId); render(); }
+function closeDraftPicker() { draftPicker = false; render(); }
+
+function viewDraft() {
+  return `<h1>Existing draft</h1>${draftSection()}`;
 }
 
 function viewStyle() {
@@ -1408,6 +1518,7 @@ function viewStyle() {
   const books = S.sources.filter((s) => (s.kinds || []).includes("past_book"));
   const refs = S.sources.filter((s) => (s.kinds || []).includes("reference_book"));
   const usingReference = books.length === 0 && refs.length > 0;
+  const canBuild = S.sourcesReviewed && (books.length > 0 || refs.length > 0);
   return `
   <h1>Style corpus</h1>
   <p class="sub">This is what stops the writing sounding generic. Canon Quill cuts your past books
@@ -1422,7 +1533,7 @@ function viewStyle() {
       <div class="hint">${(books.length ? books : refs).map((b) => esc(b.name)).join(", ")
         || "Mark something as Your writing on the Analyse screen."}</div>
       ${usingReference ? '<div class="hint" style="color:var(--warn);margin-top:4px">No writing of your own is marked, so this will learn from reference writing. The book will read like its author rather than like you.</div>' : ""}</div>
-    <button ${books.length || usingReference ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild" : "Build corpus"}</button>
+    <button ${canBuild ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild style corpus" : "Build style corpus"}</button>
   </div>
 
   ${sc.built ? `<div class="card">
@@ -1430,7 +1541,13 @@ function viewStyle() {
       <span class="pill good">${plural(sc.passageCount, "passage")}</span>
       <span class="pill">${plural(sc.wordCount, "word", null, sc.wordCount.toLocaleString())}</span></div>
     ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
-    <div id="fp"><span class="spin"></span></div></div>` : ""}`;
+    <div id="fp"><span class="spin"></span></div>
+    <div class="row" style="margin-top:16px">
+      <button onclick="continueFromStyle(this)">Continue to questions</button>
+    </div>
+    <div class="hint" style="margin-top:8px">The questions screen is where the writing agent records decisions instead of guessing.</div>
+    </div>` : ""}
+  ${!canBuild ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping and mark reference material before building the corpus.</div>' : ""}`;
 }
 
 async function buildStyle(btn) {
@@ -1443,12 +1560,45 @@ async function buildStyle(btn) {
   catch (e) { toast(e.message, "error"); render(); }
 }
 
+async function continueFromStyle(btn) {
+  btn.disabled = true;
+  try {
+    S = await api("/api/style/continue", { method: "POST" });
+    route = "questions";
+    render();
+    await loadQuestions();
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+  }
+}
+
+let FINGERPRINT = null;
 async function loadFingerprint() {
   const el = document.getElementById("fp"); if (!el) return;
   try {
-    const { fingerprint: f } = await api("/api/style/fingerprint");
+    const { fingerprint: f, profile } = await api("/api/style/fingerprint");
+    FINGERPRINT = { fingerprint: f, profile };
     const pct = (v) => Math.round(v * 100) + "%";
-    el.innerHTML = `<table><tr><th>Measure</th><th class="num">Your target</th></tr>
+    const profileRows = profile ? [
+      ["Narration", profile.narration.label],
+      ["Narration confidence", pct(profile.narration.confidence)],
+      ["Narrative distance", profile.distance.label],
+      ["Sensory palette", Object.entries(profile.sensory).map(([k, v]) => `${k} ${v}/1k`).join(", ")],
+      ["Scene beats", Object.entries(profile.beats).map(([k, v]) => `${k} ${pct(v)}`).join(", ")],
+      ["Explicit emotion", profile.emotion.explicitPer1k + "/1k"],
+      ["Body-cue emotion", profile.emotion.bodyCuePer1k + "/1k"],
+      ["Figurative language", profile.figurative.similesPer1k + " similes/1k"],
+      ["Suggested audience", profile.audience.values.join(", ") || "No strong signal"],
+      ["Suggested intimacy", profile.intimacy.value]
+    ] : [];
+    el.innerHTML = `${profile ? `<h3 style="margin:0 0 8px">Writing profile</h3>
+      <table><tr><th>Signal</th><th class="num">Measured reading</th></tr>
+        ${profileRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${esc(v)}</td></tr>`).join("")}</table>
+        ${profile.evidence?.length ? `<div class="hint" style="margin-top:10px"><b>Evidence:</b> ${profile.evidence.map(esc).join(" ")}</div>` : ""}
+      </div>` : ""}
+      <h3 style="margin:18px 0 8px">Prose fingerprint</h3>
+      <table><tr><th>Measure</th><th class="num">Your target</th></tr>
       ${[["Mean sentence length", f.sentence.meanWords + " words"],
          ["Sentence length variation", f.sentence.stdevWords],
          ["Fragment rate", pct(f.sentence.fragmentRate)],
@@ -1461,12 +1611,13 @@ async function loadFingerprint() {
          ["Abstract nouns / 1k", f.texture.abstractNounsPer1k],
          ["Similes / 1k", f.texture.similesPer1k],
          ["Vocabulary variety", f.texture.typeTokenRatio]]
-        .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
+         .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
   } catch { el.innerHTML = '<div class="hint">Fingerprint unavailable.</div>'; }
 }
 
 function viewQuestions() {
   const qs = S.questions || [];
+  const conversation = S.conversation || [];
   const open = qs.filter((q) => q.answer === undefined);
   const done = qs.filter((q) => q.answer !== undefined);
   const card = (q) => `<div class="card q ${q.answer !== undefined ? "answered" : ""}">
@@ -1487,9 +1638,47 @@ function viewQuestions() {
   <h1>Questions</h1>
   <p class="sub">When an agent hits a decision only you can make, it asks here instead of guessing
   and burying the assumption in a document. Blocking questions hold the pipeline.</p>
+  <div class="row" style="margin-bottom:12px">
+    <button class="ghost sm" onclick="loadQuestions()">Refresh conversation</button>
+    <span class="hint">Questions and answers are recorded in this book's project log.</span>
+  </div>
+  <div class="card">
+    <label>Conversation with the writing agent</label>
+    ${conversation.length ? `<div style="display:grid;gap:7px;margin:8px 0 12px">
+      ${conversation.map((message) => `<div class="answer-box" style="border-left:3px solid var(--${message.role === "author" ? "good" : "accent"})">
+        <b>${message.role === "author" ? "You" : "Agent"}</b> · ${new Date(message.createdAt).toLocaleString()}<br>${esc(message.text)}
+      </div>`).join("")}
+    </div>` : '<div class="empty" style="padding:12px">The conversation starts here.</div>'}
+    <textarea id="conversation-message" rows="3" placeholder="Tell the agent what matters about this book..."></textarea>
+    <div class="row" style="margin-top:8px"><button onclick="sendConversation(this)">Send message</button></div>
+  </div>
   ${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}`
     : '<div class="card empty">Nothing waiting. Agents will post questions here as they work.</div>'}
   ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}`;
+}
+
+async function loadQuestions() {
+  try {
+    const r = await api("/api/questions");
+    if (S) S.questions = r.questions || [];
+    if (S) S.conversation = r.conversation || S.conversation || [];
+    if (route === "questions") render();
+  } catch { /* the state already contains the last known conversation */ }
+}
+
+async function sendConversation(btn) {
+  const box = document.getElementById("conversation-message");
+  const text = box?.value?.trim();
+  if (!text) { toast("Write the message first.", "warn"); return; }
+  btn.disabled = true;
+  try {
+    S = await api("/api/conversation", { method: "POST", body: { text } });
+    render();
+    toast("Message recorded.");
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+  }
 }
 
 async function answer(id, text) {
@@ -1663,12 +1852,15 @@ async function setStatus(number, status) {
   loadVersion(true);
   setInterval(() => loadVersion(true), 10 * 60 * 1000);
   if (S) {
-    route = PHASES.find((p) => p.id === S.phase)?.id || "connect";
+    const persistedRoute = { preparation: "style", preflight: "questions", writing: "chapters",
+      review: "chapters", export: "chapters", complete: "chapters" }[S.phase] || S.phase;
+    route = PHASES.some((p) => p.id === persistedRoute) ? persistedRoute : "connect";
     render();
     if (route === "sources") loadBrowse("root");
     if (route === "engine") loadEngine();
     if (route === "connect") loadDrive();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
+    if (route === "questions") loadQuestions();
   }
 })();
 </script>

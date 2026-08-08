@@ -22,7 +22,17 @@ Finalization passes:
 1. **Manifest and chapter inclusion**
    - Confirm every planned/approved chapter is included once, in order.
    - Confirm chapter headings, numbering, and titles are consistent.
-   - Confirm no draft, failed-validation, or duplicate chapter file is included.
+    - Confirm no draft, failed-validation, or duplicate chapter file is included.
+    - If `state.manuscript` exists, load `GET /api/manuscript/brief` and the
+      analysed source before compiling. This is a continuation, not a fresh
+      manuscript.
+    - For `manuscript.target: continue`, merge approved chapters with
+      `mergeContinuation` from `src/analysis/manuscript.ts`. Insert them before
+      detected back matter and preserve the original back matter unchanged.
+    - For `manuscript.target: separate`, compile a new manuscript from the
+      existing story plus approved chapters, leaving the source document alone.
+    - Record the source Drive ID, target mode, insertion offset, and preserved
+      back-matter heading in the final manifest.
 
 2. **Whole-book continuity**
    - Invoke `sub-continuity-auditor` when available.

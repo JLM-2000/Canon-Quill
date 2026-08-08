@@ -16,6 +16,8 @@ workspaces/
 **/artifacts/
 **/chapters/
 **/manuscript.*
+!src/analysis/manuscript.ts
+!tests/manuscript.test.ts
 **/style-corpus/
 **/drive-cache/
 *.docx

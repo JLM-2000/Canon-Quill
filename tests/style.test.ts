@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { splitParagraphs, splitSentences, dialogueSpans, percentile } from "../src/style/text.js";
 import { computeMetrics } from "../src/style/metrics.js";
 import { buildCorpus, classifyBeat, extractProse } from "../src/style/corpus.js";
+import { analyseWriting } from "../src/style/profile.js";
 import { renderExemplarPrompt, retrieveExemplars } from "../src/style/retrieve.js";
 import { findRepetitions, scoreAgainstCorpus, scoreAgainstFingerprint } from "../src/style/score.js";
 
@@ -86,6 +87,19 @@ describe("metrics", () => {
   });
 });
 
+describe("writing profile", () => {
+  it("keeps audience and intimacy readings advisory and evidence-backed", () => {
+    const profile = analyseWriting(
+      "At university, in her freshman year, she kissed him and closed the door. The next morning, blood darkened the sheet. " +
+      "He swore under his breath and wondered whether she would stay."
+    );
+    expect(profile.intimacy.value).toBe("Fade to black");
+    expect(profile.intimacy.evidence.length).toBeGreaterThan(0);
+    expect(profile.audience.values).toContain("New adult");
+    expect(profile.audience.confidence).toBeGreaterThan(0);
+  });
+});
+
 describe("beat classification", () => {
   it("detects dialogue", () => {
     expect(classifyBeat('"Where were you?" she asked. "Out," he said. "All night?" "Yes."')).toBe("dialogue");
@@ -151,6 +165,13 @@ describe("corpus", () => {
 
   it("classifies at least one passage as dialogue", () => {
     expect(corpus.passages.some((passage) => passage.beat === "dialogue")).toBe(true);
+  });
+
+  it("stores an evidence-backed writing profile", () => {
+    expect(corpus.profile.narration.label).toContain("past");
+    expect(corpus.profile.sensory.sight).toBeGreaterThan(0);
+    expect(corpus.profile.beats.dialogue).toBeGreaterThan(0);
+    expect(corpus.profile.intimacy.value).toBe("None");
   });
 });
 

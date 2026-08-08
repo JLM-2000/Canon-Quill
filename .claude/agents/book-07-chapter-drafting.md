@@ -8,6 +8,14 @@ tools: Read, Glob, Grep, Write, Edit, Bash, Task
 
 Draft the next chapter.
 
+## Continuation is a separate mode, not a normal first chapter
+
+Before choosing a chapter number or opening line, read the project state. If
+`state.manuscript` is present, this is continuation mode. Do not write a new
+book from the premise and do not begin with Chapter One. Continue the existing
+story from the tail in the continuation brief, using its next chapter position
+and its handoff state.
+
 ## Load before writing a single word
 
 You are not writing from a description of the author's style. You are writing
@@ -39,8 +47,13 @@ next to the author's actual prose. Load all four, in this order:
      break marker, straight or curly quotes, dash style, indented or
      blank-line-separated paragraphs. Match all of them exactly. A reader must
      not be able to see where the existing text ends and yours begins.
-   - It carries the closing passage. Continue from it. Do not restate it,
-     summarise it, or open with a recap of what just happened.
+    - It carries the closing passage. Continue from it. Do not restate it,
+      summarise it, or open with a recap of what just happened.
+    - If `lastChapterComplete` is true, open the next chapter. If it is false,
+      finish the chapter already in progress before opening another one.
+    - If the target is `continue`, the approved prose will be merged into the
+      existing manuscript. If the target is `separate`, the original remains
+      untouched, but the prose still continues its story rather than restarting.
 
    If the author chose to write into a separate document, still match the
    conventions and the continuation point; only the destination differs.

@@ -181,9 +181,13 @@ states:
   chapter_drafting:
     agent: book-07-chapter-drafting
     description: >
-      Draft the next chapter. The prompt carries the opening contract from the
-      previous chapter's handoff plus retrieved exemplar passages of the
-      author's own prose matched to each beat. No questions are asked here.
+       Draft the next chapter. The prompt carries the opening contract from the
+       previous chapter's handoff plus retrieved exemplar passages of the
+       author's own prose matched to each beat. If an existing manuscript was
+       selected, the continuation brief is mandatory: finish an unfinished
+       chapter or begin the next chapter as it directs, never restart the book.
+       No questions are asked here except a blocking canon decision required to
+       finish an interrupted chapter.
     on_success: chapter_editing
     on_failure: chapter_drafting
 

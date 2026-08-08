@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import type { SourceKind } from "../analysis/classify.js";
+import type { Classification, SourceKind } from "../analysis/classify.js";
 import type { ContinuityLedger } from "../continuity/ledger.js";
 import { emptyLedger } from "../continuity/ledger.js";
 import { workspacePaths } from "../workspace/paths.js";
@@ -13,6 +13,7 @@ export type PhaseId =
   | "sources"
   | "analyze"
   | "intake"
+  | "draft"
   | "preparation"
   | "preflight"
   | "writing"
@@ -34,6 +35,8 @@ export interface SelectedSource {
    */
   kinds: SourceKind[];
   wordCount?: number;
+  /** Evidence behind the initial classification, kept for author review. */
+  classification?: Classification;
 }
 
 export interface OpenQuestion {
@@ -49,6 +52,15 @@ export interface OpenQuestion {
   answeredAt?: string;
   /** Blocking questions hold the pipeline until answered. */
   blocking: boolean;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "agent" | "author";
+  text: string;
+  questionId?: string;
+  phase: PhaseId;
+  createdAt: string;
 }
 
 export interface ChapterRecord {
@@ -134,7 +146,7 @@ export interface ExistingManuscript {
 }
 
 export interface StudioState {
-  version: 3;
+  version: 4;
   slug: string;
   projectName: string;
   phase: PhaseId;
@@ -152,9 +164,12 @@ export interface StudioState {
   /** The author has looked at the grouping board and moved on. */
   sourcesReviewed: boolean;
   questions: OpenQuestion[];
+  conversation: ConversationMessage[];
   chapters: ChapterRecord[];
   /** Null when starting from scratch. */
   manuscript: ExistingManuscript | null;
+  /** True after the author chooses a draft or explicitly starts fresh. */
+  manuscriptReviewed: boolean;
   directions: Direction[];
   run: RunState;
   ledger: ContinuityLedger;
@@ -164,6 +179,8 @@ export interface StudioState {
     passageCount: number;
     wordCount: number;
     builtAt: string | null;
+    /** True after the author has left the corpus screen for the questions conversation. */
+    continuedAt: string | null;
     /** Built from reference prose because the author had none of their own. */
     fromReference?: boolean;
   };
@@ -174,7 +191,7 @@ export interface StudioState {
 export function emptyState(slug: string, projectName = "Untitled Book"): StudioState {
   const now = new Date().toISOString();
   return {
-    version: 3,
+    version: 4,
     slug,
     projectName,
     phase: "engine",
@@ -186,12 +203,14 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     sources: [],
     sourcesReviewed: false,
     questions: [],
+    conversation: [],
     chapters: [],
     manuscript: null,
+    manuscriptReviewed: false,
     directions: [],
     run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),
-    styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null },
+    styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null },
     createdAt: now,
     updatedAt: now
   };
@@ -202,7 +221,15 @@ export async function loadState(slug: string): Promise<StudioState> {
     const parsed = JSON.parse(await readFile(workspacePaths(slug).stateFile, "utf8")) as Partial<StudioState>;
     // Merged onto a fresh default so a file written by an older version gains
     // new fields rather than leaving them undefined at the call site.
-    const merged = { ...emptyState(slug, parsed.projectName ?? "Untitled Book"), ...parsed, slug, version: 3 as const };
+    const base = emptyState(slug, parsed.projectName ?? "Untitled Book");
+    const merged = {
+      ...base,
+      ...parsed,
+      slug,
+      version: 4 as const,
+      manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
+      styleCorpus: { ...base.styleCorpus, ...(parsed.styleCorpus ?? {}) }
+    };
     return { ...merged, sources: migrateSources(merged.sources) };
   } catch (error) {
     if (isMissing(error)) return emptyState(slug);
@@ -256,9 +283,11 @@ export function derivePhase(state: StudioState): PhaseId {
   if (state.drive.referenceRoots.length === 0) return "sources";
   if (state.sources.length === 0) return "sources";
   if (!state.sourcesReviewed) return "analyze";
+  if (blockingQuestions(state).length > 0) return "preflight";
   if (state.shape === null || state.draftingMode === null) return "intake";
-  if (state.questions.some((question) => question.blocking && question.answer === undefined)) return "intake";
+  if (!state.manuscriptReviewed) return "draft";
   if (!state.styleCorpus.built) return "preparation";
+  if (!state.styleCorpus.continuedAt) return "preparation";
   return "preflight";
 }
 

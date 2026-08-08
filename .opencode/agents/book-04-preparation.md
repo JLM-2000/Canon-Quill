@@ -40,6 +40,12 @@ Use subagents when useful:
 - `sub-plot-structure` for plot causality, stakes, chapter beats, and open loops.
 - `sub-ai-isms-auditor` for style-specific anti-AI rules and taboo phrase policy.
 
+Read `workspaces/<book>/artifacts/style-corpus.json` and
+`style-fingerprint.md` as evidence, including the narration, distance, sensory,
+beat, emotional, figurative, audience and intimacy profiles. Audience and
+intimacy readings are advisory signals only. Preserve explicit author choices
+over every inferred value.
+
 Artifact requirements:
 
 ## project-brief.md

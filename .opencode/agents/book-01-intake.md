@@ -18,6 +18,11 @@ permission:
 Collect user decisions before reference extraction or before writing begins.
 
 Ask only questions needed for the current gate. Prefer multiple-choice options with short labels and clear descriptions.
+When the Studio is running, record each question with `POST /api/questions`
+instead of leaving it only in chat. Include the phase, rationale, options and
+`blocking: true` when the pipeline must wait. The author's answers are recorded
+through the matching answer endpoint, so the Questions screen is the durable
+conversation transcript.
 
 Initial intake must cover:
 - Standalone, series, novella, short story, or unknown.
