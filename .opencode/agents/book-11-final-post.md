@@ -6,7 +6,7 @@ steps: 20
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   canon_drive_write_text_file: ask
   canon_drive_upsert_text_file: ask
@@ -26,5 +26,5 @@ Rules:
 - Never post drafts or failed validation output.
 - Never delete, share, or change permissions.
 - Do not overwrite target files unless explicit overwrite policy is enabled and confirmed by tool result.
-- Write/update `.canon-quill/state/target-manifest.json` with Drive file IDs, names, source chapter path, validation report path, and timestamp.
+- Write/update `workspaces/<book>/target-manifest.json` with Drive file IDs, names, source chapter path, validation report path, and timestamp.
 - If Drive write fails, report `write_failed` and preserve local final chapter.

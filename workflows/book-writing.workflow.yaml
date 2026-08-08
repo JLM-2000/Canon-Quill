@@ -7,10 +7,12 @@ terminal_states:
 
 global:
   max_state_retries: 3
-  state_dir: .canon-quill/state
-  logs_dir: .canon-quill/logs
-  artifacts_dir: .canon-quill/artifacts
-  target_staging_dir: .canon-quill/target-staging
+
+  # Every book lives in its own workspace. <book> is the active project slug.
+  workspace_root: workspaces
+  state_file: workspaces/<book>/project.json
+  logs_dir: workspaces/<book>/logs
+  artifacts_dir: workspaces/<book>/artifacts
 
   # Every gate that stops for the author. Nothing else may block on input --
   # the pipeline used to interrupt mid-draft to ask questions it could have

@@ -6,9 +6,9 @@ steps: 55
 permission:
   edit:
     "*": deny
-    ".canon-quill/artifacts/validation/**": allow
-    ".canon-quill/artifacts/chapters/*-validation.md": allow
-    ".canon-quill/artifacts/chapters/*-validation.json": allow
+    "workspaces/<book>/artifacts/validation/**": allow
+    "workspaces/<book>/artifacts/chapters/*-validation.md": allow
+    "workspaces/<book>/artifacts/chapters/*-validation.json": allow
   bash: deny
   task:
     "*": deny
@@ -25,15 +25,15 @@ Validate the edited chapter as a strict quality gate. Do not rewrite the chapter
 
 Required inputs:
 - Current edited chapter path.
-- Drafting mode from `.canon-quill/state/current.json`.
-- `.canon-quill/artifacts/book-bible.md`
-- `.canon-quill/artifacts/plot-bible.md`
-- `.canon-quill/artifacts/character-bible.md`
-- `.canon-quill/artifacts/world-bible.md`, when present
-- `.canon-quill/artifacts/style-guide.md`
-- `.canon-quill/artifacts/ai-isms-policy.md`
-- `.canon-quill/artifacts/validation-rubric.md`
-- `.canon-quill/artifacts/chapter-plan.md`
+- Drafting mode from `workspaces/<book>/current.json`.
+- `workspaces/<book>/artifacts/book-bible.md`
+- `workspaces/<book>/artifacts/plot-bible.md`
+- `workspaces/<book>/artifacts/character-bible.md`
+- `workspaces/<book>/artifacts/world-bible.md`, when present
+- `workspaces/<book>/artifacts/style-guide.md`
+- `workspaces/<book>/artifacts/ai-isms-policy.md`
+- `workspaces/<book>/artifacts/validation-rubric.md`
+- `workspaces/<book>/artifacts/chapter-plan.md`
 - prior approved chapters and continuity notes, when present
 - edit notes and AI-ism cleanup notes for the current chapter, when present
 
@@ -115,8 +115,8 @@ Transitions:
 
 Report requirements:
 - Put the transition token first.
-- Save a detailed report to `.canon-quill/artifacts/chapters/chapter-XX-validation.md` when possible.
-- Optionally save machine-readable gate scores to `.canon-quill/artifacts/chapters/chapter-XX-validation.json`.
+- Save a detailed report to `workspaces/<book>/artifacts/chapters/chapter-XX-validation.md` when possible.
+- Optionally save machine-readable gate scores to `workspaces/<book>/artifacts/chapters/chapter-XX-validation.json`.
 - Include exact locations/quotes for every fail condition.
 - Include revision instructions addressed to the next agent, not vague feedback.
 - Include a final proofread note and a Drive safety note.

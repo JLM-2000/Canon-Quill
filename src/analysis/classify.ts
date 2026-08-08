@@ -1,18 +1,10 @@
-/**
- * Source classification.
- *
- * The author points Canon Quill at a pile of Drive folders. Some of it is
- * previous books in the series (canon *and* the style corpus), some is
- * comparison titles by other writers (style inspiration but emphatically NOT
- * canon), some is character sheets, timelines, outlines and loose notes.
- *
- * Getting this wrong is expensive in a specific way: if another author's novel
- * is filed as a past series book, its prose is fed into the style fingerprint
- * and its facts into canon, and the book comes out sounding like someone else
- * and contradicting itself. So classification reports a confidence and the
- * evidence behind it, and anything uncertain is surfaced for the author to
- * confirm rather than silently assumed.
- */
+// Sorts a pile of Drive documents into past series books, other authors'
+// reference titles, character sheets, timelines, outlines and notes.
+//
+// Getting this wrong is expensive: another author's novel filed as a past
+// series book feeds their prose into the style fingerprint and their facts into
+// canon. So every result carries a confidence and its evidence, and anything
+// uncertain is surfaced for confirmation rather than assumed.
 
 import { dialogueSpans, splitParagraphs, words } from "../style/text.js";
 
@@ -27,9 +19,9 @@ export type SourceKind =
 
 export interface Classification {
   kind: SourceKind;
-  /** 0-1. Below `reviewThreshold` the UI asks the author to confirm. */
+  /** 0 to 1. Below `reviewThreshold` the UI asks for confirmation. */
   confidence: number;
-  /** Human-readable evidence, shown in the Studio grouping board. */
+  /** Evidence shown in the Studio grouping board. */
   reasons: string[];
   /** Runner-up, offered as a one-click correction. */
   alternative?: SourceKind;
@@ -116,11 +108,10 @@ export function classifySource(input: ClassifyInput): Classification {
     /\b(?:year|day|month|age|era|\d{3,4}\s*(?:AD|BC|CE|BCE))\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/i.test(line)
   ).length;
 
-  // Prose is defined by the absence of list/sheet structure plus a positive
-  // sign of narrative -- either dialogue or sustained paragraphs. Requiring a
-  // high *mean* paragraph length would misfile dialogue-driven fiction, whose
-  // paragraphs are mostly one-line exchanges; that is the shape of a novel,
-  // not evidence against one.
+  // Prose means no list or sheet structure, plus a positive sign of narrative:
+  // dialogue or sustained paragraphs. A high mean paragraph length would
+  // misfile dialogue-driven fiction, whose paragraphs are mostly one-line
+  // exchanges.
   const longParagraphs = paragraphs.filter((paragraph) => words(paragraph.text).length >= 40).length;
   const longParagraphShare = paragraphs.length > 0 ? longParagraphs / paragraphs.length : 0;
   const isProse =
@@ -167,8 +158,7 @@ export function classifySource(input: ClassifyInput): Classification {
   keyword("world", /\b(?:kingdom|empire|guild|religion|currency|climate|species|magic system|technology)\b/g, 2, "worldbuilding vocabulary");
   keyword("plot", /\b(?:act (?:one|two|three|i|ii|iii)|inciting|climax|resolution|midpoint|subplot|beat)\b/g, 2, "story-structure vocabulary");
 
-  // An explicit by-line for someone else is the strongest reference-book signal
-  // there is, and it must beat the "long prose = past book" default.
+  // A by-line for someone else must beat the "long prose means past book" default.
   const byline = /\bby\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/.exec(text.slice(0, 1500));
   if (byline) note("reference_book", 2.5, `by-line "${byline[1]}" near the top`);
 
@@ -177,8 +167,8 @@ export function classifySource(input: ClassifyInput): Classification {
   const [topKind, topScore] = ranked[0];
   const [altKind, altScore] = ranked[1] ?? ["notes", 0];
 
-  // Confidence blends absolute evidence with the margin over the runner-up:
-  // a document that scores 5 for two kinds is genuinely ambiguous.
+  // Blends absolute evidence with the margin over the runner-up: a document
+  // scoring equally for two kinds is genuinely ambiguous.
   const margin = topScore > 0 ? (topScore - altScore) / topScore : 0;
   const strength = Math.min(topScore / 6, 1);
   const confidence = Math.round(Math.max(0.15, Math.min(0.98, strength * 0.6 + margin * 0.4)) * 100) / 100;

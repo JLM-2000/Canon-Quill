@@ -6,7 +6,7 @@ steps: 22
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   canon_drive_*: ask
   task:
@@ -20,16 +20,16 @@ permission:
 Push the final book package to the selected target Drive folder.
 
 Required uploads:
-- `.canon-quill/artifacts/final/manuscript.docx`
-- `.canon-quill/artifacts/final/manuscript.md`
-- `.canon-quill/artifacts/final/continuity-report.md`
-- `.canon-quill/artifacts/final/style-report.md`
-- `.canon-quill/artifacts/final/open-threads-report.md`
-- `.canon-quill/artifacts/final/final-proofread-report.md`
+- `workspaces/<book>/artifacts/final/manuscript.docx`
+- `workspaces/<book>/artifacts/final/manuscript.md`
+- `workspaces/<book>/artifacts/final/continuity-report.md`
+- `workspaces/<book>/artifacts/final/style-report.md`
+- `workspaces/<book>/artifacts/final/open-threads-report.md`
+- `workspaces/<book>/artifacts/final/final-proofread-report.md`
 
 Rules:
 - Never delete, share, or mutate permissions.
 - Do not upload if DOCX is missing.
 - Refuse overwrite unless explicitly enabled by workflow/user policy.
-- Update `.canon-quill/state/final-package-manifest.json` with Drive IDs and timestamps.
+- Update `workspaces/<book>/final-package-manifest.json` with Drive IDs and timestamps.
 - On failure, return `write_failed` and preserve all local files.

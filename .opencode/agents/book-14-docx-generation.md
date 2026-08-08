@@ -6,7 +6,7 @@ steps: 18
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash:
     "*": ask
     "npm run docx": allow
@@ -21,8 +21,8 @@ permission:
 Generate the final DOCX only after the user approves the final manuscript package.
 
 Rules:
-- Input is `.canon-quill/artifacts/final/manuscript.md`.
-- Output is `.canon-quill/artifacts/final/manuscript.docx`.
+- Input is `workspaces/<book>/artifacts/final/manuscript.md`.
+- Output is `workspaces/<book>/artifacts/final/manuscript.docx`.
 - Run `npm run docx`.
 - If generation fails, report exact blocker and do not proceed to Drive posting.
 - Do not alter manuscript content in this phase except through an explicit user feedback loop routed back to book finalization.

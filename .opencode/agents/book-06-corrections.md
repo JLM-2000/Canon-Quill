@@ -6,7 +6,7 @@ steps: 24
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   task:
     "*": deny
@@ -23,5 +23,5 @@ Apply user feedback to preparation artifacts.
 Rules:
 - Do not start drafting.
 - Preserve prior findings unless explicitly corrected.
-- Record changes in `.canon-quill/artifacts/preflight-corrections-log.md`.
+- Record changes in `workspaces/<book>/artifacts/preflight-corrections-log.md`.
 - Return to preflight review when done.

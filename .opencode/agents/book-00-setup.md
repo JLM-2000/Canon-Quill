@@ -6,7 +6,7 @@ steps: 18
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash:
     "*": ask
     "node --version": allow
@@ -39,4 +39,4 @@ Must check:
 
 Do not use user-pasted secrets. If authentication is needed, require environment variables or existing CLI auth.
 
-On success, report readiness and next state. On failure, write a concise blocker report to `.canon-quill/state/setup-blockers.md` if edits are allowed.
+On success, report readiness and next state. On failure, write a concise blocker report to `workspaces/<book>/setup-blockers.md` if edits are allowed.

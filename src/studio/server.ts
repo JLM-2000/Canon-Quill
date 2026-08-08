@@ -1,32 +1,21 @@
-/**
- * Canon Quill Studio -- local control surface for a book project.
- *
- * Replaces the old wizard, which was a single textarea for pasting Drive URLs.
- * This serves a real UI and the API behind it: browse and select Drive
- * material, classify and group it, answer the questions agents raise, watch
- * chapters move through drafting with live style-fidelity and flow scores.
- *
- * Local-only by design. It binds to loopback, holds no credentials of its own
- * (Drive OAuth lives in `src/drive/auth.ts`), and every write lands in
- * `.canon-quill/`, which is gitignored.
- */
-
-import express, { type Request, type Response } from "express";
-import { readFile } from "node:fs/promises";
+import express from "express";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import { SafeDriveClient } from "../drive/client.js";
 import { extractDriveId } from "../drive/id.js";
-import { classifySource, groupSources, sourceKindLabels, type SourceKind } from "../analysis/classify.js";
-import { buildCorpus, type CorpusDocument } from "../style/corpus.js";
+import { classifySource, sourceKindLabels, type SourceKind } from "../analysis/classify.js";
+import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
 import { scoreAgainstFingerprint } from "../style/score.js";
+import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
+import { renderExemplarPrompt, retrieveExemplars } from "../style/retrieve.js";
 import { buildOpeningBrief, validateFlow } from "../continuity/flow.js";
-import { computeMetrics } from "../style/metrics.js";
 import {
   blockingQuestions,
   derivePhase,
+  emptyState,
   loadState,
   saveState,
   updateState,
@@ -34,7 +23,16 @@ import {
   type SelectedSource,
   type StudioState
 } from "./state.js";
-import { projectPaths } from "../project/paths.js";
+import {
+  activeSlug,
+  createProject,
+  deleteProject,
+  finishProject,
+  listProjects,
+  setActiveProject,
+  touchProject
+} from "../workspace/registry.js";
+import { workspacePaths } from "../workspace/paths.js";
 import { appendLog } from "../project/logs.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -50,15 +48,26 @@ export function createStudioApp() {
 
   const drive = new SafeDriveClient();
 
+  /** Resolve the workspace a request applies to, or fail with a clear message. */
+  async function requireSlug(): Promise<string> {
+    const slug = await activeSlug();
+    if (!slug) throw new HttpError(409, "No book selected. Create one first.");
+    return slug;
+  }
+
+  const route = (handler: (req: express.Request, res: express.Response) => Promise<void>) =>
+    (req: express.Request, res: express.Response) => {
+      handler(req, res).catch((error: unknown) => {
+        const status = error instanceof HttpError ? error.status : 500;
+        res.status(status).json({ error: message(error) });
+      });
+    };
+
   // --- UI -------------------------------------------------------------------
-  app.get("/", async (_req, res) => {
-    // The UI ships as one self-contained file: no bundler, no install step,
-    // nothing to rebuild before it will run.
-    const candidates = [
-      path.join(here, "ui.html"),          // dist/studio/ui.html
-      path.join(here, "../../src/studio/ui.html") // running from source via tsx
-    ];
-    for (const candidate of candidates) {
+  app.get("/", route(async (_req, res) => {
+    // The UI is one self-contained file, so there is no bundler step between
+    // editing it and running it.
+    for (const candidate of [path.join(here, "ui.html"), path.join(here, "../../src/studio/ui.html")]) {
       try {
         res.type("html").send(await readFile(candidate, "utf8"));
         return;
@@ -66,18 +75,58 @@ export function createStudioApp() {
         continue;
       }
     }
-    res.status(500).type("text").send("Studio UI not found. Run `npm run build`.");
-  });
+    res.status(500).type("text").send("Studio UI not found. Run npm run build.");
+  }));
+
+  // --- Projects -------------------------------------------------------------
+  app.get("/api/projects", route(async (_req, res) => {
+    res.json({ projects: await listProjects(), activeSlug: await activeSlug() });
+  }));
+
+  app.post("/api/projects", route(async (req, res) => {
+    const title = typeof req.body?.title === "string" ? req.body.title : "";
+    const project = await createProject(title);
+    await saveState(emptyState(project.slug, project.title));
+    await appendLog(project.slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "setup",
+      stageName: "Setup",
+      agent: "studio",
+      event: "project_created",
+      data: { slug: project.slug, title: project.title }
+    });
+    res.status(201).json({ project, state: withDerived(await loadState(project.slug)) });
+  }));
+
+  app.post("/api/projects/:slug/activate", route(async (req, res) => {
+    await setActiveProject(req.params.slug);
+    res.json({ state: withDerived(await loadState(req.params.slug)) });
+  }));
+
+  app.post("/api/projects/:slug/finish", route(async (req, res) => {
+    await finishProject(req.params.slug);
+    res.json({ projects: await listProjects() });
+  }));
+
+  app.delete("/api/projects/:slug", route(async (req, res) => {
+    await deleteProject(req.params.slug);
+    res.json({ projects: await listProjects(), activeSlug: await activeSlug() });
+  }));
 
   // --- State ----------------------------------------------------------------
-  app.get("/api/state", async (_req, res) => {
-    const state = await loadState();
-    res.json(withDerived(state));
-  });
+  app.get("/api/state", route(async (_req, res) => {
+    const slug = await activeSlug();
+    if (!slug) {
+      res.json({ state: null, projects: await listProjects() });
+      return;
+    }
+    res.json({ state: withDerived(await loadState(slug)), projects: await listProjects() });
+  }));
 
-  app.patch("/api/project", async (req, res) => {
+  app.patch("/api/project", route(async (req, res) => {
+    const slug = await requireSlug();
     const { projectName, shape, draftingMode, intake } = req.body ?? {};
-    const state = await updateState((current) => ({
+    const state = await updateState(slug, (current) => ({
       ...current,
       projectName: typeof projectName === "string" && projectName.trim() ? projectName.trim() : current.projectName,
       shape: shape === "standalone" || shape === "series" ? shape : current.shape,
@@ -85,133 +134,124 @@ export function createStudioApp() {
         draftingMode === "chapter_by_chapter" || draftingMode === "whole_book" ? draftingMode : current.draftingMode,
       intake: intake && typeof intake === "object" ? { ...current.intake, ...intake } : current.intake
     }));
+    if (typeof projectName === "string" && projectName.trim()) {
+      await touchProject(slug, { title: projectName.trim() });
+    }
     res.json(withDerived(state));
-  });
-
-  app.post("/api/reset", async (_req, res) => {
-    const { emptyState } = await import("./state.js");
-    res.json(withDerived(await saveState(emptyState())));
-  });
+  }));
 
   // --- Drive ----------------------------------------------------------------
-  app.get("/api/drive/status", async (_req, res) => {
-    // Probing with a cheap call tells us whether OAuth is actually usable,
-    // rather than whether a token file merely exists.
+  app.get("/api/drive/status", route(async (_req, res) => {
+    // Probed with a real request: a token file on disk is not proof that OAuth
+    // still works.
     try {
       await drive.listFolder("root");
-      const state = await updateState((current) => {
-        current.drive.connected = true;
-      });
-      res.json({ connected: true, referenceRoots: state.drive.referenceRoots, targetFolderId: state.drive.targetFolderId });
     } catch (error) {
       res.json({ connected: false, reason: message(error) });
+      return;
     }
-  });
+    const slug = await activeSlug();
+    if (slug) await updateState(slug, (current) => void (current.drive.connected = true));
+    res.json({ connected: true });
+  }));
 
-  app.get("/api/drive/browse", async (req, res) => {
+  app.get("/api/drive/browse", route(async (req, res) => {
     const folderId = typeof req.query.folderId === "string" && req.query.folderId ? req.query.folderId : "root";
-    try {
-      const entries = await drive.listFolder(folderId);
-      res.json({
-        folderId,
-        entries: entries.map((entry) => ({
-          ...entry,
-          isFolder: entry.mimeType === "application/vnd.google-apps.folder"
-        }))
-      });
-    } catch (error) {
-      res.status(502).json({ error: message(error) });
-    }
-  });
+    const entries = await drive.listFolder(folderId);
+    res.json({
+      folderId,
+      entries: entries.map((entry) => ({
+        ...entry,
+        isFolder: entry.mimeType === "application/vnd.google-apps.folder"
+      }))
+    });
+  }));
 
-  app.post("/api/drive/roots", async (req, res) => {
+  app.post("/api/drive/roots", route(async (req, res) => {
+    const slug = await requireSlug();
     const raw: unknown = req.body?.roots;
     const roots = Array.isArray(raw)
       ? raw.map((value) => extractDriveId(String(value))).filter((id): id is string => Boolean(id))
       : [];
     const target = req.body?.targetFolderId ? extractDriveId(String(req.body.targetFolderId)) : null;
 
-    const state = await updateState((current) => {
+    const state = await updateState(slug, (current) => {
       current.drive.referenceRoots = roots;
       if (target) current.drive.targetFolderId = target;
     });
     res.json(withDerived(state));
-  });
+  }));
 
-  /**
-   * Index the selected roots: walk them, read every readable text document,
-   * classify it, and store the grouping for the author to confirm.
-   */
-  app.post("/api/sources/index", async (_req, res) => {
-    const state = await loadState();
+  app.post("/api/sources/index", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
     if (state.drive.referenceRoots.length === 0) {
-      res.status(400).json({ error: "Select at least one reference folder first." });
-      return;
+      throw new HttpError(400, "Select at least one reference folder first.");
     }
 
-    try {
-      const documents: Array<{ source: SelectedSource; text: string }> = [];
+    const found: Array<{ source: SelectedSource; text: string }> = [];
 
-      for (const root of state.drive.referenceRoots) {
-        const tree = await drive.walkFolder(root, { maxDepth: 6, maxFiles: 400 });
-        for (const node of flatten(tree)) {
-          if (node.isFolder || !isReadable(node.mimeType)) continue;
-          let text = "";
-          try {
-            text = await drive.readFileText(node.id);
-          } catch {
-            continue; // unreadable file: skip rather than fail the whole index
-          }
-          const classification = classifySource({ name: node.name, path: node.path, text });
-          documents.push({
-            source: {
-              driveId: node.id,
-              name: node.name,
-              path: node.path,
-              mimeType: node.mimeType,
-              isFolder: false,
-              kind: classification.kind,
-              confidence: classification.confidence,
-              reasons: classification.reasons,
-              confirmedByUser: false,
-              wordCount: computeMetrics(text).wordCount
-            },
-            text
-          });
+    for (const root of state.drive.referenceRoots) {
+      const tree = await drive.walkFolder(root, { maxDepth: 6, maxFiles: 400 });
+      for (const node of flatten(tree)) {
+        if (node.isFolder || !isReadable(node.mimeType)) continue;
+        let text = "";
+        try {
+          text = await drive.readFileText(node.id);
+        } catch {
+          continue;
         }
+        const classification = classifySource({ name: node.name, path: node.path, text });
+        found.push({
+          source: {
+            driveId: node.id,
+            name: node.name,
+            path: node.path,
+            mimeType: node.mimeType,
+            isFolder: false,
+            kind: classification.kind,
+            confidence: classification.confidence,
+            reasons: classification.reasons,
+            confirmedByUser: false,
+            wordCount: computeMetrics(text).wordCount
+          },
+          text
+        });
       }
-
-      // Cache text locally so building the style corpus later does not re-fetch
-      // every document from Drive.
-      await cacheDocuments(documents.map(({ source, text }) => ({ id: source.driveId, name: source.name, text })));
-
-      const next = await updateState((current) => {
-        current.sources = documents.map(({ source }) => source);
-        current.drive.lastIndexedAt = new Date().toISOString();
-      });
-
-      await appendLog("audit", {
-        timestamp: new Date().toISOString(),
-        stage: "analyze",
-        stageName: "Source analysis",
-        agent: "studio",
-        event: "sources_indexed",
-        data: { count: documents.length }
-      });
-
-      res.json(withDerived(next));
-    } catch (error) {
-      res.status(502).json({ error: message(error) });
     }
-  });
 
-  app.patch("/api/sources/:driveId", async (req, res) => {
+    // Cached so building the corpus later does not refetch every document.
+    const cache = workspacePaths(slug).driveCache;
+    await mkdir(cache, { recursive: true });
+    await Promise.all(
+      found.map((entry) =>
+        writeFile(path.join(cache, `${entry.source.driveId}.json`), JSON.stringify({ text: entry.text }), "utf8")
+      )
+    );
+
+    const next = await updateState(slug, (current) => {
+      current.sources = found.map((entry) => entry.source);
+      current.drive.lastIndexedAt = new Date().toISOString();
+    });
+
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "source_analysis",
+      stageName: "Source analysis",
+      agent: "studio",
+      event: "sources_indexed",
+      data: { count: found.length }
+    });
+
+    res.json(withDerived(next));
+  }));
+
+  app.patch("/api/sources/:driveId", route(async (req, res) => {
+    const slug = await requireSlug();
     const kind = req.body?.kind as SourceKind | undefined;
-    if (!kind || !(kind in sourceKindLabels)) {
-      res.status(400).json({ error: "Unknown source kind." });
-      return;
-    }
-    const state = await updateState((current) => {
+    if (!kind || !(kind in sourceKindLabels)) throw new HttpError(400, "Unknown source kind.");
+
+    const state = await updateState(slug, (current) => {
       const source = current.sources.find((entry) => entry.driveId === req.params.driveId);
       if (source) {
         source.kind = kind;
@@ -221,47 +261,46 @@ export function createStudioApp() {
       }
     });
     res.json(withDerived(state));
-  });
+  }));
 
-  app.post("/api/sources/confirm-all", async (_req, res) => {
-    const state = await updateState((current) => {
+  app.post("/api/sources/confirm-all", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
       for (const source of current.sources) source.confirmedByUser = true;
     });
     res.json(withDerived(state));
-  });
+  }));
 
-  // --- Style corpus ---------------------------------------------------------
-  /**
-   * Build the exemplar corpus from documents grouped as past series books.
-   *
-   * Only `past_book` sources are used. Reference books by other authors are
-   * deliberately excluded: their prose would pull the fingerprint towards
-   * someone else's voice, which is the precise failure this system exists to
-   * prevent.
-   */
-  app.post("/api/style/build", async (_req, res) => {
-    const state = await loadState();
+  // --- Style ----------------------------------------------------------------
+  app.post("/api/style/build", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
     const pastBooks = state.sources.filter((source) => source.kind === "past_book");
 
     if (pastBooks.length === 0) {
-      res.status(400).json({
-        error:
-          "No sources are grouped as 'Past series book'. The style corpus is built only from your own prose, so at least one is required."
-      });
-      return;
+      throw new HttpError(
+        400,
+        "No sources are grouped as a past series book. The corpus is built only from your own prose, so at least one is required."
+      );
     }
 
     const documents: CorpusDocument[] = [];
     for (const source of pastBooks) {
-      const text = await readCachedDocument(source.driveId);
+      const text = await readCached(slug, source.driveId);
       if (text) documents.push({ source: source.name, text });
     }
 
     const corpus = buildCorpus(state.projectName, documents);
-    await writeArtifact("style-corpus.json", JSON.stringify(corpus, null, 2));
-    await writeArtifact("style-fingerprint.md", renderFingerprint(corpus.label, corpus.fingerprint, corpus.passages.length));
+    const paths = workspacePaths(slug);
+    await mkdir(paths.artifacts, { recursive: true });
+    await writeFile(path.join(paths.artifacts, "style-corpus.json"), JSON.stringify(corpus, null, 2), "utf8");
+    await writeFile(
+      path.join(paths.artifacts, "style-fingerprint.md"),
+      renderFingerprint(corpus.label, corpus.fingerprint, corpus.passages.length),
+      "utf8"
+    );
 
-    const next = await updateState((current) => {
+    const next = await updateState(slug, (current) => {
       current.styleCorpus = {
         built: true,
         label: corpus.label,
@@ -272,40 +311,69 @@ export function createStudioApp() {
     });
 
     res.json({ ...withDerived(next), fingerprint: corpus.fingerprint });
-  });
+  }));
 
-  app.get("/api/style/fingerprint", async (_req, res) => {
-    const corpus = await readCorpus();
-    if (!corpus) {
-      res.status(404).json({ error: "No style corpus built yet." });
-      return;
-    }
+  app.get("/api/style/fingerprint", route(async (_req, res) => {
+    const corpus = await readCorpus(await requireSlug());
+    if (!corpus) throw new HttpError(404, "No style corpus built yet.");
     res.json({ label: corpus.label, fingerprint: corpus.fingerprint, passageCount: corpus.passages.length });
-  });
+  }));
 
-  /** Score arbitrary text against the corpus -- used by the UI's live check. */
-  app.post("/api/style/score", async (req, res) => {
-    const text = typeof req.body?.text === "string" ? req.body.text : "";
-    const corpus = await readCorpus();
-    if (!corpus) {
-      res.status(400).json({ error: "Build the style corpus first." });
-      return;
-    }
-    res.json(scoreAgainstFingerprint(text, corpus.fingerprint));
-  });
+  app.post("/api/style/score", route(async (req, res) => {
+    const corpus = await readCorpus(await requireSlug());
+    if (!corpus) throw new HttpError(400, "Build the style corpus first.");
+    res.json(scoreAgainstFingerprint(typeof req.body?.text === "string" ? req.body.text : "", corpus.fingerprint));
+  }));
+
+  /**
+   * Retrieve exemplar passages for a scene and render them as a prompt block.
+   * This is what the drafting agent calls before writing, so the model sees the
+   * author's actual paragraphs for the beat rather than a description of them.
+   */
+  app.post("/api/style/exemplars", route(async (req, res) => {
+    const corpus = await readCorpus(await requireSlug());
+    if (!corpus) throw new HttpError(400, "Build the style corpus first.");
+
+    const beat = (req.body?.beat ?? "dialogue") as BeatType;
+    const valid: BeatType[] = ["dialogue", "action", "interiority", "description", "transition"];
+    if (!valid.includes(beat)) throw new HttpError(400, `Unknown beat "${beat}".`);
+
+    const brief = {
+      beat,
+      characters: Array.isArray(req.body?.characters) ? req.body.characters.map(String) : undefined,
+      summary: typeof req.body?.summary === "string" ? req.body.summary : undefined,
+      register: typeof req.body?.register === "string" ? req.body.register : undefined
+    };
+    const exemplars = retrieveExemplars(corpus, brief, {
+      limit: Number(req.body?.limit) || 4,
+      maxWords: Number(req.body?.maxWords) || 1200
+    });
+
+    res.json({
+      brief,
+      prompt: renderExemplarPrompt(exemplars, brief),
+      exemplars: exemplars.map((entry) => ({
+        source: entry.passage.source,
+        beat: entry.passage.beat,
+        wordCount: entry.passage.wordCount,
+        score: entry.score,
+        reasons: entry.reasons,
+        text: entry.passage.text
+      }))
+    });
+  }));
 
   // --- Questions ------------------------------------------------------------
-  app.get("/api/questions", async (_req, res) => {
-    const state = await loadState();
+  app.get("/api/questions", route(async (_req, res) => {
+    const state = await loadState(await requireSlug());
     res.json({ questions: state.questions, blocking: blockingQuestions(state) });
-  });
+  }));
 
-  /** Agents POST here when they need the author to decide something. */
-  app.post("/api/questions", async (req, res) => {
+  app.post("/api/questions", route(async (req, res) => {
+    const slug = await requireSlug();
     const body = req.body ?? {};
     if (typeof body.question !== "string" || !body.question.trim()) {
-      res.status(400).json({ error: "A question is required." });
-      return;
+      throw new HttpError(400, "A question is required.");
     }
     const question: OpenQuestion = {
       id: randomUUID(),
@@ -318,19 +386,16 @@ export function createStudioApp() {
       askedAt: new Date().toISOString(),
       blocking: body.blocking === true
     };
-    const state = await updateState((current) => {
-      current.questions.push(question);
-    });
+    const state = await updateState(slug, (current) => void current.questions.push(question));
     res.status(201).json({ question, state: withDerived(state) });
-  });
+  }));
 
-  app.post("/api/questions/:id/answer", async (req, res) => {
+  app.post("/api/questions/:id/answer", route(async (req, res) => {
+    const slug = await requireSlug();
     const answer = typeof req.body?.answer === "string" ? req.body.answer.trim() : "";
-    if (!answer) {
-      res.status(400).json({ error: "An answer is required." });
-      return;
-    }
-    const state = await updateState((current) => {
+    if (!answer) throw new HttpError(400, "An answer is required.");
+
+    const state = await updateState(slug, (current) => {
       const question = current.questions.find((entry) => entry.id === req.params.id);
       if (question) {
         question.answer = answer;
@@ -338,80 +403,70 @@ export function createStudioApp() {
       }
     });
     res.json(withDerived(state));
-  });
+  }));
 
   // --- Chapters -------------------------------------------------------------
-  app.put("/api/chapters", async (req, res) => {
+  app.put("/api/chapters", route(async (req, res) => {
+    const slug = await requireSlug();
     const raw: unknown = req.body?.chapters;
-    if (!Array.isArray(raw)) {
-      res.status(400).json({ error: "chapters must be an array." });
-      return;
-    }
-    const chapters = raw.map((entry, index) => ({
-      number: Number((entry as Record<string, unknown>).number ?? index + 1),
-      title: String((entry as Record<string, unknown>).title ?? `Chapter ${index + 1}`),
-      synopsis: String((entry as Record<string, unknown>).synopsis ?? ""),
-      status: "planned" as const,
-      issues: [] as string[]
-    }));
+    if (!Array.isArray(raw)) throw new HttpError(400, "chapters must be an array.");
 
-    const state = await updateState((current) => {
+    const chapters = raw.map((entry, index) => {
+      const record = entry as Record<string, unknown>;
+      return {
+        number: Number(record.number ?? index + 1),
+        title: String(record.title ?? `Chapter ${index + 1}`),
+        synopsis: String(record.synopsis ?? ""),
+        status: "planned" as const,
+        issues: [] as string[]
+      };
+    });
+
+    const state = await updateState(slug, (current) => {
       current.chapters = chapters;
       current.ledger.plannedChapters = chapters.length;
     });
     res.json(withDerived(state));
-  });
+  }));
 
-  /** The opening contract for a chapter, straight from the continuity ledger. */
-  app.get("/api/chapters/:number/brief", async (req, res) => {
-    const state = await loadState();
-    const number = Number(req.params.number);
-    res.type("text/markdown").send(buildOpeningBrief(state.ledger, number));
-  });
+  app.get("/api/chapters/:number/brief", route(async (req, res) => {
+    const state = await loadState(await requireSlug());
+    res.type("text/markdown").send(buildOpeningBrief(state.ledger, Number(req.params.number)));
+  }));
 
-  /**
-   * Validate a drafted chapter: style fidelity plus chapter-to-chapter flow.
-   * This is the gate the old pipeline had no code for.
-   */
-  app.post("/api/chapters/:number/validate", async (req, res) => {
+  app.post("/api/chapters/:number/validate", route(async (req, res) => {
+    const slug = await requireSlug();
     const number = Number(req.params.number);
     const text = typeof req.body?.text === "string" ? req.body.text : "";
-    if (!text.trim()) {
-      res.status(400).json({ error: "Chapter text is required." });
-      return;
-    }
+    if (!text.trim()) throw new HttpError(400, "Chapter text is required.");
 
-    const state = await loadState();
-    const corpus = await readCorpus();
+    const state = await loadState(slug);
+    const corpus = await readCorpus(slug);
     const style = corpus ? scoreAgainstFingerprint(text, corpus.fingerprint) : null;
     const flow = validateFlow(state.ledger, number, text, req.body?.handoff);
 
-    const next = await updateState((current) => {
+    const next = await updateState(slug, (current) => {
       const chapter = current.chapters.find((entry) => entry.number === number);
       if (chapter) {
         chapter.status = style?.verdict === "pass" && flow.verdict === "pass" ? "validated" : "needs_work";
         chapter.wordCount = computeMetrics(text).wordCount;
         chapter.styleFidelity = style?.fidelity;
         chapter.flowVerdict = flow.verdict;
-        chapter.issues = [
-          ...flow.issues.map((issue) => issue.message),
-          ...(style?.instructions ?? [])
-        ].slice(0, 20);
+        chapter.issues = [...flow.issues.map((issue) => issue.message), ...(style?.instructions ?? [])].slice(0, 20);
         chapter.updatedAt = new Date().toISOString();
       }
     });
 
     res.json({ style, flow, state: withDerived(next) });
-  });
+  }));
 
-  app.post("/api/chapters/:number/status", async (req, res) => {
+  app.post("/api/chapters/:number/status", route(async (req, res) => {
+    const slug = await requireSlug();
     const status = req.body?.status;
     const allowed = ["planned", "drafting", "drafted", "editing", "validated", "approved", "needs_work"];
-    if (!allowed.includes(status)) {
-      res.status(400).json({ error: "Unknown chapter status." });
-      return;
-    }
-    const state = await updateState((current) => {
+    if (!allowed.includes(status)) throw new HttpError(400, "Unknown chapter status.");
+
+    const state = await updateState(slug, (current) => {
       const chapter = current.chapters.find((entry) => entry.number === Number(req.params.number));
       if (chapter) {
         chapter.status = status;
@@ -419,7 +474,7 @@ export function createStudioApp() {
       }
     });
     res.json(withDerived(state));
-  });
+  }));
 
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
@@ -428,32 +483,36 @@ export function createStudioApp() {
 
 export function startStudio(options: StudioServerOptions = {}) {
   const port = options.port ?? Number(process.env.CANON_QUILL_STUDIO_PORT ?? 4180);
-  // Loopback only: this surface exposes the author's manuscript and Drive
-  // contents and must never be reachable from the network.
+  // Loopback only. This surface exposes manuscripts and Drive contents.
   const host = options.host ?? "127.0.0.1";
-  const app = createStudioApp();
-  return app.listen(port, host, () => {
-    console.log(`Canon Quill Studio → http://${host}:${port}`);
+  return createStudioApp().listen(port, host, () => {
+    console.log(`Canon Quill Studio -> http://${host}:${port}`);
   });
 }
 
-// --- helpers ----------------------------------------------------------------
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
 
 function withDerived(state: StudioState) {
   return { ...state, phase: derivePhase(state), blocking: blockingQuestions(state).length };
 }
 
-function flatten(nodes: Array<{ children?: unknown[] }>): Array<{
+interface FlatNode {
   id: string;
   name: string;
   path: string;
   mimeType: string;
   isFolder: boolean;
-}> {
-  const output: Array<{ id: string; name: string; path: string; mimeType: string; isFolder: boolean }> = [];
+}
+
+function flatten(nodes: Array<FlatNode & { children?: unknown[] }>): FlatNode[] {
+  const output: FlatNode[] = [];
   const walk = (list: unknown[]) => {
     for (const entry of list) {
-      const node = entry as { id: string; name: string; path: string; mimeType: string; isFolder: boolean; children?: unknown[] };
+      const node = entry as FlatNode & { children?: unknown[] };
       output.push({ id: node.id, name: node.name, path: node.path, mimeType: node.mimeType, isFolder: node.isFolder });
       if (node.children) walk(node.children);
     }
@@ -462,7 +521,6 @@ function flatten(nodes: Array<{ children?: unknown[] }>): Array<{
   return output;
 }
 
-/** Mime types we can turn into text. */
 function isReadable(mimeType: string): boolean {
   return (
     mimeType.startsWith("text/") ||
@@ -472,51 +530,33 @@ function isReadable(mimeType: string): boolean {
   );
 }
 
-const cacheDir = () => path.join(projectPaths.workspace, "drive-cache");
-
-async function cacheDocuments(documents: Array<{ id: string; name: string; text: string }>): Promise<void> {
-  const { mkdir, writeFile } = await import("node:fs/promises");
-  await mkdir(cacheDir(), { recursive: true });
-  await Promise.all(
-    documents.map((document) =>
-      writeFile(path.join(cacheDir(), `${document.id}.json`), JSON.stringify(document), "utf8")
-    )
-  );
-}
-
-async function readCachedDocument(driveId: string): Promise<string | undefined> {
+async function readCached(slug: string, driveId: string): Promise<string | undefined> {
   try {
-    const raw = await readFile(path.join(cacheDir(), `${driveId}.json`), "utf8");
+    const raw = await readFile(path.join(workspacePaths(slug).driveCache, `${driveId}.json`), "utf8");
     return (JSON.parse(raw) as { text: string }).text;
   } catch {
     return undefined;
   }
 }
 
-async function writeArtifact(name: string, content: string): Promise<void> {
-  const { mkdir, writeFile } = await import("node:fs/promises");
-  await mkdir(projectPaths.artifacts, { recursive: true });
-  await writeFile(path.join(projectPaths.artifacts, name), content, "utf8");
-}
-
-async function readCorpus() {
+async function readCorpus(slug: string): Promise<StyleCorpus | undefined> {
   try {
-    const raw = await readFile(path.join(projectPaths.artifacts, "style-corpus.json"), "utf8");
-    return JSON.parse(raw) as import("../style/corpus.js").StyleCorpus;
+    const raw = await readFile(path.join(workspacePaths(slug).artifacts, "style-corpus.json"), "utf8");
+    return JSON.parse(raw) as StyleCorpus;
   } catch {
     return undefined;
   }
 }
 
-function renderFingerprint(label: string, fingerprint: ReturnType<typeof computeMetrics>, passages: number): string {
+function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: number): string {
+  const pct = (value: number) => `${Math.round(value * 100)}%`;
   return [
-    `# Style Fingerprint — ${label}`,
+    `# Style fingerprint: ${label}`,
     "",
-    `Built from ${passages} passages, ${fingerprint.wordCount.toLocaleString()} words of the author's own prose.`,
+    `Built from ${passages} passages, ${fingerprint.wordCount.toLocaleString()} words of your own prose.`,
     "",
-    "These are targets, not rules. Drafts are compared against them by",
-    "`src/style/score.ts`; deviation is measured against *this author*, never",
-    "against a generic idea of good writing.",
+    "These are targets, not rules. Drafts are compared against them, and deviation",
+    "is measured against your writing rather than a generic standard.",
     "",
     "| Measure | Target |",
     "|---|---:|",
@@ -529,27 +569,21 @@ function renderFingerprint(label: string, fingerprint: ReturnType<typeof compute
     `| Dialogue share | ${pct(fingerprint.dialogue.wordShare)} |`,
     `| Mean dialogue line | ${fingerprint.dialogue.meanLineWords} words |`,
     `| Plain dialogue tags | ${pct(fingerprint.dialogue.invisibleTagShare)} |`,
-    `| Ornate tags / 1k words | ${fingerprint.dialogue.ornateTagsPer1k} |`,
-    `| -ly adverbs / 1k | ${fingerprint.texture.lyAdverbsPer1k} |`,
-    `| Filter verbs / 1k | ${fingerprint.texture.filterVerbsPer1k} |`,
-    `| Abstract nouns / 1k | ${fingerprint.texture.abstractNounsPer1k} |`,
-    `| Similes / 1k | ${fingerprint.texture.similesPer1k} |`,
-    `| Contractions / 1k | ${fingerprint.texture.contractionsPer1k} |`,
-    `| Em dashes / 1k | ${fingerprint.texture.emDashesPer1k} |`,
+    `| Ornate tags per 1k words | ${fingerprint.dialogue.ornateTagsPer1k} |`,
+    `| Adverbs per 1k | ${fingerprint.texture.lyAdverbsPer1k} |`,
+    `| Filter verbs per 1k | ${fingerprint.texture.filterVerbsPer1k} |`,
+    `| Abstract nouns per 1k | ${fingerprint.texture.abstractNounsPer1k} |`,
+    `| Similes per 1k | ${fingerprint.texture.similesPer1k} |`,
+    `| Contractions per 1k | ${fingerprint.texture.contractionsPer1k} |`,
     `| Vocabulary variety | ${fingerprint.texture.typeTokenRatio} |`,
     ""
   ].join("\n");
-}
-
-function pct(value: number): string {
-  return `${Math.round(value * 100)}%`;
 }
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Start when executed directly.
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   startStudio();
 }

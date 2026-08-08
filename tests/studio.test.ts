@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import { createStudioApp } from "../src/studio/server.js";
-import { derivePhase, emptyState, loadState, saveState } from "../src/studio/state.js";
-import { projectPaths } from "../src/project/paths.js";
+import { derivePhase, emptyState, loadState } from "../src/studio/state.js";
+import { workspacesRoot } from "../src/workspace/paths.js";
 import type { Server } from "node:http";
 
 let server: Server;
@@ -28,29 +28,29 @@ async function call(path: string, init?: { method?: string; body?: unknown }) {
 }
 
 beforeEach(async () => {
-  await rm(projectPaths.workspace, { recursive: true, force: true });
-  await saveState(emptyState("Test Book"));
+  await rm(workspacesRoot(), { recursive: true, force: true });
   if (!server) await listen();
+  await call("/api/projects", { method: "POST", body: { title: "Test Book" } });
 });
 
 afterAll(async () => {
   server?.close();
-  await rm(projectPaths.workspace, { recursive: true, force: true });
+  await rm(workspacesRoot(), { recursive: true, force: true });
 });
 
 describe("phase derivation", () => {
   it("starts at connect on a fresh project", () => {
-    expect(derivePhase(emptyState())).toBe("connect");
+    expect(derivePhase(emptyState("x"))).toBe("connect");
   });
 
   it("asks for sources once Drive is connected", () => {
-    const state = emptyState();
+    const state = emptyState("x");
     state.drive.connected = true;
     expect(derivePhase(state)).toBe("sources");
   });
 
   it("asks for intake once sources are confirmed", () => {
-    const state = emptyState();
+    const state = emptyState("x");
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
     state.sources = [
@@ -63,13 +63,13 @@ describe("phase derivation", () => {
   });
 
   it("moves to writing once chapters exist", () => {
-    const state = emptyState();
+    const state = emptyState("x");
     state.chapters = [{ number: 1, title: "One", synopsis: "", status: "planned", issues: [] }];
     expect(derivePhase(state)).toBe("writing");
   });
 
   it("reaches export only when every chapter is approved", () => {
-    const state = emptyState();
+    const state = emptyState("x");
     state.chapters = [
       { number: 1, title: "One", synopsis: "", status: "approved", issues: [] },
       { number: 2, title: "Two", synopsis: "", status: "drafted", issues: [] }
@@ -90,8 +90,8 @@ describe("studio api", () => {
 
   it("returns state with a derived phase", async () => {
     const { body } = await call("/api/state");
-    expect(body.projectName).toBe("Test Book");
-    expect(body.phase).toBe("connect");
+    expect(body.state.projectName).toBe("Test Book");
+    expect(body.state.phase).toBe("connect");
   });
 
   it("records project shape and drafting mode", async () => {
@@ -199,7 +199,46 @@ describe("studio api", () => {
 
   it("persists state across reads", async () => {
     await call("/api/project", { method: "PATCH", body: { projectName: "Ashfall" } });
-    expect((await loadState()).projectName).toBe("Ashfall");
+    expect((await loadState("test-book")).projectName).toBe("Ashfall");
+  });
+
+  it("lists projects and switches between them", async () => {
+    await call("/api/projects", { method: "POST", body: { title: "Second Book" } });
+    const { body } = await call("/api/projects");
+    expect(body.projects.map((p: any) => p.slug).sort()).toEqual(["second-book", "test-book"]);
+    expect(body.activeSlug).toBe("second-book");
+
+    await call("/api/projects/test-book/activate", { method: "POST" });
+    const after = await call("/api/state");
+    expect(after.body.state.projectName).toBe("Test Book");
+  });
+
+  it("keeps each book's data separate", async () => {
+    await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "Only In Book One" }] } });
+    await call("/api/projects", { method: "POST", body: { title: "Second Book" } });
+    const second = await call("/api/state");
+    expect(second.body.state.chapters).toHaveLength(0);
+
+    await call("/api/projects/test-book/activate", { method: "POST" });
+    const first = await call("/api/state");
+    expect(first.body.state.chapters[0].title).toBe("Only In Book One");
+  });
+
+  it("finishing a book keeps it listed", async () => {
+    await call("/api/projects/test-book/finish", { method: "POST" });
+    const { body } = await call("/api/projects");
+    expect(body.projects.find((p: any) => p.slug === "test-book").status).toBe("finished");
+  });
+
+  it("rejects a project with a blank title", async () => {
+    const { status } = await call("/api/projects", { method: "POST", body: { title: "   " } });
+    expect(status).toBe(500);
+  });
+
+  it("refuses exemplars before a corpus exists", async () => {
+    const { status, body } = await call("/api/style/exemplars", { method: "POST", body: { beat: "dialogue" } });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/corpus/i);
   });
 
   it("404s unknown routes as JSON", async () => {

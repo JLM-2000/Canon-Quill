@@ -197,11 +197,9 @@
 </div>
 
 <script>
-// ---------------------------------------------------------------------------
-// Canon Quill Studio front end.
-// Plain ES modules-free JS: no build step, so `npm run studio` just works.
-// ---------------------------------------------------------------------------
-let S = null;              // studio state from the server
+// Canon Quill Studio front end. Plain JS, no build step.
+let S = null;              // active book state, null when no book is selected
+let PROJECTS = [];
 let route = "connect";
 let browse = { folderId: "root", crumbs: [{ id: "root", name: "My Drive" }], entries: [], loading: false };
 let picked = new Map();    // driveId -> name, chosen reference roots
@@ -244,7 +242,25 @@ function toast(msg, isError) {
 }
 
 async function reload() {
-  try { S = await api("/api/state"); render(); }
+  try {
+    const r = await api("/api/state");
+    S = r.state; PROJECTS = r.projects || [];
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function newProject() {
+  const title = prompt("Book title");
+  if (!title || !title.trim()) return;
+  try {
+    const r = await api("/api/projects", { method: "POST", body: { title: title.trim() } });
+    S = r.state; await reload(); route = "connect"; render();
+    toast(`Created "${r.project.title}".`);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function switchProject(slug) {
+  try { await api(`/api/projects/${slug}/activate`, { method: "POST" }); await reload(); }
   catch (e) { toast(e.message, true); }
 }
 
@@ -258,18 +274,29 @@ function fidelityClass(v) { return v >= 80 ? "good" : v >= 60 ? "warn" : "bad"; 
 function renderNav() {
   const nav = document.getElementById("nav");
   const blocking = (S?.questions || []).filter((q) => q.blocking && q.answer === undefined).length;
-  let html = "";
-  let group = "";
-  for (const p of PHASES) {
-    if (p.group !== group) { group = p.group; html += `<div class="navgroup">${group}</div>`; }
-    const done = isDone(p.id);
-    const cur = S?.phase === p.id;
-    html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""}"
-      onclick="go('${p.id}')"><span class="dot"></span>${p.label}${
-      p.id === "questions" && blocking ? `<span class="badge">${blocking}</span>` : ""}</button>`;
+
+  let html = `<div class="navgroup">Book</div>
+    <select onchange="if(this.value==='__new')newProject();else switchProject(this.value)"
+      style="margin-bottom:6px;font-size:12.5px;padding:6px 8px">
+      ${PROJECTS.map((p) => `<option value="${p.slug}" ${S && p.slug === S.slug ? "selected" : ""}>
+        ${esc(p.title)}${p.status === "finished" ? " (finished)" : ""}</option>`).join("")}
+      ${PROJECTS.length ? "" : '<option value="">No books yet</option>'}
+      <option value="__new">+ New book...</option>
+    </select>`;
+
+  if (S) {
+    let group = "";
+    for (const p of PHASES) {
+      if (p.group !== group) { group = p.group; html += `<div class="navgroup">${group}</div>`; }
+      const done = isDone(p.id);
+      const cur = S.phase === p.id;
+      html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""}"
+        onclick="go('${p.id}')"><span class="dot"></span>${p.label}${
+        p.id === "questions" && blocking ? `<span class="badge">${blocking}</span>` : ""}</button>`;
+    }
   }
   nav.innerHTML = html;
-  document.getElementById("proj").textContent = S?.projectName || "Studio";
+  document.getElementById("proj").textContent = S?.projectName || "no book selected";
 }
 
 function isDone(id) {
@@ -290,9 +317,17 @@ function go(r) { route = r; render(); if (r === "sources") loadBrowse(browse.fol
 
 // --- views -----------------------------------------------------------------
 function render() {
-  if (!S) return;
   renderNav();
   const v = document.getElementById("view");
+  if (!S) {
+    v.innerHTML = `
+      <h1>No book selected</h1>
+      <p class="sub">Every book gets its own workspace under <code>workspaces/</code>, holding its
+      own sources, style corpus, chapters and continuity. Books are independent, and finishing one
+      never deletes it.</p>
+      <div class="card"><button onclick="newProject()">Create your first book</button></div>`;
+    return;
+  }
   v.innerHTML = ({
     connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
     intake: viewIntake, style: viewStyle, questions: viewQuestions, chapters: viewChapters
@@ -305,7 +340,7 @@ function viewConnect() {
   <h1>Connect Google Drive</h1>
   <p class="sub">Canon Quill reads your reference material straight from Drive and writes approved
   chapters back to a folder you choose. Access is limited to the
-  <code>drive.file</code> scope — only files you explicitly pick.</p>
+  <code>drive.file</code> scope, so only files you explicitly pick.</p>
   <div class="card spread">
     <div>
       <div class="row"><b>Status</b>
@@ -348,7 +383,7 @@ function viewSources() {
   return `
   <h1>Select sources</h1>
   <p class="sub">Browse your Drive and mark the folders Canon Quill should read. Include your past
-  books in the series — they become the style corpus the drafting model actually writes against.</p>
+  books in the series. They become the style corpus the drafting model writes against.</p>
 
   <div class="card">
     <div class="crumbs">${browse.crumbs.map((c, i) =>
@@ -426,7 +461,7 @@ function viewAnalyze() {
   return `
   <h1>Analyse &amp; group</h1>
   <p class="sub">Every document was read and classified. Correct anything that landed in the wrong
-  column — this matters: only <b>Past series book</b> feeds the style corpus and canon, so a
+  column . This matters: only <b>Past series book</b> feeds the style corpus and canon, so a
   reference book filed wrongly would push the writing toward another author's voice.</p>
   ${needsReview.length ? `<div class="card" style="border-color:var(--warn)">
     <b>${needsReview.length} document(s) need your confirmation</b>
@@ -484,7 +519,7 @@ function viewIntake() {
        ["pov", "POV and tense", ["close third, past", "first person, past", "first person, present", "omniscient"]]]
       .map(([k, label, opts]) => `<div style="margin-bottom:12px"><label>${label}</label>
         <select onchange="setProject({intake:{${k}:this.value}})">
-          <option value="">—</option>
+          <option value="">Not set</option>
           ${opts.map((o) => `<option ${S.intake[k] === o ? "selected" : ""}>${o}</option>`).join("")}
         </select></div>`).join("")}
   </div>
@@ -503,7 +538,7 @@ function viewStyle() {
   <h1>Style corpus</h1>
   <p class="sub">This is what stops the writing sounding generic. Canon Quill cuts your past books
   into passages, tags each by the kind of beat it carries, and measures your prose. When a chapter
-  is drafted, real passages of yours for that same beat go into the prompt — and the result is
+  is drafted, real passages of yours for that same beat go into the prompt, and the result is
   scored against your measured fingerprint, not against a generic idea of good writing.</p>
 
   <div class="card spread">
@@ -516,7 +551,7 @@ function viewStyle() {
     <div class="row" style="margin-bottom:10px"><b>Corpus built</b>
       <span class="pill good">${sc.passageCount} passages</span>
       <span class="pill">${sc.wordCount.toLocaleString()} words</span></div>
-    ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words — the fingerprint will be noisy. Add more of your prose.</div>' : ""}
+    ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
     <div id="fp"><span class="spin"></span></div></div>` : ""}`;
 }
 
@@ -630,9 +665,12 @@ async function setStatus(number, status) {
 // --- boot ------------------------------------------------------------------
 (async function () {
   await reload();
-  if (S) { route = S.phase === "complete" ? "chapters" : (PHASES.find((p) => p.id === S.phase)?.id || "connect"); render(); }
-  if (route === "sources") loadBrowse("root");
-  if (route === "style" && S?.styleCorpus.built) loadFingerprint();
+  if (S) {
+    route = PHASES.find((p) => p.id === S.phase)?.id || "connect";
+    render();
+    if (route === "sources") loadBrowse("root");
+    if (route === "style" && S.styleCorpus.built) loadFingerprint();
+  }
 })();
 </script>
 </body>

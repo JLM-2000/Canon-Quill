@@ -18,20 +18,20 @@ This is a craft audit, not a banned-word scanner. A trigger word is acceptable w
 
 Primary references:
 - `config/ai-isms.yaml`
-- `.canon-quill/artifacts/style-guide.md`
-- `.canon-quill/artifacts/ai-isms-policy.md`
+- `workspaces/<book>/artifacts/style-guide.md`
+- `workspaces/<book>/artifacts/ai-isms-policy.md`
 - The current chapter/draft being audited
 - Prior approved chapters, when supplied
 
 Audit passes:
-1. **Lexical trigger pass** — find suspect words, adverbs, intensifiers, body cliches, filter phrases, and patterns listed in `config/ai-isms.yaml`.
-2. **Template pass** — flag repeated sentence shapes such as "Not X, but Y," "Something shifted," "The kind of X that Y," fragment clusters, and repeated paragraph endings.
-3. **Abstraction pass** — flag lines where feelings, fate, silence, darkness, grief, longing, or similar abstractions do the work that should be done by action, choice, sensory detail, or subtext.
-4. **Metaphor relevance pass** — identify decorative metaphors that do not reveal character, advance plot, sharpen atmosphere, or match POV knowledge.
-5. **Emotion embodiment pass** — flag generic labels like afraid/angry/devastated/overwhelmed when the page does not give physical, behavioral, verbal, or decision-based evidence.
-6. **Dialogue artificiality pass** — flag lines that sound like summary, therapy-speak, exposition, or the model explaining the scene.
-7. **Rhythm pass** — identify monotonous sentence length, repeated beat order, repeated action tags, overuse of ellipses/dashes/fragments, and identical emotional cadence.
-8. **Style preservation pass** — mark deliberate user-style phrases as `preserve` when supported by references; do not flatten voice into generic market prose.
+1. **Lexical trigger pass**, find suspect words, adverbs, intensifiers, body cliches, filter phrases, and patterns listed in `config/ai-isms.yaml`.
+2. **Template pass**, flag repeated sentence shapes such as "Not X, but Y," "Something shifted," "The kind of X that Y," fragment clusters, and repeated paragraph endings.
+3. **Abstraction pass**, flag lines where feelings, fate, silence, darkness, grief, longing, or similar abstractions do the work that should be done by action, choice, sensory detail, or subtext.
+4. **Metaphor relevance pass**, identify decorative metaphors that do not reveal character, advance plot, sharpen atmosphere, or match POV knowledge.
+5. **Emotion embodiment pass**, flag generic labels like afraid/angry/devastated/overwhelmed when the page does not give physical, behavioral, verbal, or decision-based evidence.
+6. **Dialogue artificiality pass**, flag lines that sound like summary, therapy-speak, exposition, or the model explaining the scene.
+7. **Rhythm pass**, identify monotonous sentence length, repeated beat order, repeated action tags, overuse of ellipses/dashes/fragments, and identical emotional cadence.
+8. **Style preservation pass**, mark deliberate user-style phrases as `preserve` when supported by references; do not flatten voice into generic market prose.
 
 Severity:
 - `blocker`: Must be fixed before validation can pass. Examples: repeated conspicuous template 3+ times, generic abstraction carrying a major emotional turn, or an ending that reads like AI summary.

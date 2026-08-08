@@ -1,155 +1,177 @@
 # Canon Quill
 
-An agentic book-writing workflow that grounds drafting in **the author's own past prose**, then gates every chapter on canon, continuity and measured style fidelity.
+Write a book with an LLM that actually sounds like you wrote it, and where chapter 12 still agrees with chapter 3.
 
-The hard part of getting an LLM to write a novel is not producing text. It is producing text that sounds like *you* wrote it, and that chapter 12 still agrees with chapter 3. Canon Quill treats both as engineering problems with measurements attached, rather than as instructions in a prompt.
+Point it at your past books in Google Drive. It measures how you write, keeps your own paragraphs on hand as reference while it drafts, and refuses to let a chapter through if it drifts from your voice or breaks continuity with the chapter before it.
 
 ```bash
-npm run setup && npm run studio
+npm run setup
+npm run studio
 ```
 
----
-
-## The two problems this exists to solve
-
-### "It has no soul"
-
-The usual approach hands the model a *description* of the author's style — "short sentences, dry humour, close third person" — and asks it to imitate that. A description of prose is not prose. Given one, the model falls back on its own default register, and the result is fluent, competent and completely anonymous.
-
-Canon Quill keeps the actual paragraphs. Past books are cut into passages, each tagged by the kind of narrative beat it carries (dialogue, action, interiority, description, transition). Before a chapter is drafted, the passages that are the closest precedent for its beats are retrieved and put in the prompt. The model writes *next to* real examples of how this author handles an argument, a corridor, a gut-punch.
-
-Then the draft is measured against the author's fingerprint and the deviations are named:
-
-| Metric | Author | Draft | Drift | Severity |
-|---|---:|---:|---:|---|
-| mean sentence length | 13.6 | 24.1 | +77% | blocker |
-| dialogue share | 0.34 | 0.11 | −68% | blocker |
-| plain dialogue tag share | 0.81 | 0.34 | −58% | major |
-| abstract nouns / 1k | 4.2 | 11.7 | +179% | blocker |
-
-The editing agent works from that table. Not from taste.
-
-### "The chapters don't flow"
-
-The previous version had a continuity phase that wrote a markdown summary the next agent was asked to "read and respect". Nothing checked that it did. So chapter 7 could open with a character in a city chapter 6 had just watched them leave.
-
-Continuity is now a typed contract. Each chapter emits a **handoff**: ending location, per-character state (where, what they know, physical condition, emotional register), timeline position, threads touched, and the open question the next chapter must engage. The next chapter is validated against it in code:
-
-- a character relocating with no travel shown and no reference to where they were → **blocker**
-- someone acting on a fact the book never showed them learning → **major**
-- in-world time running backwards without a declared flashback → **blocker**
-- a thread past its `mustResolveBy` chapter → **blocker**
-- a setup planted in chapter 2 still unpaid with two chapters left → **major**
+Then open <http://127.0.0.1:4180>.
 
 ---
 
-## Why the AI-ism detector had to be rebuilt
+## What makes this different
 
-The old `config/ai-isms.yaml` was a list of ~200 banned words: *whispered*, *ache*, *shattered*, *silence*, *afraid*, *slowly*. That is wrong in both directions at once.
+Most tools describe your style to the model. They write a prompt that says "short sentences, dry humour, close third person" and hope for the best. A description of prose is not prose, and a model given one falls back on its own default voice. That is why the output reads fluent, competent and anonymous.
 
-**False positives.** Plenty of real novelists write "whispered". Flagging it punishes an author for their own voice, and pushes the editing pass to swap natural prose for thesaurus prose — which is how the output got stiff.
+Canon Quill keeps your actual paragraphs.
 
-**False negatives.** A model can avoid every listed word and still be obviously machine-written, because what gives it away is not vocabulary but **uniformity**: every sentence the same length, every paragraph the same shape, every character the same register, every emotion named rather than shown.
+**It reads your past books and cuts them into passages**, each tagged by the kind of scene it is: dialogue, action, interiority, description, transition.
 
-So detection is calibrated against the author's own corpus. A word is only suspicious when *this author* does not use it at that rate. What is actually enforced is structural: repeated sentence openers, repeated 4-grams, paragraph lengths with no spread, dialogue lines that all run the same length. The remaining list is advisory, and anything the corpus does at a comparable rate is exempt by policy.
+**Before drafting a scene, it finds your closest precedent.** Writing an argument between two characters? It pulls the arguments you have already written, preferring ones with those same characters in them, and puts them in front of the model. The model writes next to real examples of how you handle that beat.
+
+**After drafting, it measures the result against you.** Not against a general standard of good writing, against your numbers:
+
+| Measure | You | This draft | Verdict |
+|---|---:|---:|---|
+| mean sentence length | 13.6 | 24.1 | too long |
+| dialogue share | 34% | 11% | too little |
+| plain dialogue tags | 81% | 34% | too ornate |
+| abstract nouns per 1k | 4.2 | 11.7 | too vague |
+
+The editing pass works from that table. If a fix would make the prose less like yours, it does not make it.
+
+## Chapters that connect
+
+Each chapter ends by recording where it left things: where every character physically is, what they now know, what condition they are in, where the clock stands, which threads moved, and the question the chapter closes on.
+
+The next chapter is checked against that record before it can pass:
+
+- A character who was in Marrow opening the next chapter in Calder, with no journey shown, fails.
+- Someone acting on a secret the book never showed them learning fails.
+- Time running backwards without a declared flashback fails.
+- A thread you said would resolve by chapter 9 still open at chapter 10 fails.
+- A gun on the mantelpiece in chapter 2 still unfired with two chapters left gets flagged.
+
+## What it will not do
+
+It will not treat a word as bad because a list somewhere says so. Plenty of novelists write "whispered" and "ache", and flagging those would just punish you for your own voice while pushing the editing pass toward thesaurus prose.
+
+What it looks for instead is sameness, which is what actually gives a machine away: every sentence the same length, every paragraph the same shape, every character talking in the same register, every feeling named instead of shown. Those are measured directly. Anything your own writing does at a normal rate is left alone.
 
 ---
 
-## Canon Quill Studio
+## The Studio
 
-`npm run studio` → <http://127.0.0.1:4180>
+`npm run studio` opens a local web app. Nothing leaves your machine.
 
-A local web UI, loopback-only, no build step. It replaces a wizard that was previously one textarea for pasting Drive URLs.
+**Books.** Each book is its own workspace with its own sources, style corpus, chapters and continuity. Start a second book without touching the first. Finishing a book never deletes it.
 
-1. **Connect Drive** — narrow `drive.file` scope; only files you pick.
-2. **Select sources** — browse Drive, mark reference folders, set the target folder.
-3. **Analyse & group** — every document is read and classified into *past series books · reference books · characters · timeline · worldbuilding · plot · notes*, with a confidence and the evidence behind it. Low-confidence guesses are surfaced for confirmation, and anything can be re-assigned.
+**Connect Drive.** Narrow permissions, only the files you pick.
 
-   This grouping matters more than it looks: **only past series books feed the style corpus and canon.** A reference book by another author filed wrongly would pull the writing toward someone else's voice — the exact failure the system exists to prevent.
-4. **Project shape** — standalone or series; chapter-by-chapter or whole book.
-5. **Style corpus** — build the fingerprint and see your own measured targets.
-6. **Questions** — when an agent hits a decision only you can make, it posts it here instead of guessing and burying the assumption. Blocking questions hold the pipeline.
-7. **Chapters** — the board, with live style-fidelity and flow verdicts per chapter.
+**Select sources.** Browse your Drive, mark the folders to read, choose where finished chapters get written back.
+
+**Analyse and group.** Every document is read and sorted into past series books, reference books by other authors, characters, timeline, worldbuilding, plot, and notes. Each result shows how confident it is and why. Anything uncertain is put in front of you rather than assumed, and you can move anything to a different pile.
+
+This step matters more than it looks. Only *past series books* feed your style corpus and your canon. Another author's novel filed in the wrong pile would pull your writing toward their voice, which is the one thing this is built to prevent.
+
+**Project shape.** Standalone or part of a series. Series books inherit canon from the earlier volumes and are held to it.
+
+**Style corpus.** Build it, then see your own measurements.
+
+**Questions.** When something genuinely needs your decision, it gets asked here instead of guessed at and buried in a document. Blocking questions hold the pipeline until you answer.
+
+**Chapters.** The board, with each chapter's style score and continuity verdict.
 
 ---
 
-## The two drafting modes
+## Two ways to write
 
-Chosen once, before writing starts. **The only difference is where you approve. Every quality gate runs identically in both.**
+Pick one before drafting starts. The only difference is where you approve. Every quality check runs in both.
 
-| | Chapter by chapter | Whole book |
+|  | Chapter by chapter | Whole book |
 |---|---|---|
-| **Loop** | draft → edit → validate → **you approve** → next | draft → edit → validate → next, for every chapter |
+| **What happens** | writes a chapter, edits it, checks it, then stops for you | writes every chapter start to finish |
 | **You are asked** | after each chapter | once, on the finished manuscript |
-| **Style + flow gates** | every chapter | every chapter |
-| **Best for** | catching a drift in voice or plot at chapter 2 rather than chapter 20 | getting a complete draft to react to without supervising it |
-| **Trade-off** | you need to be present throughout | a systematic problem surfaces only after the whole book is written |
-
----
-
-## Architecture
-
-```
-src/style/         the fidelity engine
-  text.ts          tokenisation: sentences, paragraphs, dialogue spans, tags
-  metrics.ts       the quantitative fingerprint (18 comparable measures)
-  corpus.ts        past books → beat-tagged passages + fingerprint
-  retrieve.ts      scene brief → matched exemplars → prompt block
-  score.ts         draft vs fingerprint → named deviations + repetition findings
-
-src/continuity/    chapter-to-chapter flow
-  ledger.ts        typed state: character states, threads, promises, timeline
-  flow.ts          opening contracts + validation of a draft against the handoff
-
-src/analysis/
-  classify.ts      Drive documents → source kinds, with confidence and evidence
-
-src/studio/        the local UI and its API
-src/drive/         OAuth + a Drive client that paginates and walks recursively
-```
-
-Style scoring and flow validation are pure functions over text and typed state, which is why they can be tested — **84 tests**, no network, no model calls.
+| **Style and continuity checks** | every chapter | every chapter |
+| **Good for** | catching a problem at chapter 2 instead of chapter 20 | getting a full draft to react to |
+| **Cost** | you need to be around | a systemic problem shows up only at the end |
 
 ---
 
 ## Setup
 
-Requires Node `20.19.0+`.
+Node 20.19 or newer.
 
 ```bash
-npm run setup     # checks Node, installs OpenCode + OpenSpec, builds, validates
-npm run studio    # the UI
-opencode          # the agent workflow; Tab to book-orchestrator
+npm run setup
 ```
 
-For Drive, create an OAuth **Desktop app** client, download the JSON, and point `.env` at it:
+That checks your Node version, installs OpenCode and OpenSpec if missing, builds, and validates the workflow.
+
+### Google Drive
+
+You need a Google OAuth client of type **Desktop app**.
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/) and pick or create a project.
+2. Enable the **Google Drive API**.
+3. Under **Credentials**, create an OAuth client ID, application type **Desktop app**.
+4. Download the JSON.
+5. Create `.env` in this folder:
 
 ```
-GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/credentials.json
+GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/your/credentials.json
 ```
 
-Then enable the Drive MCP server by setting `canon_drive.enabled` to `true` in `opencode.json` and restarting OpenCode.
+6. In `opencode.json`, set `canon_drive.enabled` to `true`.
+
+Then open the Studio and press **Check connection**. The first time, a browser window asks you to authorise. The scope is `drive.file`, which means Canon Quill can only see files you explicitly choose, never your whole Drive.
+
+---
 
 ## Commands
 
 ```bash
-npm run studio            # Canon Quill Studio
-npm run check             # build + workflow validation + tests
-npm run preview -- --file <md>   # book-style reading preview
-npm run docx              # generate the final DOCX
-npm run archive:project   # archive and reset for the next book
+npm run studio                  open the Studio
+npm run book:new -- "Title"     start a book
+npm run book:list               list your books
+npm run book:use -- <slug>      switch books
+npm run book:finish -- <slug>   mark a book done, keeping everything
+npm run docx                    build the DOCX
+npm run check                   build, validate, test
 ```
 
-## Your book is never in this repo
+## Where your book lives
 
-Everything generated — references pulled from Drive, extracted style corpora, bibles, drafts, chapters, exports — lives under `.canon-quill/` and `.canon-quill-archives/`, both gitignored, with pattern-level rules behind them as defence in depth. The repo holds the engine, never the book.
+```
+workspaces/
+  the-tide-house/
+    project.json          settings, sources, chapter board
+    drive-cache/          documents pulled from Drive
+    artifacts/
+      style-corpus.json   your passages, tagged by beat
+      style-fingerprint.md
+      chapters/           drafts and reports
+      continuity/         the ledger and per-chapter handoffs
+      final/              manuscript.md, manuscript.docx
+    logs/
+```
 
-## Limitations
+`workspaces/` is gitignored. The repository holds the engine; your writing stays out of it.
 
-- Exemplar retrieval is lexical and structural, not embedding-based. Deterministic, needs no API key, and adequate for "same beat, these characters" — but it will not catch a thematic match phrased in entirely different words.
-- The fingerprint needs roughly 2,000+ words of the author's prose to be stable. Below that, deviations are reported as advisory and the UI says so.
-- Flow validation is deliberately conservative. It reports what it can prove from structured state and stays quiet where only a human can judge; a gate that cries wolf gets switched off.
-- Character-name detection is capitalisation-based and will over-match on prose with heavy proper-noun use.
+## How it is built
+
+```
+src/style/       measuring prose, building the corpus, retrieving exemplars, scoring drafts
+src/continuity/  the ledger, opening contracts, flow validation
+src/analysis/    sorting Drive documents into groups
+src/studio/      the local app and its API
+src/drive/       OAuth and the Drive client
+src/workspace/   projects on disk
+```
+
+Scoring and validation are ordinary functions over text and typed state, so they are tested without a network or a model. 104 tests.
+
+## Honest limitations
+
+- Finding matching passages works on wording and structure, not meaning. It will not connect two scenes that are thematically alike but share no vocabulary.
+- Your fingerprint needs roughly 2,000 words of your prose before the numbers settle. Below that the Studio tells you the targets are noisy.
+- Continuity checking is deliberately cautious. It reports what it can prove and stays quiet otherwise, because a checker that fires constantly gets ignored.
+- Character detection keys on capitalisation and will over-match on prose dense with proper nouns.
+- The classifier guesses. That is why it shows its confidence and asks.
 
 ## Licence
 

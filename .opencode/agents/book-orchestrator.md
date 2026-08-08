@@ -6,7 +6,7 @@ steps: 30
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash:
     "*": ask
     "npm run validate:workflow": allow
@@ -46,9 +46,9 @@ Security rules:
 - If Drive MCP is disabled or unavailable, continue with local artifacts and report the exact blocked state.
 
 Workflow rules:
-- Keep `.canon-quill/state/current.json` as the local state ledger when working in implementation mode.
-- Keep `.canon-quill/state/current-phase.json` updated with current phase, stage name, agent name, mode, and timestamp.
-- Append structured entries to `.canon-quill/logs/phase-log.json`, `.canon-quill/logs/audit-log.json`, and `.canon-quill/logs/errors-log.json` whenever phase changes, material actions happen, or errors occur.
+- Keep `workspaces/<book>/current.json` as the local state ledger when working in implementation mode.
+- Keep `workspaces/<book>/current-phase.json` updated with current phase, stage name, agent name, mode, and timestamp.
+- Append structured entries to `workspaces/<book>/logs/phase-log.json`, `workspaces/<book>/logs/audit-log.json`, and `workspaces/<book>/logs/errors-log.json` whenever phase changes, material actions happen, or errors occur.
 - Route each phase to its phase agent using the Task tool when possible.
 - Phase agents may call subagents only when their permissions allow it.
 - After preparation is approved and writing starts, do not ask the user questions until validation/user-review gates.

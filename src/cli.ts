@@ -1,56 +1,115 @@
 import { loadWorkflow } from "./workflow/load.js";
 import { validateWorkflow } from "./workflow/validate.js";
-import { archiveProject } from "./project/archive.js";
 import { generateDocx } from "./project/docx.js";
-import { initializeProject } from "./project/init.js";
 import { logError } from "./project/logs.js";
+import {
+  activeSlug,
+  createProject,
+  deleteProject,
+  finishProject,
+  listProjects,
+  setActiveProject
+} from "./workspace/registry.js";
 
-async function main() {
-  const [command, path = "workflows/book-writing.workflow.yaml"] = process.argv.slice(2);
+const usage = `Canon Quill
 
-  if (!command || command === "help") {
-    console.log("Usage: canon-quill <validate|init|docx|archive> [workflow.yaml]");
-    return;
-  }
+  npm run studio                    open the Studio UI
+  npm run book:new -- "Title"       create a book workspace
+  npm run book:list                 list books
+  npm run book:use -- <slug>        switch the active book
+  npm run book:finish -- <slug>     mark a book finished
+  npm run book:delete -- <slug>     delete a book and its contents
+  npm run docx                      build the DOCX for the active book
+  npm run validate:workflow         validate the workflow definition
+`;
 
-  if (command === "init") {
-    const result = await initializeProject();
-    console.log(`Initialized Canon Quill state at ${result.statePath}`);
-    return;
-  }
+async function main(): Promise<void> {
+  const [command, ...args] = process.argv.slice(2);
 
-  if (command === "docx") {
-    const result = await generateDocx();
-    console.log(`Generated DOCX: ${result.outputPath}`);
-    return;
-  }
+  switch (command) {
+    case undefined:
+    case "help":
+      console.log(usage);
+      return;
 
-  if (command === "archive") {
-    const result = await archiveProject();
-    console.log(`Archived project: ${result.archivePath}`);
-    console.log(`Reset state: ${result.resetStatePath}`);
-    return;
-  }
-
-  if (command === "validate") {
-    const workflow = await loadWorkflow(path);
-    const result = validateWorkflow(workflow);
-
-    if (!result.ok) {
-      for (const issue of result.issues) console.error(`- ${issue}`);
-      process.exitCode = 1;
+    case "new": {
+      const title = args.join(" ").trim();
+      if (!title) throw new Error('A title is required: npm run book:new -- "The Tide House"');
+      const project = await createProject(title);
+      console.log(`Created "${project.title}" at workspaces/${project.slug}`);
       return;
     }
 
-    console.log(`Workflow valid: ${workflow.name}`);
-    return;
-  }
+    case "list": {
+      const projects = await listProjects();
+      const active = await activeSlug();
+      if (projects.length === 0) {
+        console.log('No books yet. Create one with: npm run book:new -- "Title"');
+        return;
+      }
+      for (const project of projects) {
+        const marker = project.slug === active ? "*" : " ";
+        console.log(`${marker} ${project.slug.padEnd(28)} ${project.status.padEnd(9)} ${project.title}`);
+      }
+      return;
+    }
 
-  throw new Error(`Unknown command: ${command}`);
+    case "use": {
+      const project = await setActiveProject(requireArg(args[0], "a book slug"));
+      console.log(`Active book: ${project.title}`);
+      return;
+    }
+
+    case "finish": {
+      const slug = args[0] ?? (await activeSlug());
+      await finishProject(requireArg(slug, "a book slug"));
+      console.log(`Marked ${slug} as finished. Nothing was deleted.`);
+      return;
+    }
+
+    case "delete": {
+      const slug = requireArg(args[0], "a book slug");
+      await deleteProject(slug);
+      console.log(`Deleted workspaces/${slug}`);
+      return;
+    }
+
+    case "docx": {
+      const slug = args[0] ?? (await activeSlug());
+      const result = await generateDocx(requireArg(slug, "a book slug"));
+      console.log(`Generated ${result.outputPath}`);
+      return;
+    }
+
+    case "validate": {
+      const workflow = await loadWorkflow(args[0] ?? "workflows/book-writing.workflow.yaml");
+      const result = validateWorkflow(workflow);
+      if (!result.ok) {
+        for (const issue of result.issues) console.error(`- ${issue}`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`Workflow valid: ${workflow.name}`);
+      return;
+    }
+
+    default:
+      throw new Error(`Unknown command: ${command}\n\n${usage}`);
+  }
 }
 
-main().catch(async (error) => {
-  await logError(error, { stage: "cli", stageName: "CLI", agent: "system", event: "command_failed" }).catch(() => undefined);
+function requireArg(value: string | null | undefined, what: string): string {
+  if (!value) throw new Error(`Expected ${what}.`);
+  return value;
+}
+
+main().catch(async (error: unknown) => {
+  const slug = await activeSlug().catch(() => null);
+  if (slug) {
+    await logError(slug, error, { stage: "cli", stageName: "CLI", agent: "system", event: "command_failed" }).catch(
+      () => undefined
+    );
+  }
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

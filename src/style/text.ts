@@ -1,10 +1,6 @@
-/**
- * Tokenisation primitives shared by the style engine.
- *
- * These are deliberately dependency-free and deterministic: the same passage
- * must always produce the same numbers, because the fingerprint is compared
- * across runs and a drifting tokeniser would look like drifting prose.
- */
+// Tokenisation primitives for the style engine. Deterministic by design: the
+// fingerprint is compared across runs, so a drifting tokeniser would read as
+// drifting prose.
 
 /** Abbreviations that end in a period without ending a sentence. */
 const abbreviations = new Set([
@@ -30,11 +26,8 @@ export interface Paragraph {
 }
 
 /**
- * Split prose into sentences.
- *
- * Handles the two cases that matter for fiction and that naive `split(/[.!?]/)`
- * gets wrong: abbreviations ("Dr. Halloway sat down." is one sentence) and
- * dialogue punctuation ("Go," she said. is one sentence, not two).
+ * Split prose into sentences, handling the two cases a naive `split(/[.!?]/)`
+ * gets wrong: abbreviations, and dialogue punctuation followed by a tag.
  */
 export function splitSentences(text: string): Sentence[] {
   const sentences: Sentence[] = [];
@@ -44,16 +37,14 @@ export function splitSentences(text: string): Sentence[] {
     const char = text[i];
     if (char !== "." && char !== "!" && char !== "?") continue;
 
-    // Consume runs of terminal punctuation ("?!", "...") as one boundary.
+    // Runs like "?!" or "..." are one boundary.
     let end = i;
     while (end + 1 < text.length && ".!?".includes(text[end + 1])) end += 1;
 
-    // A closing quote belongs to the sentence it terminates.
     while (end + 1 < text.length && closingQuotes.includes(text[end + 1])) end += 1;
 
     const next = text.slice(end + 1);
 
-    // Not a boundary unless whitespace-then-something follows.
     if (next.length > 0 && !/^\s/.test(next)) {
       i = end;
       continue;
@@ -64,8 +55,7 @@ export function splitSentences(text: string): Sentence[] {
       continue;
     }
 
-    // `"Go," she said.` — a comma-spliced dialogue tag continues the sentence,
-    // but a period inside quotes followed by a lowercase tag does too.
+    // A lowercase word after a closing quote is a dialogue tag, not a new sentence.
     if (/^\s+[a-z]/.test(next) && closingQuotes.includes(text[end])) {
       i = end;
       continue;
@@ -112,11 +102,8 @@ export function words(text: string): string[] {
 }
 
 /**
- * Extract quoted dialogue spans.
- *
- * Straight and curly double quotes only. Single quotes are excluded on purpose:
- * in English prose they collide with apostrophes far more often than they mark
- * speech, and a false positive here would corrupt the dialogue ratio.
+ * Extract quoted dialogue. Double quotes only: single quotes collide with
+ * apostrophes far more often than they mark speech in English prose.
  */
 export function dialogueSpans(text: string): string[] {
   const spans: string[] = [];
@@ -130,12 +117,9 @@ export function dialogueSpans(text: string): string[] {
 }
 
 /**
- * Subject that can sit between a quote and its tag verb.
- *
- * `[A-Z][a-z]+` covers names and sentence-cased pronouns ("He said"); the
- * lowercase alternatives are needed for the far more common mid-sentence form,
- * `"Get out," she said.` Missing those made every tag resolve to the pronoun
- * instead of the verb, so ornate-tag counts silently read zero.
+ * Subject that can sit between a quote and its tag verb. The lowercase
+ * alternatives matter: without them `"Get out," she said` resolves to the
+ * pronoun rather than the verb.
  */
 const tagSubject = "(?:[A-Z][a-zÀ-ɏ]+|he|she|they|it|we|you)";
 

@@ -1,17 +1,6 @@
-/**
- * Quantitative prose fingerprint.
- *
- * Every number here is something a drafting model can actually be steered by
- * and a validator can actually check. "Write in the author's voice" is not
- * enforceable; "your mean sentence is 24.1 words, the author's is 13.6, and
- * they open 31% of sentences with a fragment" is.
- *
- * Nothing in this file judges quality. It measures shape. Whether a given
- * shape is good is decided by comparing a draft to the author's own corpus
- * (see `score.ts`), never against a global idea of good writing -- that
- * comparison is the entire point, and it is why the AI-isms pass had to stop
- * being a fixed word blacklist.
- */
+// Quantitative prose fingerprint. Nothing here judges quality; it measures
+// shape. Whether a shape is good is decided by comparing a draft against the
+// author's own corpus in score.ts.
 
 import {
   dialogueSpans,
@@ -36,7 +25,7 @@ const filterVerbs = [
 /** Neutral tags that disappear on the page. */
 const invisibleTags = ["said", "asked", "replied", "answered"];
 
-/** Tags that narrate the delivery instead of letting the line carry it. */
+/** Tags that narrate delivery instead of letting the line carry it. */
 const ornateTags = [
   "breathed", "hissed", "growled", "purred", "chuckled", "smirked", "grinned",
   "laughed", "sneered", "spat", "murmured", "whispered", "shouted", "screamed",
@@ -57,7 +46,7 @@ const similePattern = /\b(?:like a|like the|as if|as though|the way a|the way th
 const lyAdverbPattern = /\b[a-z]{3,}ly\b/gi;
 
 export interface StyleMetrics {
-  /** Total words measured. Fingerprints below ~2,000 words are unstable. */
+  /** Fingerprints below roughly 2,000 words are unstable. */
   wordCount: number;
   sentenceCount: number;
   paragraphCount: number;
@@ -68,9 +57,9 @@ export interface StyleMetrics {
     stdevWords: number;
     p10Words: number;
     p90Words: number;
-    /** Share of sentences under five words -- the author's punch rate. */
+    /** Share of sentences under five words. */
     fragmentRate: number;
-    /** Share of sentences over thirty words -- the author's long-line rate. */
+    /** Share of sentences over thirty words. */
     longRate: number;
   };
 
@@ -183,7 +172,7 @@ export function computeMetrics(text: string): StyleMetrics {
       similesPer1k: per1k(countPattern(text, similePattern), wordCount),
       contractionsPer1k: per1k(countPattern(text, contractionPattern), wordCount),
       commasPer1k: per1k(countChar(text, ","), wordCount),
-      emDashesPer1k: per1k(countPattern(text, /—|--/g), wordCount),
+      emDashesPer1k: per1k(countPattern(text, /-|--/g), wordCount),
       semicolonsPer1k: per1k(countChar(text, ";"), wordCount),
       ellipsesPer1k: per1k(countPattern(text, /\.\.\.|…/g), wordCount),
       typeTokenRatio: rate(new Set(allWords).size, wordCount)
@@ -192,10 +181,8 @@ export function computeMetrics(text: string): StyleMetrics {
 }
 
 /**
- * Merge per-passage metrics into one corpus fingerprint.
- *
- * Weighted by word count so a 40-word fragment cannot pull the fingerprint as
- * hard as a full chapter.
+ * Merge per-passage metrics into one fingerprint, weighted by word count so a
+ * short fragment cannot pull as hard as a full chapter.
  */
 export function aggregateMetrics(samples: StyleMetrics[]): StyleMetrics {
   const usable = samples.filter((sample) => sample.wordCount > 0);
@@ -266,12 +253,8 @@ function countChar(text: string, char: string): number {
 }
 
 /**
- * Share of dialogue tags that are plain (`said`, `asked`).
- *
- * Only counts tags adjacent to a quoted span, so narrative uses of the same
- * verbs ("she whispered to herself" outside dialogue) are not miscounted.
- * Returns 1 when there is no dialogue at all, so a description-only passage
- * never reads as a tag problem.
+ * Share of dialogue tags that are plain. Returns 1 when there is no dialogue,
+ * so a description-only passage never reads as a tag problem.
  */
 function tagShare(text: string): number {
   const invisible = new Set(invisibleTags);

@@ -1,17 +1,5 @@
-/**
- * The exemplar corpus: the author's own prose, cut into retrievable passages.
- *
- * This is the piece the old workflow was missing entirely. Previously the
- * drafting agent was handed a *description* of the author's style ("short
- * sentences, dry humour, close third") and asked to imitate it. Descriptions
- * of prose are not prose, and a model handed one falls back on its own default
- * register -- which is where the flat, soulless, everyone-talks-the-same
- * output came from.
- *
- * Here we keep the actual paragraphs, tagged by the kind of beat they carry,
- * so the drafter can be shown real examples of how *this author* writes an
- * argument, a kiss, a corridor, a gut-punch -- and match them.
- */
+// The exemplar corpus: the author's own prose, cut into retrievable passages
+// and tagged by the kind of beat each one carries.
 
 import { computeMetrics, type StyleMetrics } from "./metrics.js";
 import { dialogueSpans, isSpeechParagraph, splitParagraphs, words } from "./text.js";
@@ -65,11 +53,8 @@ const interiorityMarkers = /\b(?:thought|wondered|remembered|realized|realised|k
 const transitionMarkers = /\b(?:later|afterwards?|the next (?:day|morning|week|month|year)|hours? (?:later|passed)|by (?:then|morning|evening|nightfall)|meanwhile|that (?:night|evening|afternoon)|days? (?:later|passed)|eventually|in the end)\b/gi;
 
 /**
- * Build a style corpus from the author's past books.
- *
- * Documents should be prose only. Front matter, tables of contents and
- * copyright pages skew the fingerprint badly, so callers are expected to strip
- * them (`extractProse` handles the common markdown cases).
+ * Build a style corpus from the author's past books. Front matter and
+ * copyright pages skew the fingerprint, so `extractProse` strips them.
  */
 export function buildCorpus(label: string, documents: CorpusDocument[], options: BuildCorpusOptions = {}): StyleCorpus {
   const minWords = options.minWords ?? 60;
@@ -103,13 +88,9 @@ export function buildCorpus(label: string, documents: CorpusDocument[], options:
 }
 
 /**
- * Classify what a passage is doing.
- *
- * Dialogue wins whenever a meaningful share of the words are spoken, because a
- * scene that is mostly people talking is a dialogue scene regardless of what
- * the surrounding narration does. The remaining categories are decided by
- * marker density rather than a single keyword hit, so one stray "remembered"
- * does not turn a fight into introspection.
+ * Classify what a passage is doing. Categories are decided by marker density
+ * rather than a single keyword, so one stray "remembered" does not turn a
+ * fight into introspection.
  */
 export function classifyBeat(text: string): BeatType {
   const total = words(text).length;
@@ -153,10 +134,8 @@ export function extractProse(markdown: string): string {
 }
 
 /**
- * Group paragraphs into passages of roughly `minWords`..`maxWords`.
- *
- * Paragraph boundaries are never broken -- a passage cut mid-paragraph would
- * be a bad writing example, which defeats the purpose.
+ * Group paragraphs into passages. Paragraph boundaries are never broken: a
+ * passage cut mid-paragraph would be a poor writing example.
  */
 function chunkDocument(text: string, minWords: number, maxWords: number): string[] {
   const paragraphs = splitParagraphs(extractProse(text));
@@ -185,11 +164,10 @@ function chunkDocument(text: string, minWords: number, maxWords: number): string
       continue;
     }
 
-    // Break at the seam between a dialogue run and narration. Dialogue
-    // paragraphs are short, so a pure word-count rule swallows an entire
-    // exchange into the surrounding description and the passage stops looking
-    // like dialogue at all -- which meant the corpus held no dialogue
-    // exemplars to retrieve, exactly when they matter most.
+    // Break at the seam between dialogue and narration. Dialogue paragraphs
+    // are short, so a pure word-count rule swallows an exchange into the
+    // surrounding description and the corpus ends up with no dialogue
+    // exemplars to retrieve.
     if (currentIsSpeech !== undefined && speech !== currentIsSpeech && currentWords >= 25) {
       flush();
     }
@@ -207,12 +185,7 @@ function chunkDocument(text: string, minWords: number, maxWords: number): string
   return chunks;
 }
 
-/**
- * Detect capitalised names that look like characters.
- *
- * Sentence-initial words are skipped because every sentence starts capitalised,
- * and a stop list removes the common false positives.
- */
+/** Detect capitalised names that look like characters. */
 function detectSpeakers(text: string): string[] {
   const stop = new Set([
     "the", "and", "but", "he", "she", "they", "it", "we", "you", "i", "a", "an",
@@ -237,8 +210,8 @@ function detectSpeakers(text: string): string[] {
 }
 
 function aggregate(passages: Passage[]): StyleMetrics {
-  // Re-measure the concatenated corpus rather than averaging per-passage
-  // metrics: ratios like type/token only mean anything over the whole text.
+  // Measured over the concatenated corpus rather than averaged per passage:
+  // ratios like type/token only mean anything across the whole text.
   return computeMetrics(passages.map((passage) => passage.text).join("\n\n"));
 }
 

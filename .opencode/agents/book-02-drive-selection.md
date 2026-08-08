@@ -6,7 +6,7 @@ steps: 20
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash:
     "*": ask
     "npm run wizard": ask
@@ -30,6 +30,6 @@ Preferred path: visual picker/wizard. Fallback: ask for Drive URLs and use `cano
 Rules:
 - Do not read file content in this phase.
 - Do not write to target in this phase.
-- Produce `.canon-quill/state/drive-selection.json` with selected reference IDs, target folder ID, and user-facing labels.
+- Produce `workspaces/<book>/drive-selection.json` with selected reference IDs, target folder ID, and user-facing labels.
 - If the user has provided broad folder URLs, ask which files/folders inside are in-scope before extraction.
 - Never request broader Drive scopes unless the user explicitly opts into folder crawling.

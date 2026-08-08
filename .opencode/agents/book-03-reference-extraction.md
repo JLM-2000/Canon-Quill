@@ -6,7 +6,7 @@ steps: 30
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   task:
     "*": deny
@@ -25,10 +25,10 @@ permission:
 Extract only from user-selected references.
 
 Produce:
-- `.canon-quill/artifacts/source-inventory.md`
-- `.canon-quill/artifacts/reference-findings.md`
-- `.canon-quill/artifacts/style-samples.md`
-- `.canon-quill/artifacts/unknowns-and-assumptions.md`
+- `workspaces/<book>/artifacts/source-inventory.md`
+- `workspaces/<book>/artifacts/reference-findings.md`
+- `workspaces/<book>/artifacts/style-samples.md`
+- `workspaces/<book>/artifacts/unknowns-and-assumptions.md`
 
 Extraction targets:
 - Book format: series/standalone/novella/short.

@@ -6,7 +6,7 @@ steps: 18
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
     ".canon-quill-archives/**": allow
   bash:
     "*": ask

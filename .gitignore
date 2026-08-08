@@ -1,15 +1,14 @@
 # ---------------------------------------------------------------------------
 # Canon Quill ignore rules
 #
-# Rule of thumb: the repo holds the *engine* only. Every byte of an author's
-# book -- references pulled from Drive, extracted style corpora, bibles,
-# drafts, chapters, exports, archives -- lives under a generated directory and
-# must never be committed. Generated content is confined to `.canon-quill/`
-# (active project) and `.canon-quill-archives/` (finished projects) so a single
-# pair of rules covers anything added in the future.
+# The repo holds the engine only. Every byte of a book (references pulled from
+# Drive, style corpora, bibles, drafts, chapters, exports) lives under
+# workspaces/ and must never be committed. Confining generated content to one
+# tree means a single rule covers anything added later.
 # ---------------------------------------------------------------------------
 
 # --- Generated book content (NEVER commit) ---------------------------------
+workspaces/
 .canon-quill/
 .canon-quill-archives/
 

@@ -1,21 +1,7 @@
-/**
- * Style fidelity scoring.
- *
- * Compares a draft against the author's own fingerprint and reports where it
- * drifted, in numbers a human and an editing agent can both act on.
- *
- * This is the replacement for the old banned-word list. That list flagged
- * "whispered", "ache", "shattered" and "silence" as AI tells, which is wrong in
- * two directions at once: it fails on an author who legitimately writes those
- * words -- punishing their voice for being theirs -- and it passes prose that
- * avoids every listed word while still being unmistakably machine-written,
- * because what gives a model away is not vocabulary but *uniformity*: every
- * sentence the same length, every emotion named rather than shown, every
- * character speaking in the same register.
- *
- * So we measure the shape and compare it to the author's. A word is only
- * suspicious when the author does not use it at that rate.
- */
+// Compares a draft against the author's fingerprint and reports where it
+// drifted, in numbers an editing agent can act on. Deviation is measured
+// against this author rather than a general standard, so a habit of theirs is
+// never treated as a defect.
 
 import {
   comparableMetrics,
@@ -62,7 +48,7 @@ export interface StyleReport {
   notes: string[];
 }
 
-/** Metrics where drift matters most; weights feed the fidelity score. */
+/** Metrics where drift matters most. Weights feed the fidelity score. */
 const weights: Record<string, number> = {
   "sentence.meanWords": 1.5,
   "sentence.stdevWords": 1.5,
@@ -75,10 +61,7 @@ const weights: Record<string, number> = {
 };
 
 export interface ScoreOptions {
-  /**
-   * Fraction of drift tolerated before a deviation is reported.
-   * Default 0.25 -- prose is not a spreadsheet and small variation is life.
-   */
+  /** Drift tolerated before a deviation is reported. Default 0.25. */
   tolerance?: number;
 }
 
@@ -111,8 +94,8 @@ export function scoreAgainstFingerprint(
     const draftValue = readMetric(draftMetrics, metric);
     if (authorValue === 0 && draftValue === 0) continue;
 
-    // Guard against divide-by-zero and against tiny absolute values producing
-    // enormous relative drift (0.01 -> 0.03 is not a 200% style failure).
+    // Floored so a tiny absolute value cannot produce enormous relative drift:
+    // 0.01 to 0.03 is not a 200% style failure.
     const base = Math.max(authorValue, floorFor(metric));
     const drift = (draftValue - authorValue) / base;
     if (Math.abs(drift) < tolerance) continue;
@@ -146,10 +129,7 @@ export function scoreAgainstFingerprint(
   };
 }
 
-/**
- * Detect mechanical repetition -- the strongest signal of machine authorship
- * that survives any vocabulary filter.
- */
+/** Detect mechanical repetition, which survives any vocabulary filter. */
 export function findRepetitions(draft: string): RepetitionFinding[] {
   const findings: RepetitionFinding[] = [];
   const paragraphs = splitParagraphs(draft);
@@ -157,7 +137,7 @@ export function findRepetitions(draft: string): RepetitionFinding[] {
   const totalWords = words(draft).length;
   if (totalWords === 0) return findings;
 
-  // Repeated 4-grams: catches "a mixture of X and Y", "the kind of X that Y".
+  // Repeated 4-grams.
   const grams = new Map<string, number>();
   const tokens = words(draft);
   for (let i = 0; i + 4 <= tokens.length; i += 1) {
@@ -175,7 +155,7 @@ export function findRepetitions(draft: string): RepetitionFinding[] {
     });
   }
 
-  // Repeated sentence openers: the "She felt... She knew... She turned..." tic.
+  // Repeated sentence openers.
   const openers = new Map<string, number>();
   for (const sentence of sentences) {
     const opener = sentence.words.slice(0, 2).join(" ");
@@ -194,7 +174,7 @@ export function findRepetitions(draft: string): RepetitionFinding[] {
     });
   }
 
-  // Uniform paragraph length: real prose varies, generated prose rarely does.
+  // Uniform paragraph length.
   const paragraphLengths = paragraphs.map((paragraph) => words(paragraph.text).length).filter((n) => n > 0);
   if (paragraphLengths.length >= 6) {
     const avg = paragraphLengths.reduce((a, b) => a + b, 0) / paragraphLengths.length;
@@ -232,7 +212,7 @@ export function findRepetitions(draft: string): RepetitionFinding[] {
     });
   }
 
-  // Dialogue lines that all run to the same length -- everyone talking alike.
+  // Dialogue lines that all run to the same length.
   const lines = dialogueSpans(draft).map((span) => words(span).length).filter((n) => n > 2);
   if (lines.length >= 8) {
     const avg = lines.reduce((a, b) => a + b, 0) / lines.length;
@@ -254,7 +234,7 @@ export function findRepetitions(draft: string): RepetitionFinding[] {
 }
 
 function floorFor(metric: string): number {
-  // Rates expressed as shares need a larger floor than per-1k counts.
+  // Shares need a larger floor than per-1k counts.
   if (metric.endsWith("Rate") || metric.endsWith("Share") || metric.endsWith("Ratio")) return 0.05;
   if (metric.endsWith("Per1k")) return 1.5;
   return 1;
@@ -292,7 +272,7 @@ function instructionFor(metric: string, label: string, above: boolean, draft: nu
     ],
     "sentence.stdevWords": [
       `Sentence lengths swing more than the author's. Even out the extremes (${target}).`,
-      `Sentence lengths are too uniform — the clearest machine tell. Mix short punches with long runs (${target}).`
+      `Sentence lengths are too uniform. Mix short punches with long runs (${target}).`
     ],
     "sentence.fragmentRate": [
       `Too many fragments; they lose force through repetition (${target}).`,
@@ -307,7 +287,7 @@ function instructionFor(metric: string, label: string, above: boolean, draft: nu
       `Too many ornate tags doing the acting. Replace with "said" plus a physical beat (${target}).`
     ],
     "texture.filterVerbsPer1k": [
-      `Too many filter verbs (saw/felt/realised) putting distance between reader and scene. Render directly (${target}).`,
+      `Too many filter verbs putting distance between reader and scene. Render directly (${target}).`,
       `Fewer filter verbs than the author uses; harmless, but check POV has not gone too distant (${target}).`
     ],
     "texture.abstractNounsPer1k": [
@@ -349,8 +329,8 @@ export function renderStyleReport(report: StyleReport): string {
   const lines: string[] = [
     "# Style Fidelity Report",
     "",
-    `**Fidelity:** ${report.fidelity}/100 — **${report.verdict.toUpperCase()}**`,
-    `**Draft:** ${report.draftMetrics.wordCount} words · **Author corpus:** ${report.authorMetrics.wordCount} words`,
+    `**Fidelity:** ${report.fidelity}/100, verdict **${report.verdict.toUpperCase()}**`,
+    `**Draft:** ${report.draftMetrics.wordCount} words. **Author corpus:** ${report.authorMetrics.wordCount} words.`,
     ""
   ];
 

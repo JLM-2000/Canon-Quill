@@ -3,16 +3,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { appendLog } from "./logs.js";
-import { projectPaths } from "./paths.js";
+import { workspacePaths } from "../workspace/paths.js";
 
 export interface GenerateDocxResult {
   inputPath: string;
   outputPath: string;
 }
 
-export async function generateDocx(): Promise<GenerateDocxResult> {
-  const inputPath = path.join(projectPaths.final, "manuscript.md");
-  const outputPath = path.join(projectPaths.final, "manuscript.docx");
+export async function generateDocx(slug: string): Promise<GenerateDocxResult> {
+  const paths = workspacePaths(slug);
+  const inputPath = path.join(paths.final, "manuscript.md");
+  const outputPath = path.join(paths.final, "manuscript.docx");
 
   if (!existsSync(inputPath)) {
     throw new Error(`Final manuscript not found: ${inputPath}`);
@@ -20,19 +21,13 @@ export async function generateDocx(): Promise<GenerateDocxResult> {
 
   const markdown = await readFile(inputPath, "utf8");
   const doc = new Document({
-    sections: [
-      {
-        properties: {},
-        children: markdownToParagraphs(markdown)
-      }
-    ]
+    sections: [{ properties: {}, children: markdownToParagraphs(markdown) }]
   });
 
-  await mkdir(projectPaths.final, { recursive: true });
-  const buffer = await Packer.toBuffer(doc);
-  await writeFile(outputPath, buffer);
+  await mkdir(paths.final, { recursive: true });
+  await writeFile(outputPath, await Packer.toBuffer(doc));
 
-  await appendLog("audit", {
+  await appendLog(slug, "audit", {
     timestamp: new Date().toISOString(),
     stage: "docx_generation",
     stageName: "DOCX Generation",
@@ -64,7 +59,6 @@ function markdownToParagraphs(markdown: string): Paragraph[] {
       paragraphs.push(new Paragraph({ children: [new TextRun("")] }));
       continue;
     }
-
     paragraphs.push(new Paragraph({ children: parseInline(line) }));
   }
 

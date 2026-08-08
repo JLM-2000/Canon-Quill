@@ -1,17 +1,10 @@
-/**
- * Exemplar retrieval.
- *
- * Given a brief for the scene about to be written, pick the passages from the
- * author's own books that are the closest precedent, and render them into a
- * prompt block. The drafting agent then writes *next to* real examples of how
- * this author handles this kind of beat, instead of from an adjective.
- *
- * Retrieval is lexical and structural rather than embedding-based, on purpose:
- * it needs no model call, no API key and no index build, it is deterministic
- * across runs, and for "find me passages of the same beat with these
- * characters in them" it is entirely adequate. If semantic recall ever proves
- * to be the bottleneck, this module is the only one that has to change.
- */
+// Given a brief for the scene about to be written, pick the closest precedent
+// passages from the author's own books and render them into a prompt block.
+//
+// Retrieval is lexical and structural rather than embedding-based: no model
+// call, no index build, deterministic across runs, and adequate for "same beat,
+// these characters". If semantic recall becomes the bottleneck, this is the
+// only module that has to change.
 
 import type { BeatType, Passage, StyleCorpus } from "./corpus.js";
 import { words } from "./text.js";
@@ -52,14 +45,9 @@ const stopWords = new Set([
 ]);
 
 /**
- * Rank corpus passages against a scene brief.
- *
- * Scoring, highest weight first:
- *   beat match       -- an argument should be modelled on an argument
- *   character match  -- captures per-character voice, the thing that makes
- *                       every character stop sounding identical
- *   topical overlap  -- shared content words with the beat summary
- *   length fitness   -- mid-length passages make the best examples
+ * Rank corpus passages against a scene brief. Weighted by beat match, then
+ * character match (which is what keeps voices distinct), then topical overlap,
+ * then how usable the passage length is as an example.
  */
 export function retrieveExemplars(
   corpus: StyleCorpus,
@@ -81,8 +69,7 @@ export function retrieveExemplars(
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  // Diversify by source so all four examples do not come from one chapter of
-  // one book, which would over-fit the drafter to a single scene.
+  // Spread across sources so the examples do not all come from one chapter.
   const chosen: RetrievedExemplar[] = [];
   const perSource = new Map<string, number>();
   let budget = maxWords;
@@ -142,8 +129,7 @@ function score(
     }
   }
 
-  // Prefer 80-260 word passages: long enough to show rhythm, short enough to
-  // leave prompt room for several of them.
+  // Long enough to show rhythm, short enough to fit several.
   if (passage.wordCount >= 80 && passage.wordCount <= 260) total += 1;
   else if (passage.wordCount < 40) total -= 1;
 
@@ -162,11 +148,9 @@ function isAdjacentBeat(a: BeatType, b: BeatType): boolean {
 }
 
 /**
- * Render exemplars as a prompt block.
- *
- * The framing matters as much as the passages: the model is told to match
- * rhythm and register but explicitly forbidden from lifting content, which is
- * the failure mode when you hand a model its own author's prose.
+ * Render exemplars as a prompt block. The framing matters as much as the
+ * passages: lifting content is the failure mode when a model is handed prose
+ * to imitate.
  */
 export function renderExemplarPrompt(exemplars: RetrievedExemplar[], brief: SceneBrief): string {
   if (exemplars.length === 0) {
@@ -182,7 +166,7 @@ export function renderExemplarPrompt(exemplars: RetrievedExemplar[], brief: Scen
   const blocks = exemplars.map((entry, index) => {
     const { passage } = entry;
     return [
-      `### Exemplar ${index + 1} — ${passage.source} (${passage.beat}, ${passage.wordCount} words)`,
+      `### Exemplar ${index + 1}: ${passage.source} (${passage.beat}, ${passage.wordCount} words)`,
       `_Selected because: ${entry.reasons.join("; ")}._`,
       "",
       passage.text.trim()
@@ -190,7 +174,7 @@ export function renderExemplarPrompt(exemplars: RetrievedExemplar[], brief: Scen
   });
 
   return [
-    "## Style exemplars — the author's own prose",
+    "## Style exemplars: the author's own prose",
     "",
     `These are real passages from the author's published work, chosen as the closest`,
     `precedent for the ${brief.beat} beat you are about to write.`,

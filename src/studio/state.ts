@@ -1,18 +1,8 @@
-/**
- * Studio project state.
- *
- * One JSON document under `.canon-quill/state/studio.json` holding everything
- * the UI renders and the agents read. Writes are atomic (temp file + rename)
- * because the OpenCode agents and the Studio server both touch this file, and
- * a half-written state document would strand a project mid-book.
- */
-
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { projectPaths } from "../project/paths.js";
 import type { SourceKind } from "../analysis/classify.js";
 import type { ContinuityLedger } from "../continuity/ledger.js";
 import { emptyLedger } from "../continuity/ledger.js";
+import { workspacePaths } from "../workspace/paths.js";
 
 export type ProjectShape = "standalone" | "series";
 export type DraftingMode = "chapter_by_chapter" | "whole_book";
@@ -35,43 +25,35 @@ export interface SelectedSource {
   path: string;
   mimeType: string;
   isFolder: boolean;
-  /** Assigned group. `auto` values come from the classifier. */
   kind: SourceKind;
   confidence: number;
   reasons: string[];
-  /** True once the author has explicitly confirmed or corrected the group. */
   confirmedByUser: boolean;
   wordCount?: number;
 }
 
-/** A question an agent needs answered before it can proceed. */
 export interface OpenQuestion {
   id: string;
   phase: PhaseId;
-  /** Which agent or spec raised it. */
   askedBy: string;
   question: string;
-  /** Why it matters -- shown under the question in the UI. */
   rationale?: string;
-  /** Suggested answers; the UI renders these as one-click choices. */
   options?: string[];
-  /** Free text allowed alongside options. */
   allowFreeText: boolean;
   askedAt: string;
   answer?: string;
   answeredAt?: string;
-  /** Blocking questions stop the pipeline; others are answered when convenient. */
+  /** Blocking questions hold the pipeline until answered. */
   blocking: boolean;
 }
 
 export interface ChapterRecord {
   number: number;
   title: string;
-  /** One-line intent from the chapter plan. */
   synopsis: string;
   status: "planned" | "drafting" | "drafted" | "editing" | "validated" | "approved" | "needs_work";
   wordCount?: number;
-  /** 0-100 from the style engine. */
+  /** 0 to 100, from the style scorer. */
   styleFidelity?: number;
   flowVerdict?: "pass" | "revise" | "fail";
   issues: string[];
@@ -79,7 +61,8 @@ export interface ChapterRecord {
 }
 
 export interface StudioState {
-  version: 2;
+  version: 3;
+  slug: string;
   projectName: string;
   phase: PhaseId;
   shape: ProjectShape | null;
@@ -87,7 +70,6 @@ export interface StudioState {
   intake: Record<string, string>;
   drive: {
     connected: boolean;
-    /** Drive folder ids the author picked as reference roots. */
     referenceRoots: string[];
     targetFolderId: string | null;
     lastIndexedAt: string | null;
@@ -96,7 +78,6 @@ export interface StudioState {
   questions: OpenQuestion[];
   chapters: ChapterRecord[];
   ledger: ContinuityLedger;
-  /** Fingerprint summary for the UI; full metrics live in the artifacts dir. */
   styleCorpus: {
     built: boolean;
     label: string;
@@ -108,12 +89,11 @@ export interface StudioState {
   updatedAt: string;
 }
 
-const stateFile = () => path.join(projectPaths.state, "studio.json");
-
-export function emptyState(projectName = "Untitled Book"): StudioState {
+export function emptyState(slug: string, projectName = "Untitled Book"): StudioState {
   const now = new Date().toISOString();
   return {
-    version: 2,
+    version: 3,
+    slug,
     projectName,
     phase: "connect",
     shape: null,
@@ -130,48 +110,43 @@ export function emptyState(projectName = "Untitled Book"): StudioState {
   };
 }
 
-export async function loadState(): Promise<StudioState> {
+export async function loadState(slug: string): Promise<StudioState> {
   try {
-    const raw = await readFile(stateFile(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<StudioState>;
-    // Merge onto a fresh default so a state file written by an older version
-    // gains new fields instead of leaving them undefined at the call site.
-    return { ...emptyState(parsed.projectName ?? "Untitled Book"), ...parsed, version: 2 };
+    const parsed = JSON.parse(await readFile(workspacePaths(slug).stateFile, "utf8")) as Partial<StudioState>;
+    // Merged onto a fresh default so a file written by an older version gains
+    // new fields rather than leaving them undefined at the call site.
+    return { ...emptyState(slug, parsed.projectName ?? "Untitled Book"), ...parsed, slug, version: 3 };
   } catch (error) {
-    if (isMissing(error)) return emptyState();
+    if (isMissing(error)) return emptyState(slug);
     throw error;
   }
 }
 
 export async function saveState(state: StudioState): Promise<StudioState> {
-  await mkdir(projectPaths.state, { recursive: true });
+  const paths = workspacePaths(state.slug);
+  await mkdir(paths.root, { recursive: true });
   const next = { ...state, updatedAt: new Date().toISOString() };
-  const target = stateFile();
-  const temp = `${target}.${process.pid}.tmp`;
+  // Written via a temp file and renamed: agents and the Studio both write here,
+  // and a half-written state document would strand a book mid-draft.
+  const temp = `${paths.stateFile}.${process.pid}.tmp`;
   await writeFile(temp, JSON.stringify(next, null, 2), "utf8");
-  await rename(temp, target);
+  await rename(temp, paths.stateFile);
   return next;
 }
 
-/** Read, transform, write. */
-export async function updateState(mutate: (state: StudioState) => StudioState | void): Promise<StudioState> {
-  const current = await loadState();
-  const result = mutate(current);
-  return saveState(result ?? current);
+export async function updateState(
+  slug: string,
+  mutate: (state: StudioState) => StudioState | void
+): Promise<StudioState> {
+  const current = await loadState(slug);
+  return saveState(mutate(current) ?? current);
 }
 
 /**
- * Which phase the project should be in, derived from what actually exists.
- *
- * Deriving this rather than storing it means the UI cannot get stuck showing a
- * phase the data no longer supports -- the failure mode of the old
- * `current-phase.json`, which was written by whichever agent ran last and
- * silently disagreed with reality after any manual edit.
+ * Which phase a project is in, derived from what exists rather than stored.
+ * Storing it let the UI show a phase the data no longer supported.
  */
 export function derivePhase(state: StudioState): PhaseId {
-  // Order matters: this must walk the pipeline from the earliest unmet
-  // prerequisite forward. Testing intake before Drive reported "intake" on a
-  // brand-new project that had not connected to anything yet.
   if (state.chapters.length > 0 && state.chapters.every((chapter) => chapter.status === "approved")) {
     return "export";
   }
@@ -186,7 +161,6 @@ export function derivePhase(state: StudioState): PhaseId {
   return "preflight";
 }
 
-/** Blocking questions the pipeline is currently waiting on. */
 export function blockingQuestions(state: StudioState): OpenQuestion[] {
   return state.questions.filter((question) => question.blocking && question.answer === undefined);
 }

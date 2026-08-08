@@ -6,7 +6,7 @@ steps: 45
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   task:
     "*": deny
@@ -22,14 +22,14 @@ permission:
 Compile the final book package only after all chapters have passed validation and have been approved/accepted according to the selected drafting mode.
 
 Required outputs:
-- `.canon-quill/artifacts/final/manuscript.md`
-- `.canon-quill/artifacts/final/final-validation-summary.md`
-- `.canon-quill/artifacts/final/continuity-report.md`
-- `.canon-quill/artifacts/final/style-report.md`
-- `.canon-quill/artifacts/final/ai-isms-report.md`
-- `.canon-quill/artifacts/final/open-threads-report.md`
-- `.canon-quill/artifacts/final/final-proofread-report.md`
-- `.canon-quill/artifacts/final/final-review-package.md`
+- `workspaces/<book>/artifacts/final/manuscript.md`
+- `workspaces/<book>/artifacts/final/final-validation-summary.md`
+- `workspaces/<book>/artifacts/final/continuity-report.md`
+- `workspaces/<book>/artifacts/final/style-report.md`
+- `workspaces/<book>/artifacts/final/ai-isms-report.md`
+- `workspaces/<book>/artifacts/final/open-threads-report.md`
+- `workspaces/<book>/artifacts/final/final-proofread-report.md`
+- `workspaces/<book>/artifacts/final/final-review-package.md`
 
 Finalization passes:
 1. **Manifest and chapter inclusion**

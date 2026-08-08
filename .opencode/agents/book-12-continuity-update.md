@@ -6,7 +6,7 @@ steps: 25
 permission:
   edit:
     "*": deny
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   task: deny
   webfetch: deny
@@ -26,16 +26,16 @@ chapter is mechanically validated against.
 Read the approved chapter and fill every field honestly. Guessing here is worse
 than leaving a field empty, because a wrong value becomes an enforced constraint.
 
-- `endsAtLocation` — where the chapter physically leaves the story.
-- `timeline` — in-world time it ends at (e.g. "Day 4, dusk"), elapsed time it
+- `endsAtLocation`, where the chapter physically leaves the story.
+- `timeline`, in-world time it ends at (e.g. "Day 4, dusk"), elapsed time it
   covered, and `isFlashback` if it deliberately moved backwards.
-- `characters[]` — for every character on the page: where they are, what they
+- `characters[]`, for every character on the page: where they are, what they
   now **know**, their physical **condition**, the emotional register they exit
   on, and who they are with. Knowledge is the field most often got wrong: list
   only what the chapter actually showed them learning.
-- `newFacts[]` — facts established that later chapters may rely on.
-- `closingBeat` — the note the chapter ends on.
-- `openQuestion` — the hook the next chapter must answer, advance or knowingly
+- `newFacts[]`, facts established that later chapters may rely on.
+- `closingBeat`, the note the chapter ends on.
+- `openQuestion`, the hook the next chapter must answer, advance or knowingly
   defer. This single field does more for flow than everything else here.
 
 ## Update the ledger
@@ -48,11 +48,11 @@ than leaving a field empty, because a wrong value becomes an enforced constraint
 
 ## Route
 
-- More chapters planned → `next_chapter`.
-- Final chapter recorded → `book_complete`.
+- More chapters planned: `next_chapter`.
+- Final chapter recorded: `book_complete`.
 
 ## Output
 
-- `.canon-quill/artifacts/continuity/ledger.json`
-- `.canon-quill/artifacts/continuity/chapter-XX-handoff.json`
+- `workspaces/<book>/artifacts/continuity/ledger.json`
+- `workspaces/<book>/artifacts/continuity/chapter-XX-handoff.json`
 - A one-paragraph human summary for the Studio chapter board.

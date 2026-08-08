@@ -1,7 +1,15 @@
+/**
+ * Per-workspace structured logs.
+ *
+ * Every entry belongs to a specific book. The previous version wrote to one
+ * global `.canon-quill/logs/` directory, so two projects would have interleaved
+ * their phase history into the same file.
+ */
+
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { projectPaths } from "./paths.js";
+import { workspacePaths } from "../workspace/paths.js";
 
 export type LogKind = "phase" | "audit" | "error";
 
@@ -27,33 +35,34 @@ const logFiles: Record<LogKind, string> = {
   error: "errors-log.json"
 };
 
-export async function initializeLogs(): Promise<void> {
-  await mkdir(projectPaths.logs, { recursive: true });
+export function logPath(slug: string, kind: LogKind): string {
+  return path.join(workspacePaths(slug).logs, logFiles[kind]);
+}
+
+export async function initializeLogs(slug: string): Promise<void> {
+  await mkdir(workspacePaths(slug).logs, { recursive: true });
   await Promise.all([
-    ensureJsonArray(logPath("phase")),
-    ensureJsonArray(logPath("audit")),
-    ensureJsonArray(logPath("error"))
+    ensureJsonArray(logPath(slug, "phase")),
+    ensureJsonArray(logPath(slug, "audit")),
+    ensureJsonArray(logPath(slug, "error"))
   ]);
 }
 
-export async function writeCurrentPhase(entry: BaseLogEntry & { mode?: string }): Promise<string> {
-  await mkdir(projectPaths.state, { recursive: true });
-  const phasePath = path.join(projectPaths.state, "current-phase.json");
-  await writeFile(phasePath, JSON.stringify({ ...entry, timestamp: entry.timestamp || new Date().toISOString() }, null, 2));
-  return phasePath;
-}
-
-export async function appendLog(kind: LogKind, entry: BaseLogEntry | ErrorLogEntry): Promise<void> {
-  await initializeLogs();
-  const filePath = logPath(kind);
+export async function appendLog(slug: string, kind: LogKind, entry: BaseLogEntry | ErrorLogEntry): Promise<void> {
+  await initializeLogs(slug);
+  const filePath = logPath(slug, kind);
   const entries = await readJsonArray(filePath);
   entries.push({ ...entry, timestamp: entry.timestamp || new Date().toISOString() });
   await writeFile(filePath, JSON.stringify(entries, null, 2));
 }
 
-export async function logError(error: unknown, context: Partial<BaseLogEntry> = {}): Promise<void> {
+export async function readLog(slug: string, kind: LogKind): Promise<unknown[]> {
+  return readJsonArray(logPath(slug, kind));
+}
+
+export async function logError(slug: string, error: unknown, context: Partial<BaseLogEntry> = {}): Promise<void> {
   const normalized = normalizeError(error);
-  await appendLog("error", {
+  await appendLog(slug, "error", {
     timestamp: new Date().toISOString(),
     stage: context.stage ?? "unknown",
     stageName: context.stageName ?? "Unknown",
@@ -65,10 +74,6 @@ export async function logError(error: unknown, context: Partial<BaseLogEntry> = 
     stack: normalized.stack,
     data: context.data
   });
-}
-
-export function logPath(kind: LogKind): string {
-  return path.join(projectPaths.logs, logFiles[kind]);
 }
 
 async function ensureJsonArray(filePath: string): Promise<void> {

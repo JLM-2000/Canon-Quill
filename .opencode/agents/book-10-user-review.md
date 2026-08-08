@@ -45,7 +45,7 @@ Chapter review package:
 Final book review package:
 1. Provide manuscript path, DOCX-not-yet-generated status, final validation/report paths, and manifest status.
 2. Summarize whole-book checks: continuity, open threads, style drift, AI-ism sweep, proofread, target audience/boundaries.
-3. Open a preview when possible using `npm run preview -- --detach --file .canon-quill/artifacts/final/manuscript.md --title "Final Manuscript"`.
+3. Open a preview when possible using `npm run preview -- --detach --file workspaces/<book>/artifacts/final/manuscript.md --title "Final Manuscript"`.
 4. Ask the user to choose one: `final approved`, `request changes`, or `cancel`.
 5. If the user says the book is good/approved, route to DOCX generation, final package post, archive, and reset.
 

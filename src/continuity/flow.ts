@@ -1,18 +1,10 @@
-/**
- * Chapter-to-chapter flow: brief generation and contract validation.
- *
- * Two directions:
- *
- *   `buildOpeningBrief`  -- before drafting chapter N, turn the ledger into an
- *                           explicit list of things chapter N must honour.
- *   `validateFlow`       -- after drafting, check the chapter against the
- *                           previous handoff and report breaks.
- *
- * The validator is deliberately conservative. It reports what it can prove
- * from structured state (a character who was in Marrow at the end of chapter 6
- * is on page one of chapter 7 in Calder with no travel) and stays quiet where
- * only a human or a model can judge. A gate that cries wolf gets switched off.
- */
+// Chapter-to-chapter flow. `buildOpeningBrief` turns the ledger into what the
+// next chapter must honour; `validateFlow` checks a draft against the previous
+// handoff.
+//
+// The validator is conservative on purpose: it reports what it can prove from
+// structured state and stays quiet where only a human can judge, because a gate
+// that cries wolf gets switched off.
 
 import {
   handoffFor,
@@ -51,21 +43,16 @@ export interface FlowReport {
 const staleAfter: Record<Thread["weight"], number> = { main: 3, subplot: 5, minor: 8 };
 
 /**
- * Everything chapter N must honour, derived from chapter N-1's handoff.
- *
- * This is injected into the drafting prompt. Previously the drafter got
- * "current continuity state" as a vague instruction; now it gets a checklist
- * it will be measured against.
+ * Everything chapter N must honour, derived from chapter N-1's handoff. This
+ * goes into the drafting prompt as a checklist the chapter is measured against.
  */
 export function buildOpeningBrief(ledger: ContinuityLedger, chapter: number): string {
   const previous = handoffFor(ledger, chapter - 1);
-  const lines: string[] = [`# Opening contract — Chapter ${chapter}`, ""];
+  const lines: string[] = [`# Opening contract, chapter ${chapter}`, ""];
 
-  // Series canon and thread state are always binding, including when the
-  // immediately-preceding handoff is missing (a resumed or re-ordered
-  // project). Only the previous-chapter section is conditional -- dropping
-  // threads along with it would quietly disable payoff tracking exactly when
-  // continuity is already shaky.
+  // Canon and thread state stay binding even when the preceding handoff is
+  // missing. Only the previous-chapter section is conditional; dropping threads
+  // with it would disable payoff tracking when continuity is already shaky.
   if (ledger.projectShape === "series" && ledger.inheritedCanon.length > 0) {
     lines.push("## Inherited series canon (binding)", "");
     for (const fact of ledger.inheritedCanon) lines.push(`- ${fact}`);
@@ -99,8 +86,8 @@ export function buildOpeningBrief(ledger: ContinuityLedger, chapter: number): st
       );
       for (const character of previous.characters) {
         lines.push(
-          `| ${character.name} | ${character.location} | ${character.condition || "—"} | ${character.emotionalState || "—"} | ${
-            character.knows.length > 0 ? character.knows.join("; ") : "—"
+          `| ${character.name} | ${character.location} | ${character.condition || "not set"} | ${character.emotionalState || "not set"} | ${
+            character.knows.length > 0 ? character.knows.join("; ") : "not set"
           } |`
         );
       }
@@ -114,8 +101,8 @@ export function buildOpeningBrief(ledger: ContinuityLedger, chapter: number): st
     for (const thread of live.sort((a, b) => weightRank(b.weight) - weightRank(a.weight))) {
       const age = chapter - thread.lastTouchedChapter;
       const due = thread.mustResolveBy ? `, due by ch.${thread.mustResolveBy}` : "";
-      const stale = age >= staleAfter[thread.weight] ? " **← going cold, touch it or resolve it**" : "";
-      lines.push(`- *(${thread.weight}${due})* ${thread.question} — last advanced ch.${thread.lastTouchedChapter}${stale}`);
+      const stale = age >= staleAfter[thread.weight] ? " going cold, touch it or resolve it**" : "";
+      lines.push(`- *(${thread.weight}${due})* ${thread.question}, last advanced ch.${thread.lastTouchedChapter}${stale}`);
     }
     lines.push("");
   }
@@ -162,8 +149,7 @@ export function validateFlow(
   const opening = openingWindow(draft);
 
   if (previous) {
-    // A character whose previous location is never re-established, in a chapter
-    // that opens somewhere else, is the classic teleport.
+    // Relocation with no travel shown and no reference to where they were.
     const openingMentionsPrevLocation = mentions(opening, previous.endsAtLocation);
     for (const character of previous.characters) {
       if (!mentions(opening, character.name)) continue;
@@ -196,7 +182,7 @@ export function validateFlow(
       }
     }
 
-    // Timeline must not run backwards without declaring a flashback.
+    // Time must not run backwards without a declared flashback.
     if (claimed && !claimed.timeline.isFlashback && previous.timeline.endsAt) {
       const previousDay = dayNumber(previous.timeline.endsAt);
       const currentDay = dayNumber(claimed.timeline.endsAt);
@@ -210,18 +196,18 @@ export function validateFlow(
       }
     }
 
-    // The hook the previous chapter left should not simply evaporate.
+    // The previous chapter's hook should not evaporate.
     if (previous.openQuestion && !touchesQuestion(draft, previous.openQuestion)) {
       issues.push({
         kind: "dropped-hook",
         severity: "major",
         message: `Chapter ${previous.chapter} closed on "${previous.openQuestion}" and this chapter never engages it.`,
-        fix: `Answer it, advance it, or have a character consciously defer it — but acknowledge it.`
+        fix: `Answer it, advance it, or have a character consciously defer it, but acknowledge it.`
       });
     }
   }
 
-  // Knowledge violations: someone acting on a fact they were never given.
+  // Someone acting on a fact they were never given.
   for (const state of claimed?.characters ?? []) {
     const known = latestCharacterState(ledger, state.name);
     if (!known) continue;
@@ -262,7 +248,7 @@ export function validateFlow(
     }
   }
 
-  // Promises the book is running out of room to pay off.
+  // Setups the book is running out of room to pay off.
   const remaining = ledger.plannedChapters - chapter;
   if (remaining <= 2) {
     for (const promise of ledger.promises.filter((entry) => entry.paidOffChapter === undefined)) {
@@ -290,7 +276,7 @@ export function validateFlow(
 
 /** Render a flow report as markdown for the editing agent and the UI. */
 export function renderFlowReport(report: FlowReport): string {
-  const lines = [`# Chapter Flow Report — Chapter ${report.chapter}`, "", `**Verdict:** ${report.verdict.toUpperCase()}`, ""];
+  const lines = [`# Chapter Flow Report, Chapter ${report.chapter}`, "", `**Verdict:** ${report.verdict.toUpperCase()}`, ""];
   if (report.issues.length === 0) {
     lines.push("Chapter connects cleanly to the previous handoff. No flow breaks detected.", "");
     return lines.join("\n");
@@ -303,7 +289,7 @@ export function renderFlowReport(report: FlowReport): string {
   return lines.join("\n");
 }
 
-/** The first ~250 words, where continuity breaks are most jarring. */
+/** The first 250 words, where continuity breaks are most jarring. */
 function openingWindow(draft: string): string {
   return words(draft).slice(0, 250).join(" ");
 }

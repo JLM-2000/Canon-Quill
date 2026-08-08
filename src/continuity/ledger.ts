@@ -1,28 +1,16 @@
-/**
- * The continuity ledger: typed state carried from one chapter into the next.
- *
- * The old workflow had a `continuity_update` phase whose entire contract was a
- * markdown file the next agent was asked to "read and respect". Nothing checked
- * that it did. That is why chapters did not flow: chapter 7 could open with a
- * character in a city chapter 6 had just seen them leave, resolve a thread
- * chapter 4 had already resolved, or have someone act on a secret they were
- * never told -- and no gate in the pipeline could notice.
- *
- * Here the state is structured, so the handoff between chapters is a contract
- * that can be validated (`validate.ts`) rather than a document that can be
- * skimmed.
- */
+// Typed state carried from one chapter into the next, so the handoff is a
+// contract that can be validated rather than a document that can be skimmed.
 
 /** Where a character stands as a chapter ends. */
 export interface CharacterState {
   name: string;
   /** Where they physically are when the chapter closes. */
   location: string;
-  /** Facts they now know. Used to catch characters acting on secrets. */
+  /** Facts they know. Used to catch characters acting on secrets. */
   knows: string[];
-  /** Injuries, exhaustion, intoxication -- anything that constrains the next scene. */
+  /** Anything that constrains the next scene: injury, exhaustion, drink. */
   condition: string;
-  /** Emotional register they exit on, so the next appearance is continuous. */
+  /** Emotional register they exit on. */
   emotionalState: string;
   /** Who they are currently with. */
   withCharacters: string[];
@@ -45,7 +33,7 @@ export interface Thread {
   weight: "main" | "subplot" | "minor";
 }
 
-/** A setup that obliges a payoff -- Chekhov's ledger. */
+/** A setup that obliges a payoff. */
 export interface Promise_ {
   id: string;
   setup: string;
@@ -75,17 +63,14 @@ export interface ChapterHandoff {
   newFacts: string[];
   /** The emotional note the chapter closes on. */
   closingBeat: string;
-  /**
-   * The hook the next chapter must answer, honour, or deliberately subvert.
-   * This is the single most important field for flow.
-   */
+  /** The hook the next chapter must answer, honour, or deliberately subvert. */
   openQuestion: string;
 }
 
 /** The whole book's continuity state. */
 export interface ContinuityLedger {
   bookTitle: string;
-  /** Standalone books carry no prior-book canon; series books inherit it. */
+  /** Standalone books carry no prior-book canon. */
   projectShape: "standalone" | "series";
   /** For series books: canon inherited from earlier volumes. */
   inheritedCanon: string[];

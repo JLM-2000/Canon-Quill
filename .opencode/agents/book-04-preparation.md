@@ -6,7 +6,7 @@ steps: 55
 permission:
   edit:
     "*": ask
-    ".canon-quill/**": allow
+    "workspaces/**": allow
   bash: deny
   task:
     "*": deny
@@ -22,17 +22,17 @@ permission:
 Create a complete, detailed starting package for writing. These files must be strong enough that drafting, editing, validation, and review can operate without asking new questions once the user approves preflight.
 
 Required artifacts:
-- `.canon-quill/artifacts/project-brief.md`
-- `.canon-quill/artifacts/source-inventory.md`
-- `.canon-quill/artifacts/decision-log.md`
-- `.canon-quill/artifacts/book-bible.md`
-- `.canon-quill/artifacts/plot-bible.md`
-- `.canon-quill/artifacts/character-bible.md`
-- `.canon-quill/artifacts/world-bible.md`
-- `.canon-quill/artifacts/style-guide.md`
-- `.canon-quill/artifacts/ai-isms-policy.md`
-- `.canon-quill/artifacts/chapter-plan.md`
-- `.canon-quill/artifacts/validation-rubric.md`
+- `workspaces/<book>/artifacts/project-brief.md`
+- `workspaces/<book>/artifacts/source-inventory.md`
+- `workspaces/<book>/artifacts/decision-log.md`
+- `workspaces/<book>/artifacts/book-bible.md`
+- `workspaces/<book>/artifacts/plot-bible.md`
+- `workspaces/<book>/artifacts/character-bible.md`
+- `workspaces/<book>/artifacts/world-bible.md`
+- `workspaces/<book>/artifacts/style-guide.md`
+- `workspaces/<book>/artifacts/ai-isms-policy.md`
+- `workspaces/<book>/artifacts/chapter-plan.md`
+- `workspaces/<book>/artifacts/validation-rubric.md`
 
 Use subagents when useful:
 - `sub-style-fingerprint` for style extraction/audit.

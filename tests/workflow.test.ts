@@ -1,11 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { loadWorkflow } from "../src/workflow/load.js";
 import { validateWorkflow } from "../src/workflow/validate.js";
 import { extractDriveId } from "../src/drive/id.js";
 import { generateDocx } from "../src/project/docx.js";
-import { initializeProject } from "../src/project/init.js";
-import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { createProject } from "../src/workspace/registry.js";
+import { workspacePaths, workspacesRoot } from "../src/workspace/paths.js";
+
+afterEach(async () => {
+  await rm(workspacesRoot(), { recursive: true, force: true });
+});
 
 describe("workflow", () => {
   it("validates the book workflow", async () => {
@@ -16,17 +22,20 @@ describe("workflow", () => {
   });
 });
 
-describe("project lifecycle", () => {
-  it("initializes state and generates docx", async () => {
-    await initializeProject();
-    expect(existsSync(".canon-quill/state/current-phase.json")).toBe(true);
-    expect(existsSync(".canon-quill/logs/phase-log.json")).toBe(true);
-    expect(existsSync(".canon-quill/logs/errors-log.json")).toBe(true);
-    expect(existsSync(".canon-quill/logs/audit-log.json")).toBe(true);
-    await mkdir(".canon-quill/artifacts/final", { recursive: true });
-    await writeFile(".canon-quill/artifacts/final/manuscript.md", "# Test Book\n\n## Chapter 1\n\nHello *world*.");
-    const result = await generateDocx();
+describe("docx generation", () => {
+  it("builds a DOCX from the workspace manuscript", async () => {
+    const project = await createProject("Docx Book");
+    const paths = workspacePaths(project.slug);
+    await mkdir(paths.final, { recursive: true });
+    await writeFile(path.join(paths.final, "manuscript.md"), "# Test Book\n\n## Chapter 1\n\nHello *world*.");
+
+    const result = await generateDocx(project.slug);
     expect(existsSync(result.outputPath)).toBe(true);
+  });
+
+  it("fails clearly when there is no manuscript", async () => {
+    const project = await createProject("Empty Book");
+    await expect(generateDocx(project.slug)).rejects.toThrow(/manuscript not found/i);
   });
 });
 
