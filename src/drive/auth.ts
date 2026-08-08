@@ -6,7 +6,37 @@ import type { AddressInfo } from "node:net";
 import { dirname, resolve } from "node:path";
 import { explainMissingPath, resolveExistingPath } from "../config/env.js";
 
-const defaultScopes = ["https://www.googleapis.com/auth/drive.file"];
+// Browsing needs `drive.readonly`. `drive.file` alone can only see files the
+// app itself created or that the user picked through Google's Picker widget,
+// so listing a folder with it returns nothing at all, which is what made the
+// Drive browser show an empty My Drive.
+//
+// `drive.readonly` grants read access to Drive and no write access whatsoever;
+// `drive.file` is kept alongside it so chapters can be written back to the one
+// target folder. Set CANON_QUILL_DRIVE_SCOPES to just `drive.file` to opt out
+// of browsing and paste folder links instead.
+const defaultScopes = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file"
+];
+
+/** True when the granted token covers everything currently configured. */
+function coversConfiguredScopes(token: StoredToken, scopes: string[]): boolean {
+  if (!token.scope) return true; // nothing recorded; assume the server knows
+  const granted = new Set(token.scope.split(/\s+/).filter(Boolean));
+  return scopes.every((scope) => granted.has(scope));
+}
+
+/** Can this token browse Drive, or only touch files it already knows about? */
+export function canBrowse(token: { scope?: string } | undefined): boolean {
+  if (!token?.scope) return false;
+  return token.scope.split(/\s+/).some(
+    (scope) =>
+      scope === "https://www.googleapis.com/auth/drive.readonly" ||
+      scope === "https://www.googleapis.com/auth/drive" ||
+      scope === "https://www.googleapis.com/auth/drive.metadata.readonly"
+  );
+}
 const tokenRefreshSkewMs = 60_000;
 
 interface OAuthClientConfig {
@@ -48,6 +78,10 @@ export interface DriveAuthStatus {
   configured: boolean;
   /** A stored token exists, so Drive can be used without a browser. */
   authorized: boolean;
+  /** The grant is narrower than what is configured now. */
+  needsReauthorization?: boolean;
+  /** The grant is wide enough to list folders. */
+  canBrowse?: boolean;
   detail: string;
 }
 
@@ -79,14 +113,37 @@ export async function driveAuthStatus(): Promise<DriveAuthStatus> {
     };
   }
 
+  const scopes = configuredScopes();
+  if (!coversConfiguredScopes(token, scopes)) {
+    return {
+      configured: true,
+      authorized: false,
+      needsReauthorization: true,
+      canBrowse: canBrowse(token),
+      detail:
+        "Authorised, but with narrower access than is now configured. Reconnect to grant the rest.\n" +
+        "This is expected if you connected before browsing was supported: the old token could not list your Drive."
+    };
+  }
+
   if (isUsable(token)) {
-    return { configured: true, authorized: true, detail: "Connected. The stored access token is still valid." };
+    return {
+      configured: true,
+      authorized: true,
+      canBrowse: canBrowse(token),
+      detail: "Connected. The stored access token is still valid."
+    };
   }
 
   if (token.refresh_token) {
     try {
-      await refreshAccessToken(credentials, resolveTokenPath(), token);
-      return { configured: true, authorized: true, detail: "Connected. The access token was refreshed." };
+      const refreshed = await refreshAccessToken(credentials, resolveTokenPath(), token);
+      return {
+        configured: true,
+        authorized: true,
+        canBrowse: canBrowse(refreshed),
+        detail: "Connected. The access token was refreshed."
+      };
     } catch (error) {
       return {
         configured: true,

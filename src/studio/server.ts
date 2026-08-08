@@ -262,6 +262,8 @@ export function createStudioApp() {
     res.json({
       connected: status.authorized,
       configured: status.configured,
+      canBrowse: status.canBrowse ?? false,
+      needsReauthorization: status.needsReauthorization ?? false,
       reason: status.detail,
       // What the UI should offer next.
       next: status.configured ? (status.authorized ? "ready" : "connect") : "configure"
@@ -283,8 +285,13 @@ export function createStudioApp() {
   app.get("/api/drive/browse", route(async (req, res) => {
     const folderId = typeof req.query.folderId === "string" && req.query.folderId ? req.query.folderId : "root";
     const entries = await drive.listFolder(folderId);
+    const status = await driveAuthStatus();
+
     res.json({
       folderId,
+      canBrowse: status.canBrowse ?? false,
+      // An empty result under a narrow grant is not an empty folder.
+      emptyBecauseScope: entries.length === 0 && !status.canBrowse,
       entries: entries.map((entry) => ({
         ...entry,
         isFolder: entry.mimeType === "application/vnd.google-apps.folder"

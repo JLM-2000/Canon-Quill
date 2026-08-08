@@ -251,7 +251,24 @@ Because the app is in Testing and unverified, Google shows **"Google hasn't veri
 
 **Test-mode refresh tokens expire after seven days.** While the consent screen is in Testing, Google expires refresh tokens weekly, so Drive will stop working after about a week and you re-authorise. To stop that, go to the consent screen and **Publish app**. You will stay unverified (still the "unsafe" click-through), but tokens stop expiring.
 
-**The scope is `drive.file`, deliberately.** Canon Quill sees only files you explicitly select or that it created. It cannot list your whole Drive. If a folder you expected does not appear when browsing, that is the scope working as intended, not a bug. Pick the folder explicitly.
+**What access you are granting.** Two scopes by default:
+
+| Scope | What it allows |
+|---|---|
+| `drive.readonly` | Read your Drive. This is what makes the folder browser work. No write access at all. |
+| `drive.file` | Write, but only to files Canon Quill creates. This is how finished chapters reach your target folder. |
+
+Canon Quill cannot modify or delete anything that already exists in your Drive.
+
+**If you would rather grant less**, set this in `.env` and restart:
+
+```
+CANON_QUILL_DRIVE_SCOPES=https://www.googleapis.com/auth/drive.file
+```
+
+Then browsing is not possible, because `drive.file` can only see files the app created itself. Instead of browsing you paste folder links into the **Or paste Drive links** box on the Select sources screen. Everything else works the same.
+
+This is worth knowing if you connected early on: the first version requested `drive.file` alone, which is why My Drive appeared empty. Reconnect and the browser fills in.
 
 ### If it still fails
 

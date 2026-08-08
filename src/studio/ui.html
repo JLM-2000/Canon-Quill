@@ -457,7 +457,12 @@ function viewEngine() {
         <td class="num">${price}</td></tr>`;
     }).join("")}
   </table></div>
-  ${cat.estimates ? renderEstimates(cat, choice.provider) : ""}` : ""}
+  ${cat.estimates && choice.authMethod !== "subscription" ? renderEstimates(cat, choice.provider) : ""}
+  ${choice.authMethod === "subscription" ? `<div class="info">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <path d="M20 6L9 17l-5-5"/></svg>
+    <div><b>No per-token cost</b>
+      <p>Writing is covered by your plan, subject to its usage limits.</p></div></div>` : ""}` : ""}
 
   ${choice.provider && choice.authMethod ? `<button onclick="go('connect')">Next: connect Drive</button>` : ""}`;
 }
@@ -568,14 +573,26 @@ function viewConnect() {
     </div>` : ""}
 
     ${next === "connect" ? `<div class="card">
-      <b>Authorise access</b>
+      <b>${d.needsReauthorization ? "Reconnect to enable browsing" : "Authorise access"}</b>
       <p class="sub" style="margin:6px 0 10px">Opens Google in your browser once. You will see an
       unverified-app warning: choose <b>Advanced</b>, then <b>Go to (unsafe)</b>. It is your own OAuth
       client talking to your own Drive.</p>
-      <div class="row"><button onclick="connectDrive(this)">Connect Google Drive</button>
+      <div class="row"><button onclick="connectDrive(this)">${
+        d.needsReauthorization ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
         <button class="ghost" onclick="checkDrive(this)">Check again</button></div>
       <div id="authlink" class="hint" style="margin-top:10px"></div>
-    </div>` : ""}
+    </div>
+
+    <div class="info">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+      <div><b>What you are granting</b>
+        <p><b>Read access to your Drive</b>, so the Studio can show your folders and you can pick the ones
+        to use. Plus write access limited to files Canon Quill creates, which is how finished chapters get
+        back to your target folder. It cannot modify or delete anything else.</p>
+        <p style="margin-top:6px">To grant less, set <code>CANON_QUILL_DRIVE_SCOPES</code> to just
+        <code>https://www.googleapis.com/auth/drive.file</code> and restart. Browsing stops working and you
+        paste folder links instead.</p></div></div>` : ""}
 
     ${next === "ready" ? `<div class="card"><b>Next</b>
       <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
@@ -634,7 +651,23 @@ function viewSources() {
     <div class="crumbs">${browse.crumbs.map((c, i) =>
       `<button onclick="jump(${i})">${esc(c.name)}</button>${i < browse.crumbs.length - 1 ? "<span style='color:var(--faint)'>/</span>" : ""}`).join("")}</div>
     <div class="fs">${browse.loading ? '<div class="empty"><span class="spin"></span> Loading…</div>'
-      : rows || '<div class="empty">Empty folder</div>'}</div>
+      : rows || (browse.emptyBecauseScope
+        ? `<div class="empty" style="text-align:left;padding:16px">
+            <b style="color:var(--text)">Nothing visible with the current access grant</b>
+            <p style="margin:6px 0 0">Canon Quill was authorised for the narrow <code>drive.file</code>
+            scope, which can only see files it created itself. That is why this looks empty rather than
+            showing your Drive.</p>
+            <p style="margin:6px 0 0">Reconnect from <b>Connect Drive</b> to grant read access, or paste
+            folder links below.</p></div>`
+        : '<div class="empty">This folder is empty</div>')}</div>
+  </div>
+
+  <div class="card">
+    <label>Or paste Drive links</label>
+    <div class="hint" style="margin-bottom:6px">One folder or file link per line. Useful when you would
+    rather not grant read access to your whole Drive.</div>
+    <textarea id="pasted" rows="3" placeholder="https://drive.google.com/drive/folders/..."></textarea>
+    <button class="ghost sm" style="margin-top:6px" onclick="addPasted()">Add to selection</button>
   </div>
 
   <div class="card">
@@ -656,12 +689,30 @@ async function loadBrowse(folderId) {
   try {
     const r = await api(`/api/drive/browse?folderId=${encodeURIComponent(folderId)}`);
     browse.entries = r.entries; browse.folderId = folderId;
+    browse.emptyBecauseScope = r.emptyBecauseScope; browse.canBrowse = r.canBrowse;
   } catch (e) { toast(e.message, true); browse.entries = []; }
   browse.loading = false; render();
 }
 function openFolder(id, name) { browse.crumbs.push({ id, name }); loadBrowse(id); }
 function jump(i) { browse.crumbs = browse.crumbs.slice(0, i + 1); loadBrowse(browse.crumbs[i].id); }
 function pick(id, name) { picked.set(id, name); render(); }
+
+function addPasted() {
+  const box = document.getElementById("pasted");
+  const lines = (box?.value || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) { toast("Paste at least one link.", true); return; }
+  let added = 0;
+  for (const line of lines) {
+    // Accept a full URL or a bare id; the server extracts the id either way.
+    const match = /[-\w]{25,}/.exec(line);
+    if (!match) continue;
+    picked.set(match[0], line.length > 48 ? match[0] : line);
+    added += 1;
+  }
+  if (box) box.value = "";
+  toast(added ? `Added ${plural(added, "link")}.` : "No Drive link recognised.", !added);
+  render();
+}
 function unpick(id) { picked.delete(id); render(); }
 
 async function saveRoots(btn) {

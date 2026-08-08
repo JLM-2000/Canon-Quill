@@ -137,7 +137,7 @@ The console flow has a few steps that are easy to get wrong, and two that will b
 
 **[docs/GUIDE.md](docs/GUIDE.md) walks the whole thing**, along with everything else: the phases, both writing modes, choosing a provider and connecting a subscription, how to read a style report, and a table of the errors each mistake produces.
 
-The scope is `drive.file`, so Canon Quill only ever sees files you explicitly choose, never your whole Drive.
+Access is read-only across your Drive (so the folder browser works) plus write access limited to files Canon Quill creates (so chapters reach your target folder). It cannot modify or delete anything that already exists. If you would rather it could not read your whole Drive, `CANON_QUILL_DRIVE_SCOPES` narrows it to `drive.file` and you paste folder links instead of browsing.
 
 ---
 
