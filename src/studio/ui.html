@@ -1667,7 +1667,7 @@ async function loadFingerprint() {
       ["Narration confidence", pct(profile.narration.confidence)],
       ["Narrative distance", profile.distance.label],
       ["Sensory palette", Object.entries(profile.sensory).map(([k, v]) => `${k} ${v}/1k`).join(", ")],
-      ["Scene beats", Object.entries(profile.beats).map(([k, v]) => `${k} ${pct(v)}`).join(", ")],
+       ["Passage beat mix", Object.entries(profile.beats).map(([k, v]) => `${k} ${pct(v)}`).join(", ")],
       ["Explicit emotion", profile.emotion.explicitPer1k + "/1k"],
       ["Body-cue emotion", profile.emotion.bodyCuePer1k + "/1k"],
       ["Figurative language", profile.figurative.similesPer1k + " similes/1k"],
@@ -1677,7 +1677,8 @@ async function loadFingerprint() {
     el.innerHTML = `${profile ? `<h3 style="margin:0 0 8px">Writing profile</h3>
       <table><tr><th>Signal</th><th class="num">Measured reading</th></tr>
         ${profileRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${esc(v)}</td></tr>`).join("")}</table>
-        ${profile.evidence?.length ? `<div class="hint" style="margin-top:10px"><b>Evidence:</b> ${profile.evidence.map(esc).join(" ")}</div>` : ""}
+        <div class="hint" style="margin-top:10px"><b>How to read passage beat mix:</b> each passage is assigned one dominant beat. This is a directional word share, not a literal share of quoted dialogue. The separate Dialogue share below measures quoted speech.</div>
+        ${profile.evidence?.length ? `<div class="hint" style="margin-top:6px"><b>Evidence:</b> ${profile.evidence.map(esc).join(" ")}</div>` : ""}
       </div>` : ""}
       <h3 style="margin:18px 0 8px">Prose fingerprint</h3>
       <table><tr><th>Measure</th><th class="num">Your target</th></tr>

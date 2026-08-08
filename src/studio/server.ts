@@ -1368,7 +1368,7 @@ function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: n
       `- Narration: ${profile.narration.label} (${Math.round(profile.narration.confidence * 100)}% confidence).`,
       `- Narrative distance: ${profile.distance.label}; filter verbs ${profile.distance.filterVerbsPer1k}/1k, interiority ${profile.distance.interiorityPer1k}/1k.`,
       `- Sensory palette per 1k: ${Object.entries(profile.sensory).map(([key, value]) => `${key} ${value}`).join(", ")}.`,
-      `- Beat distribution: ${Object.entries(profile.beats).map(([key, value]) => `${key} ${pct(value)}`).join(", ")}.`,
+      `- Passage beat mix, one dominant label per passage: ${Object.entries(profile.beats).map(([key, value]) => `${key} ${pct(value)}`).join(", ")}. This is directional word share, not quoted-dialogue share.`,
       `- Emotional rendering per 1k: explicit ${profile.emotion.explicitPer1k}, body cues ${profile.emotion.bodyCuePer1k}, thought ${profile.emotion.thoughtPer1k}.`,
       `- Figurative language per 1k: similes ${profile.figurative.similesPer1k}, metaphor signals ${profile.figurative.metaphorSignalsPer1k}.`,
       `- Advisory audience signals: ${profile.audience.values.join(", ") || "none strong enough to suggest"}.`,

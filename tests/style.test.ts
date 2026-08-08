@@ -111,6 +111,10 @@ describe("beat classification", () => {
     ).toBe("action");
   });
 
+  it("recognises ordinary domestic movement as action", () => {
+    expect(classifyBeat("Julian blinked at the doorway, then turned back to the stove. He stirred the coffee and reached for the pan.")).toBe("action");
+  });
+
   it("detects interiority", () => {
     expect(
       classifyBeat(

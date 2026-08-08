@@ -50,8 +50,8 @@ export interface BuildCorpusOptions {
   maxWords?: number;
 }
 
-const actionVerbs = /\b(?:ran|run|grabbed|threw|hit|struck|pulled|pushed|slammed|kicked|jumped|dove|ducked|swung|fell|crashed|shoved|lunged|sprinted|drew|fired|swept|climbed|tore|caught|dropped|spun|staggered|stumbled|reached|seized|hauled|flung|rolled|leapt)\b/gi;
-const interiorityMarkers = /\b(?:thought|wondered|remembered|realized|realised|knew|believed|hoped|feared|wanted|understood|decided|regretted|imagined|considered|suspected|recalled)\b/gi;
+const actionVerbs = /\b(?:ran|run|grabbed|threw|hit|struck|pulled|pushed|slammed|kicked|jumped|dove|ducked|swung|fell|crashed|shoved|lunged|sprinted|drew|fired|swept|climbed|tore|caught|dropped|spun|staggered|stumbled|reached|seized|hauled|flung|rolled|leapt|walked|crossed|moved|stepped|stood|sat|opened|closed|entered|left|came|went|brought|carried|held|lifted|picked|placed|put|set|turned|blinked|nodded|shook|smiled|laughed|cried|breathed|cooked|stirred|poured|ate|drank|burned|tried)\b/gi;
+const interiorityMarkers = /\b(?:thought|thinking|wondered|remembered|realized|realised|knew|believed|hoped|feared|wanted|understood|decided|regretted|imagined|considered|suspected|recalled|wished|tried|meant|felt|noticed|recognized|recognised)\b/gi;
 const transitionMarkers = /\b(?:later|afterwards?|the next (?:day|morning|week|month|year)|hours? (?:later|passed)|by (?:then|morning|evening|nightfall)|meanwhile|that (?:night|evening|afternoon)|days? (?:later|passed)|eventually|in the end)\b/gi;
 
 /**
