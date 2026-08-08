@@ -45,6 +45,7 @@ import { loadDotEnv } from "../config/env.js";
 loadDotEnv();
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const startedAt = Date.now();
 
 export interface StudioServerOptions {
   port?: number;
@@ -85,6 +86,45 @@ export function createStudioApp() {
       }
     }
     res.status(500).type("text").send("Studio UI not found. Run npm run build.");
+  }));
+
+  /**
+   * Whether the running process is older than the code on disk.
+   *
+   * The UI file is read per request so it is always current, but everything
+   * else is loaded once at startup. Editing a source file while the Studio is
+   * running therefore produces a half-updated app, which is confusing enough
+   * to be worth detecting rather than leaving people to guess.
+   */
+  app.get("/api/health", route(async (_req, res) => {
+    const { readdir, stat } = await import("node:fs/promises");
+    let newest = 0;
+
+    const walk = async (dir: string, depth = 0): Promise<void> => {
+      if (depth > 4) return;
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) await walk(full, depth + 1);
+        else if (/\.(ts|mjs|yaml)$/.test(entry.name)) {
+          const info = await stat(full).catch(() => undefined);
+          if (info && info.mtimeMs > newest) newest = info.mtimeMs;
+        }
+      }
+    };
+
+    await Promise.all([walk(path.join(process.cwd(), "src")), walk(path.join(process.cwd(), "config"))]);
+
+    res.json({
+      startedAt: new Date(startedAt).toISOString(),
+      stale: newest > startedAt,
+      newestChange: newest ? new Date(newest).toISOString() : null
+    });
   }));
 
   // --- Projects -------------------------------------------------------------

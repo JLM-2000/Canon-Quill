@@ -67,6 +67,9 @@
 
   /* --- main --- */
   main { padding: 26px 32px 80px; max-width: 1080px; }
+  .stale { background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid var(--warn);
+    color: var(--text); border-radius: var(--radius); padding: 11px 14px; margin-bottom: 18px; font-size: 13px; }
+  .stale b { color: var(--warn); }
   h1 { font-size: 21px; margin: 0 0 3px; letter-spacing: -0.02em; }
   h2 { font-size: 15px; margin: 26px 0 10px; letter-spacing: -0.01em; }
   .sub { color: var(--muted); margin: 0 0 22px; max-width: 68ch; }
@@ -206,7 +209,7 @@
       <button class="ghost sm" style="width:100%" onclick="reload()">Refresh</button>
     </div>
   </aside>
-  <main id="view"></main>
+  <main><div id="stale"></div><div id="view"></div></main>
 </div>
 
 <script>
@@ -253,6 +256,18 @@ function toast(msg, isError) {
   el.textContent = msg;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), isError ? 6000 : 3000);
+}
+
+async function checkStale() {
+  try {
+    const h = await api("/api/health");
+    const el = document.getElementById("stale");
+    if (el) el.innerHTML = h.stale
+      ? `<div class="stale"><b>This Studio is running older code.</b> Source files changed after it
+         started, so what you see may not match what is on disk. Stop it with Ctrl+C and run
+         <code>npm run studio</code> again.</div>`
+      : "";
+  } catch { /* health is advisory */ }
 }
 
 async function reload() {
@@ -961,6 +976,8 @@ async function setStatus(number, status) {
 // --- boot ------------------------------------------------------------------
 (async function () {
   await reload();
+  checkStale();
+  setInterval(checkStale, 30000);
   if (S) {
     route = PHASES.find((p) => p.id === S.phase)?.id || "connect";
     render();
