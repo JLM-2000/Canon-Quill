@@ -306,16 +306,18 @@ Every document is read and sorted into one of seven groups:
 | Group | What it is | What it feeds |
 |---|---|---|
 | **Past series book** | your own earlier books | style corpus **and** canon |
-| **Reference book** | another author's work | nothing automatic, held for reference |
+| **Reference book** | comparison titles, research, anything not your own series | held for reference; never feeds the corpus |
 | **Characters** | cast lists, sheets, bibles | character canon |
 | **Timeline** | chronology, dates, eras | timeline canon |
 | **Worldbuilding** | setting, magic, factions | world canon |
 | **Plot** | outlines, synopses, beat sheets | chapter plan |
 | **Notes** | everything else | nothing automatic |
 
-Each result carries a confidence and the evidence behind it, for example "narrative prose (48,120 words, 31% dialogue)" or "by-line 'Eleanor Finch' near the top".
+**Check this step.** Only *past series books* feed your voice and your canon. If someone else's novel lands in that pile, you get a book that sounds like them and contradicts itself.
 
-**Check this step.** Only *past series books* feed your voice and your canon. If someone else's novel lands in that pile, you get a book that sounds like them and contradicts itself. Anything the classifier is unsure about is surfaced for you to confirm, and you can move any document to any pile with a dropdown.
+Click the labels on any document to change its groups. A document can be in several at once, which is normal: one file often holds a timeline, an outline and loose notes, and your own past books are usually both style corpus and general reference.
+
+Re-analysing replaces the grouping entirely, so the Studio warns before doing it.
 
 ### Style corpus
 

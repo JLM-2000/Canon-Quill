@@ -256,7 +256,7 @@ let indexing = false;
 let indexError = null;
 
 const KINDS = {
-  past_book: "Past series book", reference_book: "Reference book (other author)",
+  past_book: "Past series book", reference_book: "Reference book",
   characters: "Characters", timeline: "Timeline", world: "Worldbuilding",
   plot: "Plot & outline", notes: "Notes"
 };
@@ -316,17 +316,79 @@ function renderVersion() {
       : "";
 }
 
+/**
+ * A single modal implementation. Everything that needs to ask something uses
+ * it, so nothing falls back to prompt(), which cannot be styled and reads as a
+ * browser warning rather than part of the app.
+ */
+function showModal({ title, body, actions, onOpen, dismissable = true }) {
+  closeModal();
+  const wrap = document.createElement("div");
+  wrap.id = "modal";
+  wrap.className = "modal-bg";
+  if (dismissable) wrap.onclick = (e) => { if (e.target === wrap) closeModal(); };
+  wrap.innerHTML = `<div class="modal">
+    <h3>${title}</h3>
+    ${body}
+    <div class="row" style="margin-top:18px">${actions}</div>
+  </div>`;
+  document.body.appendChild(wrap);
+  if (dismissable) {
+    document.addEventListener("keydown", escClose);
+  }
+  onOpen?.();
+}
+function escClose(e) { if (e.key === "Escape") closeModal(); }
+function closeModal() {
+  document.getElementById("modal")?.remove();
+  document.removeEventListener("keydown", escClose);
+}
+
+function newBookModal() {
+  showModal({
+    title: "New book",
+    body: `<p class="hint" style="margin:0 0 12px">Each book gets its own workspace: its own sources,
+      style corpus, chapters and continuity. Nothing is shared between books.</p>
+      <label>Title</label>
+      <input id="booktitle" placeholder="The Tide House"
+        onkeydown="if(event.key==='Enter')createBook(document.getElementById('createbtn'))" />
+      <div id="bookerr" class="hint" style="margin-top:6px"></div>`,
+    actions: `<button id="createbtn" onclick="createBook(this)">Create book</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`,
+    onOpen: () => document.getElementById("booktitle")?.focus()
+  });
+}
+
+async function createBook(btn) {
+  const input = document.getElementById("booktitle");
+  const title = input?.value?.trim();
+  const err = document.getElementById("bookerr");
+  if (!title) { if (err) err.innerHTML = '<span style="color:var(--warn)">Give the book a title.</span>'; input?.focus(); return; }
+
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Creating…';
+  try {
+    const r = await api("/api/projects", { method: "POST", body: { title } });
+    closeModal();
+    await reload();
+    route = "engine"; render();
+    toast(`Created "${r.project.title}".`);
+  } catch (e) {
+    if (err) err.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    btn.disabled = false; btn.textContent = "Create book";
+  }
+}
+
 function openUpdate() { updateResult = null; render(); renderModal(); }
-function closeUpdate() { document.getElementById("modal")?.remove(); }
+
 
 function renderModal() {
-  closeUpdate();
+  closeModal();
   const v = VERSION;
   if (!v) return;
   const wrap = document.createElement("div");
   wrap.id = "modal";
   wrap.className = "modal-bg";
-  wrap.onclick = (e) => { if (e.target === wrap && !updating) closeUpdate(); };
+  wrap.onclick = (e) => { if (e.target === wrap && !updating) closeModal(); };
 
   const commits = v.pending.map((c) => `
     <div class="commit"><code>${esc(c.sha)}</code> ${esc(c.subject)}
@@ -358,7 +420,7 @@ function renderModal() {
         ? `<button onclick="restartStudio(this)">Restart now</button>`
         : `<button ${v.blocked || updating ? "disabled" : ""} onclick="runUpdate(this)">
              ${updating ? '<span class="spin"></span> Updating…' : "Download and install"}</button>`}
-      <button class="ghost" ${updating ? "disabled" : ""} onclick="closeUpdate()">Close</button>
+      <button class="ghost" ${updating ? "disabled" : ""} onclick="closeModal()">Close</button>
     </div>
   </div>`;
   document.body.appendChild(wrap);
@@ -391,15 +453,7 @@ async function reload() {
   } catch (e) { toast(e.message, true); }
 }
 
-async function newProject() {
-  const title = prompt("Book title");
-  if (!title || !title.trim()) return;
-  try {
-    const r = await api("/api/projects", { method: "POST", body: { title: title.trim() } });
-    S = r.state; await reload(); route = "connect"; render();
-    toast(`Created "${r.project.title}".`);
-  } catch (e) { toast(e.message, true); }
-}
+
 
 async function switchProject(slug) {
   try { await api(`/api/projects/${slug}/activate`, { method: "POST" }); await reload(); }
@@ -424,13 +478,12 @@ function renderNav() {
   const blocking = (S?.questions || []).filter((q) => q.blocking && q.answer === undefined).length;
 
   let html = `<div class="navgroup">Book</div>
-    <select onchange="if(this.value==='__new')newProject();else switchProject(this.value)"
+    ${PROJECTS.length ? `<select onchange="switchProject(this.value)"
       style="margin-bottom:6px;font-size:12.5px;padding:6px 8px">
       ${PROJECTS.map((p) => `<option value="${p.slug}" ${S && p.slug === S.slug ? "selected" : ""}>
         ${esc(p.title)}${p.status === "finished" ? " (finished)" : ""}</option>`).join("")}
-      ${PROJECTS.length ? "" : '<option value="">No books yet</option>'}
-      <option value="__new">+ New book...</option>
-    </select>`;
+    </select>` : ""}
+    <button class="ghost sm" style="width:100%;margin-bottom:6px" onclick="newBookModal()">+ New book</button>`;
 
   if (S) {
     let group = "";
@@ -504,11 +557,15 @@ function render() {
   const v = document.getElementById("view");
   if (!S) {
     v.innerHTML = `
-      <h1>No book selected</h1>
-      <p class="sub">Every book gets its own workspace under <code>workspaces/</code>, holding its
-      own sources, style corpus, chapters and continuity. Books are independent, and finishing one
-      never deletes it.</p>
-      <div class="card"><button onclick="newProject()">Create your first book</button></div>`;
+      <div style="max-width:52ch;margin:8vh auto 0;text-align:center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.4"
+          stroke-linecap="round" stroke-linejoin="round" style="width:52px;height:52px;margin-bottom:14px">
+          <path d="M20 4C11 5 7 10 6 16l-2 4"/><path d="M13 5c3 3 4 7 3 11-3 1-7 0-10-3"/></svg>
+        <h1 style="font-size:24px">Start your first book</h1>
+        <p class="sub" style="margin:8px auto 22px">Each book gets its own workspace with its own sources,
+        style corpus, chapters and continuity. Books are independent, and finishing one never deletes it.</p>
+        <button style="padding:11px 22px;font-size:14.5px" onclick="newBookModal()">Create a book</button>
+      </div>`;
     return;
   }
   v.innerHTML = ({
@@ -879,8 +936,28 @@ function unpick(id) { picked.delete(id); render(); }
 function pickTarget(id, name) { target = target?.id === id ? null : { id, name }; render(); }
 function clearTarget() { target = null; render(); }
 
-/** Save the selection and index it, showing progress on the grouping screen. */
-async function analyseSources(btn) {
+/**
+ * Analysing replaces the whole grouping, so an existing one is worth a warning:
+ * any corrections made by hand on the board are lost.
+ */
+function analyseSources(btn) {
+  const existing = (S.sources || []).length;
+  if (!existing) return runAnalysis(btn);
+
+  const touched = S.sources.filter((x) => (x.kinds || []).length).length;
+  showModal({
+    title: "Replace the current analysis?",
+    body: `<p class="hint" style="margin:0 0 10px">This book already has
+      <b>${plural(existing, "document")}</b> indexed${touched ? `, ${touched} of them grouped` : ""}.</p>
+      <p class="hint" style="margin:0">Analysing again reads your Drive from scratch and replaces the
+      grouping entirely. Any groups you set by hand are lost. Chapters, continuity and the style corpus
+      are not affected.</p>`,
+    actions: `<button onclick="closeModal();runAnalysis()">Replace analysis</button>
+      <button class="ghost" onclick="closeModal()">Keep what I have</button>`
+  });
+}
+
+async function runAnalysis(btn) {
   if (btn) btn.disabled = true;
   indexing = true;
   route = "analyze";

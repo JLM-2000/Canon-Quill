@@ -41,7 +41,7 @@ export const reviewThreshold = 0.6;
 
 export const sourceKindLabels: Record<SourceKind, string> = {
   past_book: "Past series book",
-  reference_book: "Reference book (other author)",
+  reference_book: "Reference book",
   characters: "Characters",
   timeline: "Timeline",
   world: "Worldbuilding",
