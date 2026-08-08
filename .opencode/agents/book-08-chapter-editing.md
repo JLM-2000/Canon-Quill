@@ -43,6 +43,13 @@ Run the draft through the style scorer (`POST /api/style/score`, or
 Also run the flow validator (`validateFlow`) and fix any continuity break it
 reports before touching style.
 
+## Instructions from the author
+
+Check `GET /api/directions` before editing. Anything pending is a correction
+the author has given since the last chapter and takes precedence over both the
+style report and the chapter plan. Mark each one applied once it is reflected
+in the text.
+
 ## Editing rules
 
 - Fix the specific line the report names. Do not rewrite passages that measured

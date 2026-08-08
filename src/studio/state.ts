@@ -75,6 +75,46 @@ export interface EngineChoice {
   models: Record<string, string>;
 }
 
+/** Why a run stopped, when it stopped for a reason worth acting on. */
+export type HaltReason =
+  | "no_credit"
+  | "rate_limited"
+  | "invalid_credentials"
+  | "provider_error"
+  | "cancelled"
+  | "other";
+
+export interface RunState {
+  status: "idle" | "running" | "halted" | "complete";
+  /** Which chapter was in flight when it stopped. */
+  chapter: number | null;
+  reason: HaltReason | null;
+  /** What the agent reported, verbatim. */
+  detail: string | null;
+  haltedAt: string | null;
+  startedAt: string | null;
+}
+
+/**
+ * A standing instruction from the author to the drafting agent.
+ *
+ * The questions inbox runs the other way, agent to author. This is the return
+ * channel: mid-run corrections, a change of direction, a note that applies to
+ * everything from here on. Agents read the unapplied ones before drafting.
+ */
+export interface Direction {
+  id: string;
+  text: string;
+  /** `book` applies from now on; `chapter` applies to one chapter only. */
+  scope: "book" | "chapter";
+  chapter?: number;
+  createdAt: string;
+  /** Set by the agent once it has taken the instruction into account. */
+  appliedAt?: string;
+  /** Which chapter it was first applied to, for the record. */
+  appliedTo?: number;
+}
+
 export interface StudioState {
   version: 3;
   slug: string;
@@ -95,6 +135,8 @@ export interface StudioState {
   sourcesReviewed: boolean;
   questions: OpenQuestion[];
   chapters: ChapterRecord[];
+  directions: Direction[];
+  run: RunState;
   ledger: ContinuityLedger;
   styleCorpus: {
     built: boolean;
@@ -125,6 +167,8 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     sourcesReviewed: false,
     questions: [],
     chapters: [],
+    directions: [],
+    run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),
     styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null },
     createdAt: now,

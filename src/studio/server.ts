@@ -675,6 +675,148 @@ export function createStudioApp() {
     res.json({ style, flow, state: withDerived(next) });
   }));
 
+  // --- Directions (author to agent) ------------------------------------------
+  app.get("/api/directions", route(async (_req, res) => {
+    const state = await loadState(await requireSlug());
+    res.json({
+      directions: state.directions ?? [],
+      pending: (state.directions ?? []).filter((d) => !d.appliedAt)
+    });
+  }));
+
+  app.post("/api/directions", route(async (req, res) => {
+    const slug = await requireSlug();
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) throw new HttpError(400, "An instruction is required.");
+    if (text.length > 4000) throw new HttpError(400, "That is too long for an instruction. Keep it to the point.");
+
+    const scope = req.body?.scope === "chapter" ? "chapter" : "book";
+    const direction = {
+      id: randomUUID(),
+      text,
+      scope: scope as "book" | "chapter",
+      chapter: scope === "chapter" ? Number(req.body?.chapter) || undefined : undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    const state = await updateState(slug, (current) => {
+      current.directions = [...(current.directions ?? []), direction];
+    });
+    res.status(201).json({ direction, state: withDerived(state) });
+  }));
+
+  /** An agent marks an instruction as taken into account. */
+  app.post("/api/directions/:id/applied", route(async (req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      const direction = (current.directions ?? []).find((d) => d.id === req.params.id);
+      if (direction) {
+        direction.appliedAt = new Date().toISOString();
+        direction.appliedTo = Number(req.body?.chapter) || undefined;
+      }
+    });
+    res.json(withDerived(state));
+  }));
+
+  app.delete("/api/directions/:id", route(async (req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.directions = (current.directions ?? []).filter((d) => d.id !== req.params.id);
+    });
+    res.json(withDerived(state));
+  }));
+
+  // --- Run control -----------------------------------------------------------
+  /**
+   * An agent reports that a run stopped.
+   *
+   * Canon Quill's engine never calls a provider, so it cannot see a 401 or a
+   * spent balance itself. The runtime that does hit it says so here, and the
+   * board can then explain the stop and offer to pick up where it left off
+   * instead of the work simply going quiet.
+   */
+  app.post("/api/run/halt", route(async (req, res) => {
+    const slug = await requireSlug();
+    const reasons = ["no_credit", "rate_limited", "invalid_credentials", "provider_error", "cancelled", "other"];
+    const reason = reasons.includes(req.body?.reason) ? req.body.reason : "other";
+
+    const state = await updateState(slug, (current) => {
+      current.run = {
+        status: "halted",
+        chapter: Number(req.body?.chapter) || current.run?.chapter || null,
+        reason,
+        detail: typeof req.body?.detail === "string" ? req.body.detail.slice(0, 2000) : null,
+        haltedAt: new Date().toISOString(),
+        startedAt: current.run?.startedAt ?? null
+      };
+    });
+
+    await appendLog(slug, "error", {
+      timestamp: new Date().toISOString(),
+      stage: "chapter_drafting",
+      stageName: "Drafting",
+      agent: "runtime",
+      event: "run_halted",
+      errorMessage: `${reason}: ${req.body?.detail ?? "no detail"}`,
+      data: { chapter: state.run.chapter }
+    });
+
+    res.json(withDerived(state));
+  }));
+
+  app.post("/api/run/start", route(async (req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.run = {
+        status: "running",
+        chapter: Number(req.body?.chapter) || null,
+        reason: null,
+        detail: null,
+        haltedAt: null,
+        startedAt: new Date().toISOString()
+      };
+    });
+    res.json(withDerived(state));
+  }));
+
+  /**
+   * Clear a halt and report where to pick up.
+   *
+   * The credential is re-checked first: resuming into the same wall wastes the
+   * author's time and, on a rate limit, can make it worse.
+   */
+  app.post("/api/run/resume", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+
+    if (state.engine.provider && state.engine.authMethod === "api_key") {
+      const key = (await readApiKey(state.engine.provider))
+        ?? process.env[state.engine.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"];
+      if (key) {
+        const check = await verifyApiKey(state.engine.provider, key);
+        if (!check.ok) {
+          res.status(409).json({ resumed: false, blockedBy: check });
+          return;
+        }
+      }
+    }
+
+    // The first chapter that is not finished is where the work continues.
+    const next = state.chapters.find((chapter) => chapter.status !== "approved");
+    const updated = await updateState(slug, (current) => {
+      current.run = {
+        status: "running",
+        chapter: next?.number ?? null,
+        reason: null,
+        detail: null,
+        haltedAt: null,
+        startedAt: new Date().toISOString()
+      };
+    });
+
+    res.json({ resumed: true, resumeAt: next?.number ?? null, state: withDerived(updated) });
+  }));
+
   app.post("/api/chapters/:number/status", route(async (req, res) => {
     const slug = await requireSlug();
     const status = req.body?.status;

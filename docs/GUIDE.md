@@ -467,7 +467,43 @@ A low score is not automatically bad. If you deliberately wrote a chapter in a d
 
 ---
 
-## 10. Things worth knowing
+## 10. When a run stops, and steering it
+
+### Giving instructions mid-book
+
+The **Chapters** screen has an instruction box. Anything you write there is read
+by the drafting agent before the next chapter and takes precedence over the
+chapter plan, because the plan was written earlier and you have since said
+otherwise.
+
+Scope it **from now on** for a standing change ("keep Mara's chapters colder"),
+or **next chapter only** for a one-off. Instructions move to an applied list once
+the agent has acted on them, so you can see what landed and when.
+
+This is the return channel for the questions inbox: questions run agent to you,
+instructions run you to agent.
+
+### When drafting stops
+
+Canon Quill's own engine never calls a provider, so it cannot see a rejected key
+or a spent balance directly. The runtime that does hit it reports the stop, and
+the chapter board explains it rather than going quiet:
+
+| Reported as | What it means | Worth retrying |
+|---|---|---|
+| **Out of credit** | Credentials fine, nothing left to spend | No. Add credit first. |
+| **Rate limited or capped** | Too fast, or a plan cap reached | Yes, after a wait. A cap may need the period to reset. |
+| **Credentials rejected** | Key revoked, deleted or mistyped | No. Fix it under Writing engine. |
+| **The provider failed** | Something broke on their side | Usually. |
+
+Everything already approved is kept. **Resume** picks up at the first chapter
+that is not finished, and re-checks your credentials first so you do not resume
+straight into the same wall.
+
+Verifying a key distinguishes these too: out of credit reads differently from
+revoked, and the Studio says which rather than reporting a generic failure.
+
+## 11. Things worth knowing
 
 **Nothing leaves your machine except Drive traffic.** The Studio binds to loopback only.
 
@@ -483,7 +519,7 @@ A low score is not automatically bad. If you deliberately wrote a chapter in a d
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 **"No book selected."** Create one, in the Studio or with `npm run book:new -- "Title"`.
 

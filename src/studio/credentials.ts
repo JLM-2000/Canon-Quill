@@ -71,9 +71,20 @@ export function maskKey(key: string): string {
   return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
 }
 
+/** Why a provider call failed, so the UI can say something useful. */
+export type FailureKind =
+  | "invalid"       // rejected outright: wrong, revoked or cancelled
+  | "no_credit"     // authenticated, but nothing left to spend
+  | "rate_limited"  // too fast, or a plan cap reached
+  | "network"       // never reached the provider
+  | "unknown";
+
 export interface VerifyResult {
   ok: boolean;
   detail: string;
+  kind?: FailureKind;
+  /** Whether waiting and trying the same thing again might work. */
+  retryable?: boolean;
 }
 
 /**
@@ -95,24 +106,64 @@ export async function verifyApiKey(provider: ProviderId, key: string): Promise<V
         }
       : { url: "https://api.openai.com/v1/models", headers: { Authorization: `Bearer ${trimmed}` } };
 
+  const label = provider === "anthropic" ? "Anthropic" : "OpenAI";
+
   try {
     const response = await fetch(request.url, {
       headers: request.headers,
       signal: AbortSignal.timeout(15_000)
     });
 
-    if (response.ok) {
-      return { ok: true, detail: `Verified against ${provider === "anthropic" ? "Anthropic" : "OpenAI"}. The key works.` };
+    if (response.ok) return { ok: true, detail: `Verified against ${label}. The key works.` };
+
+    // The body carries the distinction that matters most: a key that is
+    // rejected outright needs replacing, one that is out of credit needs
+    // topping up, and neither is a rate limit you can wait out.
+    const body = await response.text().catch(() => "");
+    const lower = body.toLowerCase();
+    const outOfCredit =
+      lower.includes("insufficient_quota") ||
+      lower.includes("credit balance") ||
+      lower.includes("billing") ||
+      lower.includes("exceeded your current quota");
+
+    if (outOfCredit) {
+      return {
+        ok: false,
+        kind: "no_credit",
+        retryable: false,
+        detail: `${label} accepted the key but there is nothing left to spend on it. Add credit or raise the billing limit, then try again.`
+      };
     }
     if (response.status === 401 || response.status === 403) {
-      return { ok: false, detail: `The provider rejected this key (HTTP ${response.status}). Check you copied all of it.` };
+      return {
+        ok: false,
+        kind: "invalid",
+        retryable: false,
+        detail: `${label} rejected this key (HTTP ${response.status}). It may be mistyped, revoked or deleted. Create a new one and paste it again.`
+      };
     }
     if (response.status === 429) {
-      return { ok: false, detail: "Rate limited while checking. The key may be fine; try again shortly." };
+      return {
+        ok: false,
+        kind: "rate_limited",
+        retryable: true,
+        detail: `${label} is rate limiting this key, or a usage cap has been reached. Waiting usually clears it; a plan cap may need until the period resets.`
+      };
     }
-    return { ok: false, detail: `Unexpected response from the provider (HTTP ${response.status}).` };
+    return {
+      ok: false,
+      kind: "unknown",
+      retryable: true,
+      detail: `Unexpected response from ${label} (HTTP ${response.status}).`
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return { ok: false, detail: `Could not reach the provider: ${reason}. This is a network problem, not necessarily a bad key.` };
+    return {
+      ok: false,
+      kind: "network",
+      retryable: true,
+      detail: `Could not reach ${label}: ${reason}. This is a network problem, not necessarily a bad key.`
+    };
   }
 }

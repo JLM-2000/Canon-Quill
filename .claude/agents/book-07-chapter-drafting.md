@@ -26,6 +26,12 @@ next to the author's actual prose. Load all four, in this order:
    Concrete targets: mean sentence length, fragment rate, dialogue share, tag
    habits, adverb and filter-verb rates.
 4. **Canon**, character, world and plot bibles, and the chapter plan entry.
+5. **Pending instructions from the author**, `GET /api/directions`. These are
+   corrections and changes of direction given since the last chapter. Apply
+   every one whose scope is `book`, plus any scoped to this chapter, and mark
+   each applied with `POST /api/directions/<id>/applied` once you have. They
+   outrank the chapter plan where the two disagree: the plan was written
+   earlier and the author has since said otherwise.
 
 ## What the exemplars are for
 
@@ -55,6 +61,23 @@ phrasing. Lifting from an exemplar is a validation failure, not a success.
   tell and is measured directly.
 - End on an image, an action or a line of dialogue, not on a paragraph that
   explains what the chapter meant.
+
+## If the run cannot continue
+
+If a provider call fails in a way that stopping is the only sensible response,
+report it before you stop, so the author sees why rather than finding silence:
+
+```
+POST /api/run/halt  { reason, chapter, detail }
+```
+
+`reason` is one of `no_credit`, `rate_limited`, `invalid_credentials`,
+`provider_error`, `cancelled`, `other`. Put the provider's own message in
+`detail`. Everything already approved is kept, and the author can resume from
+the board once the cause is fixed.
+
+Do not retry a `no_credit` or `invalid_credentials` failure. Nothing about
+waiting fixes either, and repeated attempts just cost time.
 
 ## Output
 

@@ -214,6 +214,12 @@
   .answer-box { background: var(--surface-2); border-radius: 7px; padding: 8px 11px; font-size: 13px; }
   .answer-box b { color: var(--good); }
 
+  .dir { background: var(--surface-2); border-radius: 7px; padding: 9px 11px; margin-top: 6px;
+    font-size: 12.5px; position: relative; padding-right: 30px; }
+  .dir.applied { opacity: .6; }
+  .dir .dir-m { color: var(--faint); font-size: 11px; margin-top: 3px; }
+  .dir .doc-x { position: absolute; top: 6px; right: 6px; }
+
   /* chapters */
   .chap { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center;
     padding: 11px 14px; border-bottom: 1px solid var(--border); }
@@ -1358,9 +1364,42 @@ async function answer(id, text) {
 function viewChapters() {
   const cs = S.chapters || [];
   const mode = S.draftingMode;
+  const run = S.run || {};
+  const dirs = S.directions || [];
+  const pending = dirs.filter((d) => !d.appliedAt);
+
+  const HALTS = {
+    no_credit: ["Out of credit", "The provider accepted the credentials but there is nothing left to spend. Add credit or raise the billing limit, then resume."],
+    rate_limited: ["Rate limited or capped", "Either too many requests too quickly, or a plan usage cap was reached. Waiting usually clears the first; a cap may need until the period resets."],
+    invalid_credentials: ["Credentials rejected", "The key or sign-in was refused. It may have been revoked, deleted or replaced. Fix it under Writing engine, then resume."],
+    provider_error: ["The provider failed", "Something went wrong on their side. Usually worth resuming after a moment."],
+    cancelled: ["Stopped by you", "Resume whenever you are ready."],
+    other: ["Drafting stopped", "The run did not finish."]
+  };
+
+  const haltCard = run.status === "halted" ? (() => {
+    const [title, help] = HALTS[run.reason] || HALTS.other;
+    return `<div class="card" style="border-color:var(--bad)">
+      <div class="row" style="margin-bottom:6px">
+        <b style="color:var(--bad)">${title}</b>
+        ${run.chapter ? `<span class="pill">stopped on chapter ${run.chapter}</span>` : ""}
+        ${run.haltedAt ? `<span class="pill">${new Date(run.haltedAt).toLocaleString()}</span>` : ""}
+      </div>
+      <p class="sub" style="margin:0 0 8px">${help}</p>
+      ${run.detail ? `<div class="steplog">${esc(run.detail)}</div>` : ""}
+      <p class="hint" style="margin:10px 0 0">Everything approved so far is kept. Resuming picks up at the
+      first chapter that is not finished, after re-checking your credentials.</p>
+      <div class="row" style="margin-top:12px">
+        <button onclick="resumeRun(this)">Resume</button>
+        <button class="ghost" onclick="go('engine')">Check writing engine</button>
+      </div>
+    </div>`;
+  })() : "";
+
   if (!cs.length) return `<h1>Chapters</h1>
+    ${haltCard}
     <p class="sub">No chapter plan yet. The preparation phase writes one; it will appear here.</p>
-    <div class="card empty">No chapters planned.</div>`;
+    ${directionsCard(pending, dirs)}`;
 
   const approved = cs.filter((c) => c.status === "approved").length;
   return `
@@ -1371,10 +1410,15 @@ function viewChapters() {
         ? "<b>Whole-book mode.</b> All chapters are drafted and validated in one pass; you review the finished manuscript."
         : "Pick a drafting mode under Project shape."}</p>
 
+  ${haltCard}
+
   <div class="card spread">
     <div><b>${approved} of ${plural(cs.length, "chapter")} approved</b>
       <div class="meter" style="width:180px;margin-top:6px"><i style="width:${cs.length ? (approved / cs.length) * 100 : 0}%"></i></div></div>
-    <span class="pill">${(() => { const t = cs.reduce((n, c) => n + (c.wordCount || 0), 0); return plural(t, "word", null, t.toLocaleString()); })()}</span>
+    <div class="row">
+      ${run.status === "running" ? '<span class="pill good">drafting</span>' : ""}
+      <span class="pill">${(() => { const t = cs.reduce((n, c) => n + (c.wordCount || 0), 0); return plural(t, "word", null, t.toLocaleString()); })()}</span>
+    </div>
   </div>
 
   <div class="card" style="padding:0">
@@ -1392,7 +1436,80 @@ function viewChapters() {
         ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
       </div>
     </div>`).join("")}
+  </div>
+
+  ${directionsCard(pending, dirs)}`;
+}
+
+/** The author's channel to the drafting agent. */
+function directionsCard(pending, all) {
+  const applied = all.filter((d) => d.appliedAt);
+  return `
+  <div class="card" style="margin-top:14px">
+    <label>Instructions for the writing</label>
+    <div class="hint" style="margin-bottom:8px">Anything you want taken into account from here on: a
+    change of direction, a note about a character, something to stop doing. The drafting agent reads these
+    before each chapter and marks them applied.</div>
+    <textarea id="direction" rows="3" placeholder="Keep Mara's chapters colder. Stop explaining the seal in dialogue."></textarea>
+    <div class="row" style="margin-top:8px">
+      <button onclick="addDirection(this)">Add instruction</button>
+      <select id="dirscope" style="width:auto">
+        <option value="book">From now on</option>
+        <option value="chapter">Next chapter only</option>
+      </select>
+    </div>
+
+    ${pending.length ? `<div style="margin-top:14px">
+      <b style="font-size:12.5px">Waiting to be applied</b>
+      ${pending.map((d) => `<div class="dir">
+        <div>${esc(d.text)}</div>
+        <div class="dir-m">${d.scope === "chapter" ? "next chapter only" : "from now on"} · ${new Date(d.createdAt).toLocaleString()}</div>
+        <button class="doc-x" title="Remove" onclick="removeDirection('${d.id}')">✕</button>
+      </div>`).join("")}
+    </div>` : ""}
+
+    ${applied.length ? `<div style="margin-top:14px">
+      <b style="font-size:12.5px;color:var(--faint)">Applied (${applied.length})</b>
+      ${applied.slice(-4).map((d) => `<div class="dir applied">
+        <div>${esc(d.text)}</div>
+        <div class="dir-m">applied${d.appliedTo ? ` at chapter ${d.appliedTo}` : ""} · ${new Date(d.appliedAt).toLocaleString()}</div>
+      </div>`).join("")}
+    </div>` : ""}
   </div>`;
+}
+
+async function addDirection(btn) {
+  const box = document.getElementById("direction");
+  const text = box?.value?.trim();
+  if (!text) { toast("Write the instruction first.", "warn"); return; }
+  const scope = document.getElementById("dirscope")?.value || "book";
+
+  btn.disabled = true;
+  try {
+    const r = await api("/api/directions", { method: "POST", body: { text, scope } });
+    S = r.state; if (box) box.value = "";
+    render();
+    toast("Instruction added. It will be applied before the next chapter.");
+  } catch (e) { toast(e.message, "error"); }
+  finally { btn.disabled = false; }
+}
+
+async function removeDirection(id) {
+  try { S = await api(`/api/directions/${id}`, { method: "DELETE" }); render(); toast("Instruction removed."); }
+  catch (e) { toast(e.message, "error"); }
+}
+
+async function resumeRun(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking credentials…';
+  try {
+    const r = await api("/api/run/resume", { method: "POST" });
+    S = r.state; render();
+    toast(r.resumeAt ? `Resuming at chapter ${r.resumeAt}.` : "Resumed.");
+  } catch (e) {
+    // A 409 carries why it refused to resume, which is more useful than the status.
+    toast(e.message, "error");
+    btn.disabled = false; btn.textContent = "Resume";
+  }
 }
 
 async function setStatus(number, status) {

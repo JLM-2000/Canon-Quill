@@ -472,3 +472,71 @@ describe("style source requirement", () => {
     expect(body.error).toMatch(/read like whoever wrote it/i);
   });
 });
+
+describe("run halt and resume", () => {
+  it("records a halt with its reason and the chapter it stopped on", async () => {
+    await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }] } });
+    const { body } = await call("/api/run/halt", {
+      method: "POST",
+      body: { reason: "no_credit", chapter: 2, detail: "credit balance is too low" }
+    });
+    expect(body.run.status).toBe("halted");
+    expect(body.run.reason).toBe("no_credit");
+    expect(body.run.chapter).toBe(2);
+    expect(body.run.detail).toContain("credit balance");
+  });
+
+  it("falls back to a safe reason for anything unrecognised", async () => {
+    const { body } = await call("/api/run/halt", { method: "POST", body: { reason: "wat" } });
+    expect(body.run.reason).toBe("other");
+  });
+
+  it("resumes at the first chapter that is not approved", async () => {
+    await call("/api/chapters", {
+      method: "PUT",
+      body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }, { number: 3, title: "Three" }] }
+    });
+    await call("/api/chapters/1/status", { method: "POST", body: { status: "approved" } });
+    await call("/api/run/halt", { method: "POST", body: { reason: "rate_limited" } });
+
+    const { body } = await call("/api/run/resume", { method: "POST" });
+    expect(body.resumed).toBe(true);
+    expect(body.resumeAt).toBe(2);
+    expect(body.state.run.status).toBe("running");
+    expect(body.state.run.reason).toBeNull();
+  });
+});
+
+describe("directions", () => {
+  it("accepts an instruction and lists it as pending", async () => {
+    const created = await call("/api/directions", {
+      method: "POST",
+      body: { text: "Keep Mara's chapters colder.", scope: "book" }
+    });
+    expect(created.status).toBe(201);
+
+    const { body } = await call("/api/directions");
+    expect(body.pending).toHaveLength(1);
+    expect(body.pending[0].text).toContain("colder");
+  });
+
+  it("moves an instruction out of pending once applied", async () => {
+    const created = await call("/api/directions", { method: "POST", body: { text: "Shorter chapters." } });
+    await call(`/api/directions/${created.body.direction.id}/applied`, { method: "POST", body: { chapter: 4 } });
+
+    const { body } = await call("/api/directions");
+    expect(body.pending).toHaveLength(0);
+    expect(body.directions[0].appliedTo).toBe(4);
+  });
+
+  it("removes an instruction", async () => {
+    const created = await call("/api/directions", { method: "POST", body: { text: "Drop the subplot." } });
+    await call(`/api/directions/${created.body.direction.id}`, { method: "DELETE" });
+    expect((await call("/api/directions")).body.directions).toHaveLength(0);
+  });
+
+  it("rejects an empty or oversized instruction", async () => {
+    expect((await call("/api/directions", { method: "POST", body: { text: "   " } })).status).toBe(400);
+    expect((await call("/api/directions", { method: "POST", body: { text: "x".repeat(5000) } })).status).toBe(400);
+  });
+});
