@@ -1464,16 +1464,14 @@ function draftSection() {
       <span class="pill">${plural(m.totalWords, "word", null, m.totalWords.toLocaleString())}</span>
       <span class="pill">${plural(m.chapterCount, "section")}</span>
     </div>
-    <div class="info ${m.lastChapterComplete ? "ok" : "warn"}" style="margin:0 0 12px">
+    ${!m.lastChapterComplete ? `<div class="info warn" style="margin:0 0 12px">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-        ${m.lastChapterComplete ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+        <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>
       </svg>
-      <div><b>${m.lastChapterComplete ? "The draft ends cleanly" : "The last chapter is unfinished"}</b>
+      <div><b>The last chapter is unfinished</b>
         <p>${esc(m.completenessReason)}</p>
-        <p style="margin-top:6px">${m.lastChapterComplete
-          ? "Writing will begin a new chapter."
-          : "Writing will finish the chapter in progress before starting another. If that is wrong, say so in the instructions box on the chapter board."}</p>
-       </div></div>
+        <p style="margin-top:6px">Writing will finish the chapter in progress before starting another. If that is wrong, say so in the instructions box on the chapter board.</p>
+       </div></div>` : ""}
 
     ${draftAnalysisLoading ? '<div class="hint" style="margin:0 0 12px"><span class="spin"></span> Checking the ending for closing material...</div>' : ""}
 
