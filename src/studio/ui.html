@@ -219,7 +219,7 @@ let PROJECTS = [];
 let route = "connect";
 let browse = { folderId: "root", crumbs: [{ id: "root", name: "My Drive" }], entries: [], loading: false };
 let picked = new Map();    // driveId -> name, chosen reference roots
-let target = "";
+let target = null;         // {id, name} of the folder finished chapters go to
 
 const KINDS = {
   past_book: "Past series book", reference_book: "Reference book (other author)",
@@ -646,21 +646,33 @@ async function checkDrive(btn) {
 }
 
 function viewSources() {
-  const rows = browse.entries.map((e) => `
-    <div class="item" onclick="${e.isFolder ? `openFolder('${e.id}','${esc(e.name).replace(/'/g, "\\'")}')` : ""}">
+  const rows = browse.entries.map((e) => {
+    const safe = esc(e.name).replace(/'/g, "\\'");
+    const isRef = picked.has(e.id);
+    const isTarget = target?.id === e.id;
+    return `
+    <div class="item" onclick="${e.isFolder ? `openFolder('${e.id}','${safe}')` : ""}">
       <svg class="ico ${e.isFolder ? "folder" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
         ${e.isFolder ? '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>'
                      : '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>'}
       </svg>
       <span class="name">${esc(e.name)}</span>
-      ${e.isFolder ? `<button class="sm ghost" onclick="event.stopPropagation();pick('${e.id}','${esc(e.name).replace(/'/g, "\\'")}')">
-        ${picked.has(e.id) ? "Selected" : "Use as reference"}</button>` : '<span class="pill">file</span>'}
-    </div>`).join("");
+      ${e.isFolder ? `
+        <button class="sm ${isRef ? "" : "ghost"}" title="Read this folder as reference material"
+          onclick="event.stopPropagation();toggleRef('${e.id}','${safe}')">
+          ${isRef ? "Reference ✓" : "Reference"}</button>
+        <button class="sm ${isTarget ? "" : "ghost"}" title="Write finished chapters here"
+          onclick="event.stopPropagation();pickTarget('${e.id}','${safe}')">
+          ${isTarget ? "Target ✓" : "Target"}</button>`
+      : '<span class="pill">file</span>'}
+    </div>`;
+  }).join("");
 
-  const chosen = [...picked.entries()].map(([id, name]) =>
+  const chip = (name, onRemove) =>
     `<span class="pill" style="background:var(--accent-dim);color:var(--text)">${esc(name)}
       <button class="sm" style="background:none;color:var(--muted);padding:0 0 0 5px"
-        onclick="unpick('${id}')">✕</button></span>`).join(" ");
+        onclick="${onRemove}">✕</button></span>`;
+  const chosen = [...picked.entries()].map(([id, name]) => chip(name, `unpick('${id}')`)).join(" ");
 
   return `
   <h1>Select sources</h1>
@@ -701,16 +713,25 @@ function viewSources() {
   </div>
 
   <div class="card">
-    <label>Selected reference folders</label>
-    <div class="row">${chosen || '<span class="hint">None selected yet.</span>'}</div>
-    <div style="margin-top:14px"><label>Target folder for finished chapters (Drive URL or ID)</label>
-      <input id="tgt" value="${esc(target)}" placeholder="https://drive.google.com/drive/folders/…" /></div>
-    <div class="row" style="margin-top:14px">
+    <label>Reference folders</label>
+    <div class="hint" style="margin-bottom:6px">Read for canon and style. Include your past books.</div>
+    <div class="row">${chosen || '<span class="hint">None yet. Press <b>Reference</b> on a folder above.</span>'}</div>
+
+    <div style="margin-top:16px"><label>Target folder</label>
+      <div class="hint" style="margin-bottom:6px">Finished chapters are written here. Canon Quill only ever
+      creates files; it never overwrites without being told to.</div>
+      <div class="row">${target
+        ? chip(target.name, "clearTarget()")
+        : '<span class="hint">None yet. Press <b>Target</b> on a folder above.</span>'}</div>
+    </div>
+
+    <div class="row" style="margin-top:16px">
       <button ${picked.size ? "" : "disabled"} onclick="saveRoots(this)">Save selection</button>
       <button class="ghost" ${S.drive.referenceRoots.length ? "" : "disabled"} onclick="indexSources(this)">
         Analyse ${S.drive.referenceRoots.length ? plural(S.drive.referenceRoots.length, "folder") : "folders"}</button>
     </div>
-    <div class="hint">Analysing walks each folder, reads every document, and groups them automatically.</div>
+    ${picked.size && !target ? '<div class="hint" style="margin-top:8px;color:var(--warn)">No target folder set. You can still analyse and write, but finished chapters will not be uploaded anywhere.</div>' : ""}
+    <div class="hint" style="margin-top:8px">Analysing walks each folder, reads every document, and groups them automatically.</div>
   </div>`;
 }
 
@@ -725,7 +746,13 @@ async function loadBrowse(folderId) {
 }
 function openFolder(id, name) { browse.crumbs.push({ id, name }); loadBrowse(id); }
 function jump(i) { browse.crumbs = browse.crumbs.slice(0, i + 1); loadBrowse(browse.crumbs[i].id); }
-function pick(id, name) { picked.set(id, name); render(); }
+function toggleRef(id, name) { picked.has(id) ? picked.delete(id) : picked.set(id, name); render(); }
+function pickTarget(id, name) {
+  // One target only: choosing another replaces it.
+  target = target?.id === id ? null : { id, name };
+  render();
+}
+function clearTarget() { target = null; render(); }
 
 function addPasted() {
   const box = document.getElementById("pasted");
@@ -747,9 +774,8 @@ function unpick(id) { picked.delete(id); render(); }
 
 async function saveRoots(btn) {
   btn.disabled = true;
-  target = document.getElementById("tgt")?.value || "";
   try {
-    S = await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target } });
+    S = await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target?.id || "" } });
     toast("Selection saved."); render();
   } catch (e) { toast(e.message, true); btn.disabled = false; }
 }
