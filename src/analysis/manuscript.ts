@@ -138,7 +138,7 @@ function findBackMatter(text: string, lines: string[]): BackMatter | null {
 
   for (const line of lines) {
     const at = offset;
-    offset += line.length + 1;
+    offset += line.length + newlineLength(text, offset + line.length);
 
     if (at < threshold) continue;
     const trimmed = line.trim();
@@ -171,6 +171,11 @@ function findBackMatter(text: string, lines: string[]): BackMatter | null {
     }
   }
   return null;
+}
+
+function newlineLength(text: string, offset: number): number {
+  if (text.startsWith("\r\n", offset)) return 2;
+  return text[offset] === "\n" || text[offset] === "\r" ? 1 : 0;
 }
 
 /** Lines used to separate scenes rather than chapters. */
@@ -214,7 +219,7 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
       currentHeading = line.trim();
       currentStart = offset;
     }
-    offset += line.length + 1;
+    offset += line.length + newlineLength(story, offset + line.length);
   }
   push(story.length);
 

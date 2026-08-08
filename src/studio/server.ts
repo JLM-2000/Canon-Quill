@@ -1143,6 +1143,18 @@ export function startStudio(options: StudioServerOptions = {}) {
     if (process.env.CANON_QUILL_NO_OPEN !== "1") openBrowser(url);
   });
 
+  // Close the HTTP listener when the terminal sends Ctrl+C. This prevents an
+  // orphaned tsx child from keeping the port occupied after npm exits.
+  let stopping = false;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1000).unref();
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+
   /**
    * A replacement started by a restart begins before its predecessor has let
    * go of the port, so the address being in use is expected for a moment

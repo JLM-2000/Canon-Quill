@@ -548,7 +548,7 @@ async function restartStudio(btn) {
   toast("The Studio did not come back. Check the terminal and start it again.", "error");
 }
 
-async function reload() {
+async function reload(attempt = 0) {
   try {
     const r = await api("/api/state");
     S = r.state; PROJECTS = r.projects || [];
@@ -567,7 +567,18 @@ async function reload() {
       target = null;
     }
     render();
-  } catch (e) { toast(e.message, "error"); }
+  } catch (e) {
+    if (attempt < 20) {
+      const view = document.getElementById("view");
+      if (view && !S) {
+        view.innerHTML = `<div class="card empty"><span class="spin"></span><br><br>
+          Reconnecting to the Studio...<div class="hint" style="margin-top:6px">If this does not clear, run <code>npm run studio</code> in the project folder.</div></div>`;
+      }
+      setTimeout(() => reload(attempt + 1), 1000);
+    } else {
+      toast(`The Studio is not responding: ${e.message}`, "error");
+    }
+  }
 }
 
 
@@ -1486,12 +1497,10 @@ function draftSection() {
     <div style="margin-top:14px"><label>Notes for continuation</label>
       <textarea id="manuscript-notes" rows="3" placeholder="The review request at the end is back matter. Continue from the last story chapter.">${esc(m.notes || "")}</textarea>
       <div class="hint" style="margin-top:4px">Clarify anything the automatic ending analysis should know. These notes are included in the continuation brief.</div>
-      <button class="ghost sm" style="margin-top:8px" onclick="saveManuscriptNotes(this)">Save notes</button>
     </div>
 
     <div class="row" style="margin-top:14px">
-      <button class="ghost" onclick="clearDraft(this)">Choose a different file</button>
-      <button ${m.target ? "" : "disabled"} onclick="go('style')">Continue</button>
+      <button ${m.target ? "" : "disabled"} onclick="continueDraft(this)">Continue</button>
       ${!m.target ? '<span class="hint" style="color:var(--warn)">Choose where new chapters go first.</span>' : ""}
     </div>
   </div>` : (!draftPicker ? `
@@ -1548,13 +1557,13 @@ async function setDraftTarget(target) {
   catch (e) { toast(e.message, "error"); }
 }
 
-async function saveManuscriptNotes(btn) {
+async function continueDraft(btn) {
   const notes = document.getElementById("manuscript-notes")?.value || "";
   btn.disabled = true;
   try {
     S = await api("/api/manuscript", { method: "PATCH", body: { notes } });
+    route = "style";
     render();
-    toast("Continuation notes saved.");
   } catch (e) {
     toast(e.message, "error");
     btn.disabled = false;

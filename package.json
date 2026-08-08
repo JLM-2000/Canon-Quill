@@ -19,7 +19,7 @@
     "preview": "node dist/preview/server.js",
     "setup": "bash scripts/install.sh",
     "mcp:drive": "node dist/mcp/drive-server.js",
-    "studio": "tsx src/studio/server.ts",
+    "studio": "exec tsx src/studio/server.ts",
     "validate:workflow": "tsx src/cli.ts validate workflows/book-writing.workflow.yaml",
     "test": "vitest run",
     "sync:agents": "node scripts/sync-agents.mjs"

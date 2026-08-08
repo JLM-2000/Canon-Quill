@@ -166,6 +166,17 @@ Scan the QR code below or click here to leave a quick review`;
     expect(a.lastChapterComplete).toBe(true);
   });
 
+  it("keeps CRLF offsets aligned when closing material follows the story", () => {
+    const story = "Chapter One\r\n\r\n" +
+      "Julian blinked at the doorway, then turned back to the stove, face burning as his boyfriend's laugh echoed from the bedroom.\r\n\r\n" +
+      "\"Oh my God,\" he muttered to himself, trying very hard not to burn their breakfast.";
+    const closing = "Thank you for reading!\r\n\r\nI hope you enjoyed reading this book as much as I enjoyed writing it. As an independent author, I rely heavily on readers like you to help my books find their audience.\r\n\r\nIf you have a quick minute, I would be incredibly grateful if you could leave an honest review.\r\n\r\nScan the QR code below or click here to leave a quick review";
+    const a = analyseManuscript(`${story}\r\n\r\n${closing}`);
+    expect(a.backMatter?.heading).toBe("Thank you for reading!");
+    expect(a.lastChapterComplete).toBe(true);
+    expect(a.completenessReason).not.toMatch(/Julian blinked/);
+  });
+
   it("counts story words separately from the whole document", () => {
     const text = chapter("# Chapter One", body) + reviewRequest;
     const a = analyseManuscript(text);
