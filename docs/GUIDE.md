@@ -356,6 +356,34 @@ Builds the project brief, the world, plot and character bibles, the style guide,
 
 Each chapter in the plan declares its beats, its POV, which thread it advances, and the question it must close on. That last field is what makes the next chapter have something to answer.
 
+### Existing draft
+
+If the book is already part-written, point Canon Quill at the document before
+drafting starts. It reads:
+
+- **How far it goes.** Word count and how many chapters or sections exist.
+- **Whether the last chapter finished.** Prose that stops without closing
+  punctuation, or on a conjunction, was interrupted; a final section far shorter
+  than the others is suspect too. The screen says which it found and why, so you
+  can overrule it.
+- **The document's typographic habits.** Heading form and case, scene break
+  marker, straight or curly quotes, em dashes or double hyphens, indented
+  paragraphs or blank lines between them.
+
+Then you choose where new chapters go:
+
+| | |
+|---|---|
+| **Into this document** | Appended to the end, matching every convention above. One document, the way you have been working. |
+| **Into a new document** | The original is read but never written to. New chapters go to your target folder. |
+
+Either way the drafting agent picks up from the closing passage rather than
+recapping it, and if the last chapter was unfinished it finishes that one before
+starting another. Where finishing it would need a decision that canon does not
+settle, it asks rather than guessing.
+
+Skip this step entirely if nothing has been written yet.
+
 ### Preflight review
 
 **A stop.** You read the preparation package before a word of prose is written. Approve it, or send corrections and it loops back.

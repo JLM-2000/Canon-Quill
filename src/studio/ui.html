@@ -310,6 +310,7 @@ const PHASES = [
   { id: "sources",     label: "Select sources", group: "Set up" },
   { id: "analyze",     label: "Analyse & group", group: "Set up" },
   { id: "intake",      label: "Project shape",  group: "Prepare" },
+  { id: "draft",       label: "Existing draft",  group: "Prepare" },
   { id: "style",       label: "Style corpus",   group: "Prepare" },
   { id: "questions",   label: "Questions",      group: "Prepare" },
   { id: "chapters",    label: "Chapters",       group: "Write" }
@@ -585,6 +586,8 @@ function isDone(id) {
     case "sources":   return S.drive.referenceRoots.length > 0;
     case "analyze":   return S.sources.length > 0 && S.sourcesReviewed;
     case "intake":    return !!S.shape && !!S.draftingMode;
+    // Answered either way: a draft was picked, or starting fresh was chosen.
+    case "draft":     return !!S.manuscript || S.startingFresh === true;
     case "style":     return S.styleCorpus.built;
     // Green means "done", so an untouched step with no questions is not green.
     case "questions": return (S.questions || []).length > 0
@@ -595,7 +598,7 @@ function isDone(id) {
 }
 
 /** Steps in order. You may revisit anything reached, but not skip ahead. */
-const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "style", "questions", "chapters"];
+const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "draft", "style", "questions", "chapters"];
 
 function furthestReached() {
   if (!S) return 0;
@@ -623,6 +626,7 @@ function go(r) {
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
   if (r === "analyze") loadCheck();
+  if (r === "draft") loadBrowse(browse.folderId);
 }
 
 // --- views -----------------------------------------------------------------
@@ -643,7 +647,7 @@ function render() {
     return;
   }
   v.innerHTML = ({
-    engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
+    engine: viewEngine, draft: viewDraft, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
     intake: viewIntake, style: viewStyle, questions: viewQuestions, chapters: viewChapters
   }[route] || viewConnect)();
 }
@@ -1263,6 +1267,110 @@ function viewIntake() {
 async function setProject(patch) {
   try { S = await api("/api/project", { method: "PATCH", body: patch }); render(); }
   catch (e) { toast(e.message, "error"); }
+}
+
+function viewDraft() {
+  const m = S.manuscript;
+
+  const rows = browse.entries.map((e) => {
+    const safe = esc(e.name).replace(/'/g, "\\'");
+    const chosen = m?.driveId === e.id;
+    return `
+    <div class="item" onclick="${e.isFolder ? `openFolder('${e.id}','${safe}')` : ""}">
+      <svg class="ico ${e.isFolder ? "folder" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        ${e.isFolder ? '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>'
+                     : '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>'}
+      </svg>
+      <span class="name">${esc(e.name)}</span>
+      ${e.isFolder ? "" : `<button class="sm ${chosen ? "" : "ghost"}"
+        onclick="event.stopPropagation();useAsDraft('${e.id}','${safe}',this)">
+        ${chosen ? "Selected ✓" : "This one"}</button>`}
+    </div>`;
+  }).join("");
+
+  return `
+  <h1>Existing draft</h1>
+  <p class="sub">If the book is already part-written, point Canon Quill at it. It reads how far the draft
+  goes, whether the last chapter finished, and the typographic habits of the document, so anything it
+  adds is indistinguishable from what is already there.</p>
+
+  ${m ? `<div class="card" style="border-color:var(--good)">
+    <div class="row" style="margin-bottom:8px">
+      <b>${esc(m.name)}</b>
+      <span class="pill">${plural(m.totalWords, "word", null, m.totalWords.toLocaleString())}</span>
+      <span class="pill">${plural(m.chapterCount, "section")}</span>
+    </div>
+    <div class="info ${m.lastChapterComplete ? "ok" : "warn"}" style="margin:0 0 12px">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        ${m.lastChapterComplete ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+      </svg>
+      <div><b>${m.lastChapterComplete ? "The draft ends cleanly" : "The last chapter is unfinished"}</b>
+        <p>${esc(m.completenessReason)}</p>
+        <p style="margin-top:6px">${m.lastChapterComplete
+          ? "Writing will begin a new chapter."
+          : "Writing will finish the chapter in progress before starting another. If that is wrong, say so in the instructions box on the chapter board."}</p>
+      </div></div>
+
+    <label>Where should new chapters go?</label>
+    <div class="choices" style="margin-top:6px">
+      <div class="choice ${m.target === "continue" ? "on" : ""}" onclick="setDraftTarget('continue')">
+        <b>Into this document</b><p>Appended to the end, matching its headings, scene breaks, quotes and
+        dashes. One document, the way you have been working.</p></div>
+      <div class="choice ${m.target === "separate" ? "on" : ""}" onclick="setDraftTarget('separate')">
+        <b>Into a new document</b><p>The original is read but never written to. New chapters go to your
+        target folder instead.</p></div>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <button onclick="go('style')">Continue</button>
+      <button class="ghost" onclick="clearDraft(this)">Choose a different file</button>
+    </div>
+  </div>` : `
+  <div class="card">
+    <div class="spread" style="margin-bottom:10px">
+      <div class="crumbs" style="margin:0">${browse.crumbs.map((c, i) =>
+        `<button onclick="jump(${i})">${esc(c.name)}</button>${i < browse.crumbs.length - 1 ? "<span style='color:var(--faint)'>/</span>" : ""}`).join("")}</div>
+      <button class="ghost sm" onclick="loadBrowse(browse.folderId)">Refresh</button>
+    </div>
+    <div class="fs">${browse.loading ? '<div class="empty"><span class="spin"></span> Loading…</div>'
+      : rows || '<div class="empty">Nothing here</div>'}</div>
+  </div>
+
+  <div class="card">
+    <b>Starting from nothing?</b>
+    <p class="sub" style="margin:6px 0 12px">If no chapters have been written yet, skip this. Canon Quill
+    will write the book from the first line.</p>
+    <button onclick="startFresh()">Nothing written yet</button>
+  </div>`}`;
+}
+
+async function useAsDraft(driveId, name, btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Reading…';
+  try {
+    const r = await api("/api/manuscript/analyse", { method: "POST", body: { driveId } });
+    S = r.state; render();
+    toast(`Read ${plural(r.analysis.totalWords, "word", null, r.analysis.totalWords.toLocaleString())} from "${name}".`);
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false; btn.textContent = "This one";
+  }
+}
+
+async function setDraftTarget(target) {
+  try { S = await api("/api/manuscript", { method: "PATCH", body: { target } }); render(); }
+  catch (e) { toast(e.message, "error"); }
+}
+
+async function clearDraft(btn) {
+  btn.disabled = true;
+  try { S = await api("/api/manuscript", { method: "DELETE" }); render(); loadBrowse(browse.folderId); }
+  catch (e) { toast(e.message, "error"); btn.disabled = false; }
+}
+
+function startFresh() {
+  S.startingFresh = true;
+  toast("Starting from the first line.", "info");
+  go("style");
 }
 
 function viewStyle() {

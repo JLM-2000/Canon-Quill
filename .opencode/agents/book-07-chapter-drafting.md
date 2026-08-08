@@ -41,7 +41,26 @@ next to the author's actual prose. Load all four, in this order:
    Concrete targets: mean sentence length, fragment rate, dialogue share, tag
    habits, adverb and filter-verb rates.
 4. **Canon**, character, world and plot bibles, and the chapter plan entry.
-5. **Pending instructions from the author**, `GET /api/directions`. These are
+5. **The continuation brief**, `GET /api/manuscript/brief`. Returns 404 when
+   the book is being written from scratch, which is the normal case. When it
+   returns a brief, the book is already part-written and you are adding to
+   someone's work in progress:
+
+   - It says whether the last chapter was finished. If it was not, **finish
+     that chapter first** rather than starting a new one. If finishing it
+     would require a decision you cannot make from canon, ask through
+     `POST /api/questions` with `blocking: true` instead of guessing.
+   - It lists the document's typographic habits: heading form and case, scene
+     break marker, straight or curly quotes, dash style, indented or
+     blank-line-separated paragraphs. Match all of them exactly. A reader must
+     not be able to see where the existing text ends and yours begins.
+   - It carries the closing passage. Continue from it. Do not restate it,
+     summarise it, or open with a recap of what just happened.
+
+   If the author chose to write into a separate document, still match the
+   conventions and the continuation point; only the destination differs.
+
+6. **Pending instructions from the author**, `GET /api/directions`. These are
    corrections and changes of direction given since the last chapter. Apply
    every one whose scope is `book`, plus any scoped to this chapter, and mark
    each applied with `POST /api/directions/<id>/applied` once you have. They

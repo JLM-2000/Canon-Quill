@@ -115,6 +115,24 @@ export interface Direction {
   appliedTo?: number;
 }
 
+/**
+ * A draft that already exists before Canon Quill is involved.
+ *
+ * `target` decides where new chapters land. Continuing in place keeps one
+ * document, which is what most authors want; writing separately leaves the
+ * original untouched, which is what they want when they are not yet sure.
+ */
+export interface ExistingManuscript {
+  driveId: string;
+  name: string;
+  target: "continue" | "separate";
+  totalWords: number;
+  chapterCount: number;
+  lastChapterComplete: boolean;
+  completenessReason: string;
+  analysedAt: string;
+}
+
 export interface StudioState {
   version: 3;
   slug: string;
@@ -135,6 +153,8 @@ export interface StudioState {
   sourcesReviewed: boolean;
   questions: OpenQuestion[];
   chapters: ChapterRecord[];
+  /** Null when starting from scratch. */
+  manuscript: ExistingManuscript | null;
   directions: Direction[];
   run: RunState;
   ledger: ContinuityLedger;
@@ -167,6 +187,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     sourcesReviewed: false,
     questions: [],
     chapters: [],
+    manuscript: null,
     directions: [],
     run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),

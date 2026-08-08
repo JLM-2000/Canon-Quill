@@ -37,3 +37,18 @@ Mode rules:
 - `book_by_book` means no user review after each chapter; the system writes/edit/validates all chapters internally and asks the user only at final book review.
 
 Do not ask questions once chapter drafting starts except in the configured review gate: each chapter for `chapter_by_chapter`, final book only for `book_by_book`.
+
+## Ask whether the book already exists
+
+Before drafting begins, establish whether chapters have already been written
+elsewhere. Someone continuing a manuscript does not want it restarted, and
+finding out afterwards is expensive.
+
+If the author says yes, send them to the **Existing draft** screen to pick the
+document. It is read for how far it goes, whether the last chapter finished,
+and its typographic conventions, and they choose whether new chapters are
+appended to it or written separately.
+
+If the last chapter turns out to be unfinished, confirm the intent rather than
+assuming: finishing someone's half-written chapter and starting a fresh one are
+very different acts. Ask it as a blocking question.

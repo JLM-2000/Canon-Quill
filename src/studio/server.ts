@@ -10,6 +10,7 @@ import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
+import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
 import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
 import { scoreAgainstFingerprint } from "../style/score.js";
 import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
@@ -673,6 +674,79 @@ export function createStudioApp() {
     });
 
     res.json({ style, flow, state: withDerived(next) });
+  }));
+
+  // --- An existing draft ------------------------------------------------------
+  /** Read a part-written book and report where it stands. */
+  app.post("/api/manuscript/analyse", route(async (req, res) => {
+    const slug = await requireSlug();
+    const driveId = typeof req.body?.driveId === "string" ? extractDriveId(req.body.driveId) : null;
+    if (!driveId) throw new HttpError(400, "A Drive file is required.");
+
+    const meta = await drive.getMetadata(driveId);
+    if (meta.mimeType === "application/vnd.google-apps.folder") {
+      throw new HttpError(400, "That is a folder. Pick the document the book is written in.");
+    }
+
+    const text = await drive.readFileText(driveId);
+    const analysis = analyseManuscript(text);
+
+    // Cached so the brief can be rebuilt without refetching.
+    const paths = workspacePaths(slug);
+    await mkdir(paths.artifacts, { recursive: true });
+    await writeFile(
+      path.join(paths.artifacts, "existing-manuscript.json"),
+      JSON.stringify({ driveId, name: meta.name, analysis }, null, 2),
+      "utf8"
+    );
+    await writeFile(
+      path.join(paths.artifacts, "continuation-brief.md"),
+      renderContinuationBrief(analysis, meta.name),
+      "utf8"
+    );
+
+    const state = await updateState(slug, (current) => {
+      current.manuscript = {
+        driveId,
+        name: meta.name,
+        target: current.manuscript?.driveId === driveId ? current.manuscript.target : "continue",
+        totalWords: analysis.totalWords,
+        chapterCount: analysis.chapters.length,
+        lastChapterComplete: analysis.lastChapterComplete,
+        completenessReason: analysis.completenessReason,
+        analysedAt: new Date().toISOString()
+      };
+    });
+
+    res.json({ analysis, state: withDerived(state) });
+  }));
+
+  app.patch("/api/manuscript", route(async (req, res) => {
+    const slug = await requireSlug();
+    const target = req.body?.target;
+    if (target !== "continue" && target !== "separate") {
+      throw new HttpError(400, "Target must be continue or separate.");
+    }
+    const state = await updateState(slug, (current) => {
+      if (current.manuscript) current.manuscript.target = target;
+    });
+    res.json(withDerived(state));
+  }));
+
+  app.delete("/api/manuscript", route(async (_req, res) => {
+    const slug = await requireSlug();
+    res.json(withDerived(await updateState(slug, (current) => void (current.manuscript = null))));
+  }));
+
+  /** The brief a drafting agent needs to continue without a visible seam. */
+  app.get("/api/manuscript/brief", route(async (_req, res) => {
+    const slug = await requireSlug();
+    try {
+      const raw = await readFile(path.join(workspacePaths(slug).artifacts, "continuation-brief.md"), "utf8");
+      res.type("text/markdown").send(raw);
+    } catch {
+      throw new HttpError(404, "No existing draft has been analysed for this book.");
+    }
   }));
 
   // --- Directions (author to agent) ------------------------------------------
