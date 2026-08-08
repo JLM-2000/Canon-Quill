@@ -11,7 +11,7 @@
     "canon_drive": {
       "type": "local",
       "command": ["node", "dist/mcp/drive-server.js"],
-      "enabled": false,
+      "enabled": true,
       "environment": {
         "GOOGLE_OAUTH_CLIENT_JSON": "{env:GOOGLE_OAUTH_CLIENT_JSON}",
         "CANON_QUILL_DRIVE_SCOPES": "{env:CANON_QUILL_DRIVE_SCOPES}",

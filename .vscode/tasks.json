@@ -1,0 +1,9 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Studio", "type": "npm", "script": "studio", "problemMatcher": [], "presentation": { "reveal": "always", "panel": "dedicated" } },
+    { "label": "Build", "type": "npm", "script": "build", "problemMatcher": ["$tsc"], "group": "build" },
+    { "label": "Check (build + validate + test)", "type": "npm", "script": "check", "problemMatcher": ["$tsc"], "group": { "kind": "test", "isDefault": true } },
+    { "label": "Sync Claude Code agents", "type": "npm", "script": "sync:agents", "problemMatcher": [] }
+  ]
+}

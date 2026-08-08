@@ -52,33 +52,123 @@ The Studio's book dropdown does the same thing.
 
 ---
 
-## 3. Connecting Google Drive
+## 3. Starting the Studio
 
-**You cannot connect yet if you have not done this.** There is no `.env` in a fresh clone.
+```bash
+npm run studio
+```
 
-1. Go to the [Google Cloud console](https://console.cloud.google.com/) and select or create a project.
-2. **APIs and Services > Library**, find **Google Drive API**, enable it.
-3. **APIs and Services > Credentials**, **Create credentials > OAuth client ID**.
-   - If it asks you to configure a consent screen first: external, fill the required fields, add yourself as a test user.
-   - Application type: **Desktop app**.
-4. Download the JSON.
-5. In the project root, create `.env`:
+It prints the URL and opens your browser:
+
+```
+  Canon Quill Studio is running.
+
+      http://127.0.0.1:4180
+
+  Press Ctrl+C to stop.
+```
+
+If the browser does not open (headless box, WSL without an opener), click or paste the URL. To stop it opening at all, set `CANON_QUILL_NO_OPEN=1`.
+
+In VS Code, press **F5** and pick **Studio** from the Run and Debug dropdown, or run the **Studio** task. Breakpoints in `src/` work. The other configurations there run the test suite (all, current file, or watch) and the CLI commands.
+
+Leave it running while you work. It reads state fresh on each request, so agents writing to a workspace and the UI reading it never conflict.
+
+---
+
+## 4. Choosing a writing engine
+
+The first screen in the Studio. Canon Quill's own engine needs no model at all, so this only decides who writes the prose.
+
+**Provider.** Anthropic (Claude) or OpenAI (GPT).
+
+**How to authenticate.**
+
+- **Subscription.** A Claude Pro or Max plan through Claude Code. No key, no per-token cost, and the cheapest way to run this. OpenAI's ChatGPT plan only works if your agent runtime supports signing in with it, which Claude Code does not.
+- **API key.** Pay per token. Export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the shell you start the Studio from, or put it in `.env`.
+
+The Studio then checks whether a usable credential is actually present and tells you exactly what to set if not.
+
+**There is no field to paste a key, by design.** Anything typed into a web form ends up in a plaintext state file, so the API refuses credentials outright. Keys stay in your environment; subscriptions stay inside the runtime's own login.
+
+### Which model for which phase
+
+Defaults come from `config/models.yaml` and can be changed per phase in the Studio.
+
+| Phase | Anthropic | OpenAI | Why |
+|---|---|---|---|
+| **Drafting** | Claude Opus 5 | GPT-5.6 Sol | The prose itself. The one place capability shows up directly. Do not economise. |
+| **Editing** | Claude Sonnet 5 | GPT-5.6 Terra | The deviations are already named by the engine, so this is execution more than judgement. |
+| **Validation** | Claude Sonnet 5 | GPT-5.6 Terra | Style and flow are computed in code; the model only judges what code cannot. |
+| **Analysis** | Claude Haiku 4.5 | GPT-5.6 Luna | Extraction and summarising. High volume, low difficulty. |
+| **Orchestration** | Claude Haiku 4.5 | GPT-5.6 Luna | Routing between phases. Almost no reasoning. |
+
+Rough cost for a 90,000-word book at three passes per chapter: **$15 to $40** on Anthropic with Opus drafting and Sonnet elsewhere, **$5 to $12** on Sonnet throughout, and **nothing extra** on a Claude subscription. Verify prices before budgeting; the `verified` dates in `config/models.yaml` say when each was last checked, and the OpenAI entries below Sol are unverified.
+
+---
+
+## 5. Connecting Google Drive
+
+**A fresh clone has no `.env`, so you cannot connect until you do this.** It takes about five minutes and Google's console moves things around, so the steps are spelled out.
+
+### Create the project and enable the API
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/). Sign in with the Google account whose Drive holds your books.
+2. Top bar, project dropdown, **New project**. Name it anything (`canon-quill` is fine), **Create**, then make sure that project is selected.
+3. Navigation menu, **APIs and Services > Library**. Search **Google Drive API**, open it, **Enable**. Wait for it to finish.
+
+### Configure the consent screen
+
+Google will not let you create an OAuth client until this exists.
+
+4. **APIs and Services > OAuth consent screen** (in newer consoles this sits under **Google Auth Platform > Branding**).
+5. User type: **External**. (**Internal** only appears with Google Workspace, and is simpler if you have it.) **Create**.
+6. Fill the required fields: **App name** (anything), **User support email** (yours), **Developer contact email** (yours). Everything else can stay blank. **Save and continue**.
+7. **Scopes**: skip it. Canon Quill requests its scope at runtime. **Save and continue**.
+8. **Test users**: this is the step people miss. Click **Add users** and add **your own Google address**. While the app is in Testing, only listed test users can authorise it, and leaving yourself out produces an `access_denied` error that looks like a bug. **Save and continue**.
+
+### Create the credentials
+
+9. **APIs and Services > Credentials**, **Create credentials**, **OAuth client ID**.
+10. Application type: **Desktop app**. This matters. A *Web application* client needs redirect URIs and will fail; a *service account* key is a different thing entirely and will not work.
+11. Name it, **Create**, then **Download JSON**. Keep the file outside this repo (`~/.config/` or anywhere private).
+
+### Point Canon Quill at it
+
+12. Create `.env` in the project root:
 
 ```
 GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/credentials.json
 ```
 
-6. In `opencode.json`, change `canon_drive.enabled` from `false` to `true`, and restart OpenCode if it is running.
+An absolute path. `~` is not expanded.
 
-Now open the Studio and press **Check connection**. A browser window opens once to authorise. A refresh token is stored locally.
+13. In `opencode.json`, change `canon_drive.enabled` from `false` to `true`. Restart OpenCode if it is running.
 
-### About the permission scope
+14. In the Studio, press **Check connection**. A browser window opens once to authorise.
 
-The scope is `drive.file`. This is the narrow one: Canon Quill sees only files you explicitly select or that it creates itself. It cannot enumerate your Drive. If a folder you picked does not appear, that is usually the scope working as intended rather than a bug.
+### The warning you will see
+
+Because the app is in Testing and unverified, Google shows **"Google hasn't verified this app"**. Click **Advanced**, then **Go to <your app name> (unsafe)**. This is your own OAuth client talking to your own Drive; verification only matters for apps distributed to other people.
+
+### Two things that will bite you later
+
+**Test-mode refresh tokens expire after seven days.** While the consent screen is in Testing, Google expires refresh tokens weekly, so Drive will stop working after about a week and you re-authorise. To stop that, go to the consent screen and **Publish app**. You will stay unverified (still the "unsafe" click-through), but tokens stop expiring.
+
+**The scope is `drive.file`, deliberately.** Canon Quill sees only files you explicitly select or that it created. It cannot list your whole Drive. If a folder you expected does not appear when browsing, that is the scope working as intended, not a bug. Pick the folder explicitly.
+
+### If it still fails
+
+| Message | Cause |
+|---|---|
+| `access_denied` | You are not in the test users list, or the app is in Testing and you signed in with a different account. |
+| `must point to a Google OAuth desktop credentials JSON file` | The path is wrong, relative, or the file is a service-account key rather than an OAuth client. |
+| `redirect_uri_mismatch` | The client is a *Web application*. Create a **Desktop app** client instead. |
+| Worked last week, fails now | Test-mode refresh token expired. Re-authorise, then publish the consent screen. |
 
 ---
 
-## 4. The phases
+## 6. The phases
 
 The workflow is defined in `workflows/book-writing.workflow.yaml`. Here is what each phase is actually for.
 
@@ -148,7 +238,7 @@ This is the cheapest place to catch a wrong premise.
 
 ### Mode select
 
-You choose chapter-by-chapter or whole-book. See section 5.
+You choose chapter-by-chapter or whole-book. See section 7.
 
 This is the last interactive decision until a gate.
 
@@ -164,7 +254,7 @@ This is the last interactive decision until a gate.
 
 **Post.** The approved chapter is written to your Drive target folder. It will not overwrite an existing file unless you allow it.
 
-**Continuity update.** The chapter's handoff is recorded. See section 6.
+**Continuity update.** The chapter's handoff is recorded. See section 8.
 
 ### Finalisation and export
 
@@ -172,7 +262,7 @@ The manuscript is compiled with reports on continuity, style across chapters, un
 
 ---
 
-## 5. Chapter by chapter, or whole book
+## 7. Chapter by chapter, or whole book
 
 Both run identical quality gates. The difference is only where you approve.
 
@@ -200,7 +290,7 @@ You can change the mode between books. Changing it mid-book is possible but mean
 
 ---
 
-## 6. How chapters stay connected
+## 8. How chapters stay connected
 
 At the end of a chapter, the system records a **handoff**:
 
@@ -230,7 +320,7 @@ The checker is deliberately cautious. It reports what it can prove from recorded
 
 ---
 
-## 7. Reading the style report
+## 9. Reading the style report
 
 ```
 Fidelity: 64/100, verdict REVISE
@@ -251,7 +341,7 @@ A low score is not automatically bad. If you deliberately wrote a chapter in a d
 
 ---
 
-## 8. Things worth knowing
+## 10. Things worth knowing
 
 **Nothing leaves your machine except Drive traffic.** The Studio binds to loopback only.
 
@@ -267,7 +357,7 @@ A low score is not automatically bad. If you deliberately wrote a chapter in a d
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
 **"No book selected."** Create one, in the Studio or with `npm run book:new -- "Title"`.
 

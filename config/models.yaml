@@ -1,0 +1,168 @@
+# ---------------------------------------------------------------------------
+# Model presets.
+#
+# Canon Quill's engine makes no model calls of its own. Measuring prose,
+# building the corpus, retrieving exemplars and validating continuity are all
+# plain functions over text, which is why they run with no API key and no
+# network. The writing is done by whichever agent runtime you drive it with,
+# and that runtime owns authentication:
+#
+#   Claude Code   .claude/agents/    subscription (Pro/Max) or ANTHROPIC_API_KEY
+#   OpenCode      .opencode/agents/  whatever provider you configured it with
+#
+# So this file is a set of recommendations, not a client configuration. Point
+# your runtime at the `id` for the role you are running, or leave it on the
+# runtime's default.
+#
+# Verify prices before relying on them. The `verified` field records when each
+# entry was last checked against the provider's own pricing page.
+# ---------------------------------------------------------------------------
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# Roles. Different phases want different trade-offs, and drafting is the only
+# one where paying for the top tier is clearly worth it.
+# ---------------------------------------------------------------------------
+roles:
+  drafting:
+    description: >
+      Writing chapter prose against retrieved exemplars. The hardest task here
+      and the one where model capability shows up most directly in the result.
+      Do not economise on this role.
+    anthropic: claude-opus-5
+    openai: gpt-5.6-sol
+
+  editing:
+    description: >
+      Revising a draft from the measured style report. The deviations are
+      already named by the engine, so this is closer to execution than
+      judgement and a mid-tier model handles it well.
+    anthropic: claude-sonnet-5
+    openai: gpt-5.6-terra
+
+  validation:
+    description: >
+      Read-only checks against canon, boundaries and the chapter plan. The
+      style and flow gates are computed in code; the model only judges what
+      code cannot.
+    anthropic: claude-sonnet-5
+    openai: gpt-5.6-terra
+
+  analysis:
+    description: >
+      Extracting facts from references, summarising sources, confirming
+      classifications. High volume, low difficulty.
+    anthropic: claude-haiku-4-5
+    openai: gpt-5.6-luna
+
+  orchestration:
+    description: Routing between phases and reading state. Almost no reasoning.
+    anthropic: claude-haiku-4-5
+    openai: gpt-5.6-luna
+
+# ---------------------------------------------------------------------------
+# Providers.
+# ---------------------------------------------------------------------------
+providers:
+  anthropic:
+    label: Anthropic
+    # Both work. A subscription is the cheaper path if you already have one.
+    auth:
+      subscription:
+        label: Claude Pro or Max, through Claude Code
+        setup: Run `claude` and sign in. No key goes in this repo.
+      api_key:
+        label: API key
+        env: ANTHROPIC_API_KEY
+        setup: Create a key at console.anthropic.com and export it.
+    models:
+      - id: claude-opus-5
+        label: Claude Opus 5
+        context: 1M
+        input_per_mtok: 5.00
+        output_per_mtok: 25.00
+        verified: 2026-06-24
+        notes: Best for drafting. Thinking is on by default.
+      - id: claude-sonnet-5
+        label: Claude Sonnet 5
+        context: 1M
+        input_per_mtok: 3.00
+        output_per_mtok: 15.00
+        verified: 2026-06-24
+        notes: >
+          Introductory rate of 2.00 / 10.00 applies through 2026-08-31.
+          Strong on structured work at well under Opus cost.
+      - id: claude-haiku-4-5
+        label: Claude Haiku 4.5
+        context: 200K
+        input_per_mtok: 1.00
+        output_per_mtok: 5.00
+        verified: 2026-06-24
+        notes: Cheapest. Fine for extraction and routing, not for prose.
+      - id: claude-fable-5
+        label: Claude Fable 5
+        context: 1M
+        input_per_mtok: 10.00
+        output_per_mtok: 50.00
+        verified: 2026-06-24
+        notes: >
+          Highest capability and priced above the Opus tier. Only worth it if
+          you have measured a difference on your own book. Not the default.
+
+  openai:
+    label: OpenAI
+    auth:
+      subscription:
+        label: ChatGPT plan
+        setup: >
+          Only usable if your agent runtime supports signing in with a ChatGPT
+          plan. Claude Code does not. Check your runtime's documentation.
+      api_key:
+        label: API key
+        env: OPENAI_API_KEY
+        setup: Create a key at platform.openai.com and export it.
+    models:
+      - id: gpt-5.6-sol
+        label: GPT-5.6 Sol
+        context: 1.05M
+        input_per_mtok: 5.00
+        output_per_mtok: 30.00
+        verified: 2026-08-08
+        notes: Reasoning and coding tier. The drafting choice on this provider.
+      - id: gpt-5.6-terra
+        label: GPT-5.6 Terra
+        context: unverified
+        input_per_mtok: null
+        output_per_mtok: null
+        verified: null
+        notes: >
+          Positioned between Sol and Luna on capability and cost. Pricing not
+          confirmed here. Check developers.openai.com/api/docs/pricing before
+          budgeting against it.
+      - id: gpt-5.6-luna
+        label: GPT-5.6 Luna
+        context: unverified
+        input_per_mtok: null
+        output_per_mtok: null
+        verified: null
+        notes: >
+          Cost-sensitive, high-volume tier. Pricing not confirmed here.
+
+# ---------------------------------------------------------------------------
+# Rough cost per book. Order of magnitude only.
+#
+# Assumes a 90,000-word book, three drafting passes per chapter, and exemplars
+# and canon re-sent on every call. Real usage varies enormously with how much
+# reference material you index and how often you request changes.
+# ---------------------------------------------------------------------------
+estimates:
+  assumptions: 90k-word book, 3 passes per chapter, exemplars resent per call
+  anthropic_mixed: Roughly 15 to 40 USD using Opus 5 for drafting and Sonnet 5 elsewhere
+  anthropic_budget: Roughly 5 to 12 USD using Sonnet 5 throughout
+  subscription: >
+    Zero marginal cost on a Claude Pro or Max plan through Claude Code, subject
+    to that plan's usage limits. This is the cheapest way to run Canon Quill.
+  note: >
+    The engine itself is free. Style scoring, corpus building, exemplar
+    retrieval and flow validation never call a model.

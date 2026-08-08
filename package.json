@@ -8,7 +8,7 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs && node scripts/sync-agents.mjs",
     "check": "npm run build && npm run validate:workflow && npm test",
     "docx": "tsx src/cli.ts docx",
     "book:new": "tsx src/cli.ts new",
@@ -21,7 +21,8 @@
     "mcp:drive": "node dist/mcp/drive-server.js",
     "studio": "tsx src/studio/server.ts",
     "validate:workflow": "tsx src/cli.ts validate workflows/book-writing.workflow.yaml",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync:agents": "node scripts/sync-agents.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",

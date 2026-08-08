@@ -212,6 +212,7 @@ const KINDS = {
 };
 
 const PHASES = [
+  { id: "engine",      label: "Writing engine", group: "Set up" },
   { id: "connect",     label: "Connect Drive", group: "Set up" },
   { id: "sources",     label: "Select sources", group: "Set up" },
   { id: "analyze",     label: "Analyse & group", group: "Set up" },
@@ -302,6 +303,7 @@ function renderNav() {
 function isDone(id) {
   if (!S) return false;
   switch (id) {
+    case "engine":    return !!(S.engine?.provider && S.engine?.authMethod);
     case "connect":   return S.drive.connected;
     case "sources":   return S.drive.referenceRoots.length > 0;
     case "analyze":   return S.sources.length > 0 && S.sources.every((s) => s.confirmedByUser || s.confidence >= 0.6);
@@ -313,7 +315,11 @@ function isDone(id) {
   return false;
 }
 
-function go(r) { route = r; render(); if (r === "sources") loadBrowse(browse.folderId); }
+function go(r) {
+  route = r; render();
+  if (r === "sources") loadBrowse(browse.folderId);
+  if (r === "engine") loadEngine();
+}
 
 // --- views -----------------------------------------------------------------
 function render() {
@@ -329,9 +335,102 @@ function render() {
     return;
   }
   v.innerHTML = ({
-    connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
+    engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
     intake: viewIntake, style: viewStyle, questions: viewQuestions, chapters: viewChapters
   }[route] || viewConnect)();
+}
+
+let ENGINE = null;
+
+async function loadEngine() {
+  try { ENGINE = await api("/api/engine"); if (route === "engine") render(); }
+  catch (e) { toast(e.message, true); }
+}
+
+function viewEngine() {
+  const choice = S.engine || {};
+  const cat = ENGINE?.catalog;
+  const cred = ENGINE?.credentials;
+  const resolved = ENGINE?.resolvedModels || {};
+
+  const providerCard = (id, label, blurb) => `
+    <div class="choice ${choice.provider === id ? "on" : ""}" onclick="setEngine({provider:'${id}'})">
+      <b>${label}</b><p>${blurb}</p></div>`;
+
+  const authCard = (id, label, blurb) => `
+    <div class="choice ${choice.authMethod === id ? "on" : ""}" onclick="setEngine({authMethod:'${id}'})">
+      <b>${label}</b><p>${blurb}</p></div>`;
+
+  return `
+  <h1>Writing engine</h1>
+  <p class="sub">Canon Quill's own engine runs without any model. Measuring your prose, building the
+  corpus, retrieving exemplars and checking continuity are plain functions, so they cost nothing and
+  work offline. A model is only needed to write the chapters, and this is where you choose which.</p>
+
+  <h2>Provider</h2>
+  <div class="choices">
+    ${providerCard("anthropic", "Anthropic", "Claude. Works with a Pro or Max subscription through Claude Code, or with an API key.")}
+    ${providerCard("openai", "OpenAI", "GPT. API key only, unless your agent runtime supports ChatGPT sign-in.")}
+  </div>
+
+  ${choice.provider ? `
+  <h2>How to authenticate</h2>
+  <div class="choices">
+    ${authCard("subscription", "Subscription", choice.provider === "anthropic"
+        ? "Your Claude Pro or Max plan, through Claude Code. No key, no per-token cost."
+        : "Only if your runtime can sign in with a ChatGPT plan. Claude Code cannot.")}
+    ${authCard("api_key", "API key", "Pay per token. The key stays in your environment.")}
+  </div>` : ""}
+
+  ${cred ? `<div class="card" style="border-color:${cred.ready ? "var(--good)" : "var(--warn)"}">
+    <div class="row"><b>Credential check</b>
+      <span class="pill ${cred.ready ? "good" : "warn"}">${cred.ready ? "ready" : "action needed"}</span></div>
+    <div class="hint" style="margin-top:6px">${esc(cred.detail)}</div>
+    ${cred.env && !cred.ready ? `<div class="hint" style="margin-top:8px">
+      <code>export ${esc(cred.env)}=...</code> then restart the Studio.</div>` : ""}
+  </div>` : ""}
+
+  <div class="card" style="border-color:var(--border)">
+    <b>Canon Quill never stores your key</b>
+    <div class="hint" style="margin-top:6px">There is no field here to paste one, and the API rejects
+    any attempt to send one. Keys are read from the environment; subscriptions stay inside your agent
+    runtime's own login.</div>
+  </div>
+
+  ${choice.provider && cat ? `
+  <h2>Models per phase</h2>
+  <p class="sub">Drafting is the one worth paying for. Everything else is structured work the engine
+  has already narrowed down.</p>
+  <div class="card" style="padding:0"><table>
+    <tr><th>Phase</th><th>Model</th><th class="num">Cost / Mtok</th></tr>
+    ${Object.entries(cat.roles).map(([role, r]) => {
+      const id = resolved[role];
+      const m = (cat.providers[choice.provider]?.models || []).find((x) => x.id === id);
+      const price = m && m.input_per_mtok !== null
+        ? `$${m.input_per_mtok} in / $${m.output_per_mtok} out`
+        : '<span style="color:var(--faint)">unverified</span>';
+      return `<tr><td><b>${esc(role)}</b><div class="s" style="color:var(--faint);font-size:11.5px">${esc((r.description||"").trim().slice(0,90))}</div></td>
+        <td><select onchange="setEngine({models:{${role}:this.value}})">
+          ${(cat.providers[choice.provider]?.models || []).map((x) =>
+            `<option value="${esc(x.id)}" ${x.id === id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}
+        </select></td>
+        <td class="num">${price}</td></tr>`;
+    }).join("")}
+  </table></div>
+  ${cat.estimates ? `<div class="card"><b>Rough cost per book</b>
+    <div class="hint" style="margin-top:6px">${esc(cat.estimates.assumptions || "")}</div>
+    <table style="margin-top:8px">
+      <tr><td>Opus for drafting, Sonnet elsewhere</td><td class="num">${esc(cat.estimates.anthropic_mixed || "")}</td></tr>
+      <tr><td>Sonnet throughout</td><td class="num">${esc(cat.estimates.anthropic_budget || "")}</td></tr>
+      <tr><td>On a Claude subscription</td><td class="num">no marginal cost</td></tr>
+    </table></div>` : ""}` : ""}
+
+  ${choice.provider && choice.authMethod ? `<button onclick="go('connect')">Next: connect Drive</button>` : ""}`;
+}
+
+async function setEngine(patch) {
+  try { ENGINE = await api("/api/engine", { method: "PATCH", body: patch }); await reload(); loadEngine(); }
+  catch (e) { toast(e.message, true); }
 }
 
 function viewConnect() {
@@ -669,6 +768,7 @@ async function setStatus(number, status) {
     route = PHASES.find((p) => p.id === S.phase)?.id || "connect";
     render();
     if (route === "sources") loadBrowse("root");
+    if (route === "engine") loadEngine();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
   }
 })();

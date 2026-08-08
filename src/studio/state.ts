@@ -8,6 +8,7 @@ export type ProjectShape = "standalone" | "series";
 export type DraftingMode = "chapter_by_chapter" | "whole_book";
 
 export type PhaseId =
+  | "engine"
   | "connect"
   | "sources"
   | "analyze"
@@ -60,11 +61,23 @@ export interface ChapterRecord {
   updatedAt?: string;
 }
 
+/**
+ * Which provider runs the writing, and how it authenticates.
+ * The credential itself is never stored here, only the choice.
+ */
+export interface EngineChoice {
+  provider: "anthropic" | "openai" | null;
+  authMethod: "subscription" | "api_key" | null;
+  /** Per-role model overrides. Empty means use the catalog defaults. */
+  models: Record<string, string>;
+}
+
 export interface StudioState {
   version: 3;
   slug: string;
   projectName: string;
   phase: PhaseId;
+  engine: EngineChoice;
   shape: ProjectShape | null;
   draftingMode: DraftingMode | null;
   intake: Record<string, string>;
@@ -95,7 +108,8 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     version: 3,
     slug,
     projectName,
-    phase: "connect",
+    phase: "engine",
+    engine: { provider: null, authMethod: null, models: {} },
     shape: null,
     draftingMode: null,
     intake: {},
@@ -151,6 +165,7 @@ export function derivePhase(state: StudioState): PhaseId {
     return "export";
   }
   if (state.chapters.length > 0) return "writing";
+  if (!state.engine.provider || !state.engine.authMethod) return "engine";
   if (!state.drive.connected) return "connect";
   if (state.drive.referenceRoots.length === 0) return "sources";
   if (state.sources.length === 0) return "sources";

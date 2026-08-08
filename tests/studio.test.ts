@@ -40,17 +40,25 @@ afterAll(async () => {
 
 describe("phase derivation", () => {
   it("starts at connect on a fresh project", () => {
-    expect(derivePhase(emptyState("x"))).toBe("connect");
+    expect(derivePhase(emptyState("x"))).toBe("engine");
   });
 
-  it("asks for sources once Drive is connected", () => {
+  it("asks for a provider before anything else", () => {
     const state = emptyState("x");
+    state.drive.connected = true;
+    expect(derivePhase(state)).toBe("engine");
+  });
+
+  it("asks for sources once the engine and Drive are set", () => {
+    const state = emptyState("x");
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.drive.connected = true;
     expect(derivePhase(state)).toBe("sources");
   });
 
   it("asks for intake once sources are confirmed", () => {
     const state = emptyState("x");
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
     state.sources = [
@@ -91,7 +99,7 @@ describe("studio api", () => {
   it("returns state with a derived phase", async () => {
     const { body } = await call("/api/state");
     expect(body.state.projectName).toBe("Test Book");
-    expect(body.state.phase).toBe("connect");
+    expect(body.state.phase).toBe("engine");
   });
 
   it("records project shape and drafting mode", async () => {
@@ -239,6 +247,37 @@ describe("studio api", () => {
     const { status, body } = await call("/api/style/exemplars", { method: "POST", body: { beat: "dialogue" } });
     expect(status).toBe(400);
     expect(body.error).toMatch(/corpus/i);
+  });
+
+  it("records provider and auth method, and checks credentials", async () => {
+    const { body } = await call("/api/engine", {
+      method: "PATCH",
+      body: { provider: "anthropic", authMethod: "api_key" }
+    });
+    expect(body.choice.provider).toBe("anthropic");
+    expect(body.resolvedModels.drafting).toBe("claude-opus-5");
+    expect(body.credentials.env).toBe("ANTHROPIC_API_KEY");
+  });
+
+  it("refuses to accept a credential through the API", async () => {
+    const { status, body } = await call("/api/engine", {
+      method: "PATCH",
+      body: { provider: "anthropic", apiKey: "sk-ant-should-never-be-stored" }
+    });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/does not accept credentials/i);
+  });
+
+  it("rejects an unknown provider", async () => {
+    const { status } = await call("/api/engine", { method: "PATCH", body: { provider: "gemini" } });
+    expect(status).toBe(400);
+  });
+
+  it("drops model overrides when the provider changes", async () => {
+    await call("/api/engine", { method: "PATCH", body: { provider: "anthropic", models: { drafting: "claude-fable-5" } } });
+    const { body } = await call("/api/engine", { method: "PATCH", body: { provider: "openai" } });
+    expect(body.choice.models).toEqual({});
+    expect(body.resolvedModels.drafting).toBe("gpt-5.6-sol");
   });
 
   it("404s unknown routes as JSON", async () => {

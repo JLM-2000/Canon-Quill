@@ -1,4 +1,6 @@
 import express from "express";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +36,7 @@ import {
 } from "../workspace/registry.js";
 import { workspacePaths } from "../workspace/paths.js";
 import { appendLog } from "../project/logs.js";
+import { checkCredentials, defaultModels, loadCatalog } from "./engine.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -138,6 +141,68 @@ export function createStudioApp() {
       await touchProject(slug, { title: projectName.trim() });
     }
     res.json(withDerived(state));
+  }));
+
+  // --- Engine (provider, auth, models) --------------------------------------
+  app.get("/api/engine", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+    const catalog = await loadCatalog();
+    const provider = state.engine.provider;
+
+    res.json({
+      choice: state.engine,
+      catalog,
+      resolvedModels: provider
+        ? { ...defaultModels(catalog, provider), ...state.engine.models }
+        : {},
+      credentials:
+        provider && state.engine.authMethod
+          ? await checkCredentials(provider, state.engine.authMethod)
+          : null
+    });
+  }));
+
+  app.patch("/api/engine", route(async (req, res) => {
+    const slug = await requireSlug();
+    const { provider, authMethod, models } = req.body ?? {};
+
+    if (provider !== undefined && provider !== "anthropic" && provider !== "openai") {
+      throw new HttpError(400, "Provider must be anthropic or openai.");
+    }
+    if (authMethod !== undefined && authMethod !== "subscription" && authMethod !== "api_key") {
+      throw new HttpError(400, "Auth method must be subscription or api_key.");
+    }
+    // Refuse anything that looks like a secret. Keys belong in the environment.
+    for (const key of Object.keys(req.body ?? {})) {
+      if (/key|token|secret|password/i.test(key) && key !== "authMethod") {
+        throw new HttpError(400, "Canon Quill does not accept credentials. Set the environment variable instead.");
+      }
+    }
+
+    const state = await updateState(slug, (current) => {
+      if (provider !== undefined) {
+        current.engine.provider = provider;
+        // Model overrides belong to a provider; drop them when it changes.
+        current.engine.models = {};
+      }
+      if (authMethod !== undefined) current.engine.authMethod = authMethod;
+      if (models && typeof models === "object") {
+        current.engine.models = { ...current.engine.models, ...models };
+      }
+    });
+
+    const catalog = await loadCatalog();
+    res.json({
+      choice: state.engine,
+      resolvedModels: state.engine.provider
+        ? { ...defaultModels(catalog, state.engine.provider), ...state.engine.models }
+        : {},
+      credentials:
+        state.engine.provider && state.engine.authMethod
+          ? await checkCredentials(state.engine.provider, state.engine.authMethod)
+          : null
+    });
   }));
 
   // --- Drive ----------------------------------------------------------------
@@ -486,8 +551,36 @@ export function startStudio(options: StudioServerOptions = {}) {
   // Loopback only. This surface exposes manuscripts and Drive contents.
   const host = options.host ?? "127.0.0.1";
   return createStudioApp().listen(port, host, () => {
-    console.log(`Canon Quill Studio -> http://${host}:${port}`);
+    const url = `http://${host}:${port}`;
+    console.log("");
+    console.log("  Canon Quill Studio is running.");
+    console.log("");
+    console.log(`      ${url}`);
+    console.log("");
+    console.log("  Press Ctrl+C to stop.");
+    console.log("");
+    if (process.env.CANON_QUILL_NO_OPEN !== "1") openBrowser(url);
   });
+}
+
+/**
+ * Open the default browser. Best effort: a headless box, a locked-down WSL, or
+ * a missing opener is not a reason to fail, so failures are silent and the URL
+ * printed above remains the instruction.
+ */
+function openBrowser(url: string): void {
+  const command =
+    process.platform === "darwin" ? "open"
+    : process.platform === "win32" ? "explorer.exe"
+    // WSL reaches the Windows browser through the same binary.
+    : existsSync("/proc/sys/fs/binfmt_misc/WSLInterop") ? "explorer.exe"
+    : "xdg-open";
+
+  try {
+    spawn(command, [url], { stdio: "ignore", detached: true }).unref();
+  } catch {
+    // Silent by design.
+  }
 }
 
 class HttpError extends Error {

@@ -9,7 +9,9 @@ npm run setup
 npm run studio
 ```
 
-Then open <http://127.0.0.1:4180>.
+It prints the URL and opens your browser. In VS Code, press **F5** and pick **Studio**.
+
+Works with **Claude Code** (`.claude/agents/`) or **OpenCode** (`.opencode/agents/`) as the writing runtime, on an Anthropic or OpenAI model, authenticated by subscription or API key. You choose in the Studio.
 
 ---
 
@@ -58,6 +60,8 @@ What it looks for instead is sameness, which is what actually gives a machine aw
 
 `npm run studio` opens a local web app. Nothing leaves your machine.
 
+**Writing engine.** Pick your provider (Anthropic or OpenAI) and how it authenticates (subscription or API key). Canon Quill's own engine needs no model at all, so this only decides who writes the prose. There is no field to paste a key and the API refuses one: keys stay in your environment, subscriptions stay inside your runtime's login.
+
 **Books.** Each book is its own workspace with its own sources, style corpus, chapters and continuity. Start a second book without touching the first. Finishing a book never deletes it.
 
 **Connect Drive.** Narrow permissions, only the files you pick.
@@ -92,6 +96,12 @@ Pick one before drafting starts. The only difference is where you approve. Every
 
 ---
 
+## What it costs
+
+The engine is free. Measuring prose, building the corpus, retrieving exemplars and validating continuity never call a model.
+
+Only the writing does. For a 90,000-word book at three passes per chapter: roughly **$15 to $40** using Opus 5 for drafting and Sonnet 5 elsewhere, **$5 to $12** on Sonnet throughout, and **nothing extra** on a Claude Pro or Max subscription. Model defaults per phase live in `config/models.yaml` and are editable in the Studio.
+
 ## Setup
 
 Node 20.19 or newer.
@@ -118,7 +128,11 @@ GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/your/credentials.json
 
 6. In `opencode.json`, set `canon_drive.enabled` to `true`.
 
-Then open the Studio and press **Check connection**. The first time, a browser window asks you to authorise. The scope is `drive.file`, which means Canon Quill can only see files you explicitly choose, never your whole Drive.
+Then open the Studio and press **Check connection**.
+
+Two things catch people out: while the OAuth consent screen is in Testing you must add your own Google address as a **test user**, and test-mode refresh tokens expire after **seven days** unless you publish the consent screen. [docs/GUIDE.md](docs/GUIDE.md) walks the whole console flow step by step, including the errors and what causes them.
+
+The scope is `drive.file`, so Canon Quill only ever sees files you explicitly choose, never your whole Drive.
 
 ---
 
@@ -126,6 +140,7 @@ Then open the Studio and press **Check connection**. The first time, a browser w
 
 ```bash
 npm run studio                  open the Studio
+npm run sync:agents             regenerate the Claude Code agents
 npm run book:new -- "Title"     start a book
 npm run book:list               list your books
 npm run book:use -- <slug>      switch books
@@ -162,6 +177,8 @@ src/studio/      the local app and its API
 src/drive/       OAuth and the Drive client
 src/workspace/   projects on disk
 ```
+
+Agent prompts are authored in `.opencode/agents/` and `.claude/agents/` is generated from them by `npm run sync:agents` (which `npm run build` also runs). One source, both runtimes.
 
 Scoring and validation are ordinary functions over text and typed state, so they are tested without a network or a model. 104 tests.
 
