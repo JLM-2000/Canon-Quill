@@ -127,6 +127,21 @@
   .ico.folder { color: var(--accent); }
 
   /* grouping board */
+  .counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 18px; }
+  .count { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; }
+  .count b { display: block; font-size: 19px; letter-spacing: -0.02em; }
+  .count span { color: var(--muted); font-size: 11.5px; }
+  .count.zero b { color: var(--faint); }
+  .doc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; margin-bottom: 8px; }
+  .doc-h b { font-size: 13.5px; word-break: break-word; }
+  .doc-m { color: var(--faint); font-size: 11.5px; margin-top: 1px; word-break: break-all; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .chip { background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
   .col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
   .col h3 { font-size: 12.5px; margin: 0 0 9px; display: flex; justify-content: space-between; align-items: center; }
@@ -220,6 +235,8 @@ let route = "connect";
 let browse = { folderId: "root", crumbs: [{ id: "root", name: "My Drive" }], entries: [], loading: false };
 let picked = new Map();    // driveId -> name, chosen reference roots
 let target = null;         // {id, name} of the folder finished chapters go to
+let indexing = false;
+let indexError = null;
 
 const KINDS = {
   past_book: "Past series book", reference_book: "Reference book (other author)",
@@ -341,7 +358,7 @@ function isDone(id) {
     case "engine":    return !!(S.engine?.provider && S.engine?.authMethod);
     case "connect":   return S.drive.connected;
     case "sources":   return S.drive.referenceRoots.length > 0;
-    case "analyze":   return S.sources.length > 0 && S.sources.every((s) => s.confirmedByUser || s.confidence >= 0.6);
+    case "analyze":   return S.sources.length > 0 && S.sourcesReviewed;
     case "intake":    return !!S.shape && !!S.draftingMode;
     case "style":     return S.styleCorpus.built;
     case "questions": return !(S.questions || []).some((q) => q.blocking && q.answer === undefined);
@@ -657,14 +674,12 @@ function viewSources() {
                      : '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>'}
       </svg>
       <span class="name">${esc(e.name)}</span>
-      ${e.isFolder ? `
-        <button class="sm ${isRef ? "" : "ghost"}" title="Read this folder as reference material"
-          onclick="event.stopPropagation();toggleRef('${e.id}','${safe}')">
-          ${isRef ? "Reference ✓" : "Reference"}</button>
-        <button class="sm ${isTarget ? "" : "ghost"}" title="Write finished chapters here"
-          onclick="event.stopPropagation();pickTarget('${e.id}','${safe}')">
-          ${isTarget ? "Target ✓" : "Target"}</button>`
-      : '<span class="pill">file</span>'}
+      <button class="sm ${isRef ? "" : "ghost"}" title="Read this as reference material"
+        onclick="event.stopPropagation();toggleRef('${e.id}','${safe}')">
+        ${isRef ? "Reference ✓" : "Reference"}</button>
+      ${e.isFolder ? `<button class="sm ${isTarget ? "" : "ghost"}" title="Write finished chapters here"
+        onclick="event.stopPropagation();pickTarget('${e.id}','${safe}')">
+        ${isTarget ? "Target ✓" : "Target"}</button>` : ""}
     </div>`;
   }).join("");
 
@@ -676,8 +691,9 @@ function viewSources() {
 
   return `
   <h1>Select sources</h1>
-  <p class="sub">Browse your Drive and mark the folders Canon Quill should read. Include your past
-  books in the series. They become the style corpus the drafting model writes against.</p>
+  <p class="sub">Browse your Drive and mark what Canon Quill should read. Folders and individual files
+  both work. Include your past books in the series: they become the style corpus the drafting model
+  writes against.</p>
 
   <div class="card">
     <div class="spread" style="margin-bottom:10px">
@@ -690,48 +706,36 @@ function viewSources() {
         ? `<div class="empty" style="text-align:left;padding:16px">
             <b style="color:var(--text)">Nothing visible with the current access grant</b>
             <p style="margin:6px 0 0">Canon Quill was authorised for the narrow <code>drive.file</code>
-            scope, which can only see files it created itself. That is why this looks empty rather than
-            showing your Drive.</p>
-            <p style="margin:6px 0 0">Reconnect from <b>Connect Drive</b> to grant read access, or paste
-            folder links below.</p></div>`
+            scope, which can only see files it created itself.</p>
+            <p style="margin:6px 0 0">Reconnect from <b>Connect Drive</b> to grant read access.</p></div>`
         : (browse.folderId === "root"
           ? `<div class="empty" style="text-align:left;padding:16px">
               <b style="color:var(--text)">Nothing listed here</b>
-              <p style="margin:6px 0 0">If you just reconnected Google Drive, press <b>Refresh</b> above:
-              this list is fetched once when you open the screen.</p>
-              <p style="margin:6px 0 0">If it stays empty, check <b>Connect Drive</b> to confirm the grant
-              includes read access.</p></div>`
+              <p style="margin:6px 0 0">If you just reconnected Google Drive, press <b>Refresh</b> above.</p></div>`
           : '<div class="empty">This folder is empty</div>'))}</div>
   </div>
 
   <div class="card">
-    <label>Or paste Drive links</label>
-    <div class="hint" style="margin-bottom:6px">One folder or file link per line. Useful when you would
-    rather not grant read access to your whole Drive.</div>
-    <textarea id="pasted" rows="3" placeholder="https://drive.google.com/drive/folders/..."></textarea>
-    <button class="ghost sm" style="margin-top:6px" onclick="addPasted()">Add to selection</button>
-  </div>
-
-  <div class="card">
-    <label>Reference folders</label>
+    <label>Reference material</label>
     <div class="hint" style="margin-bottom:6px">Read for canon and style. Include your past books.</div>
-    <div class="row">${chosen || '<span class="hint">None yet. Press <b>Reference</b> on a folder above.</span>'}</div>
+    <div class="row">${chosen || '<span class="hint">Nothing yet. Press <b>Reference</b> on a folder or file above.</span>'}</div>
 
     <div style="margin-top:16px"><label>Target folder</label>
       <div class="hint" style="margin-bottom:6px">Finished chapters are written here. Canon Quill only ever
-      creates files; it never overwrites without being told to.</div>
+      creates files; it never overwrites without being told to. A folder can be both a reference and the
+      target.</div>
       <div class="row">${target
         ? chip(target.name, "clearTarget()")
-        : '<span class="hint">None yet. Press <b>Target</b> on a folder above.</span>'}</div>
+        : '<span class="hint">Nothing yet. Press <b>Target</b> on a folder above.</span>'}</div>
     </div>
 
     <div class="row" style="margin-top:16px">
-      <button ${picked.size ? "" : "disabled"} onclick="saveRoots(this)">Save selection</button>
-      <button class="ghost" ${S.drive.referenceRoots.length ? "" : "disabled"} onclick="indexSources(this)">
-        Analyse ${S.drive.referenceRoots.length ? plural(S.drive.referenceRoots.length, "folder") : "folders"}</button>
+      <button ${picked.size ? "" : "disabled"} onclick="analyseSources(this)">
+        Analyse ${picked.size ? plural(picked.size, "source") : "sources"}</button>
     </div>
-    ${picked.size && !target ? '<div class="hint" style="margin-top:8px;color:var(--warn)">No target folder set. You can still analyse and write, but finished chapters will not be uploaded anywhere.</div>' : ""}
-    <div class="hint" style="margin-top:8px">Analysing walks each folder, reads every document, and groups them automatically.</div>
+    ${picked.size && !target ? '<div class="hint" style="margin-top:8px;color:var(--warn)">No target folder set. You can still write the book, but finished chapters will not be uploaded anywhere.</div>' : ""}
+    <div class="hint" style="margin-top:8px">Reads every document and sorts it into groups. This can take a
+    few minutes for a large folder.</div>
   </div>`;
 }
 
@@ -747,91 +751,114 @@ async function loadBrowse(folderId) {
 function openFolder(id, name) { browse.crumbs.push({ id, name }); loadBrowse(id); }
 function jump(i) { browse.crumbs = browse.crumbs.slice(0, i + 1); loadBrowse(browse.crumbs[i].id); }
 function toggleRef(id, name) { picked.has(id) ? picked.delete(id) : picked.set(id, name); render(); }
-function pickTarget(id, name) {
-  // One target only: choosing another replaces it.
-  target = target?.id === id ? null : { id, name };
-  render();
-}
+function unpick(id) { picked.delete(id); render(); }
+function pickTarget(id, name) { target = target?.id === id ? null : { id, name }; render(); }
 function clearTarget() { target = null; render(); }
 
-function addPasted() {
-  const box = document.getElementById("pasted");
-  const lines = (box?.value || "").split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) { toast("Paste at least one link.", true); return; }
-  let added = 0;
-  for (const line of lines) {
-    // Accept a full URL or a bare id; the server extracts the id either way.
-    const match = /[-\w]{25,}/.exec(line);
-    if (!match) continue;
-    picked.set(match[0], line.length > 48 ? match[0] : line);
-    added += 1;
-  }
-  if (box) box.value = "";
-  toast(added ? `Added ${plural(added, "link")}.` : "No Drive link recognised.", !added);
+/** Save the selection and index it, showing progress on the grouping screen. */
+async function analyseSources(btn) {
+  if (btn) btn.disabled = true;
+  indexing = true;
+  route = "analyze";
   render();
-}
-function unpick(id) { picked.delete(id); render(); }
-
-async function saveRoots(btn) {
-  btn.disabled = true;
   try {
-    S = await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target?.id || "" } });
-    toast("Selection saved."); render();
-  } catch (e) { toast(e.message, true); btn.disabled = false; }
-}
-
-async function indexSources(btn) {
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Reading Drive…';
-  try {
+    await api("/api/drive/roots", { method: "POST", body: { roots: [...picked.keys()], targetFolderId: target?.id || "" } });
     S = await api("/api/sources/index", { method: "POST" });
-    toast(`Indexed ${S.sources.length} documents.`); go("analyze");
-  } catch (e) { toast(e.message, true); render(); }
+    indexing = false;
+    toast(`Indexed ${plural(S.sources.length, "document")}.`);
+  } catch (e) {
+    indexing = false;
+    indexError = e.message;
+    toast(e.message, true);
+  }
+  render();
 }
 
 function viewAnalyze() {
-  if (!S.sources.length) return `<h1>Analyse &amp; group</h1>
-    <p class="sub">Nothing indexed yet.</p><button onclick="go('sources')">← Select sources</button>`;
-
-  const needsReview = S.sources.filter((s) => !s.confirmedByUser && s.confidence < 0.6);
-  const cols = Object.entries(KINDS).map(([kind, label]) => {
-    const items = S.sources.filter((s) => s.kind === kind);
-    return `<div class="col"><h3>${label}<span>${items.length}</span></h3>
-      ${items.map((s) => `<div class="src">
-        <div class="n">${esc(s.name)}</div>
-        <div class="why">${esc(s.reasons[0] || "")}${s.wordCount ? ` · ${s.wordCount.toLocaleString()} words` : ""}</div>
-        <div class="row" style="margin-top:5px">
-          <span class="pill ${s.confirmedByUser ? "good" : s.confidence >= 0.6 ? "" : "warn"}">
-            ${s.confirmedByUser ? "confirmed" : Math.round(s.confidence * 100) + "% sure"}</span>
-        </div>
-        <select onchange="regroup('${s.driveId}', this.value)">
-          ${Object.entries(KINDS).map(([k, l]) =>
-            `<option value="${k}" ${k === s.kind ? "selected" : ""}>${l}</option>`).join("")}
-        </select></div>`).join("") || '<div class="hint">Empty</div>'}
+  if (indexing) return `
+    <h1>Analyse and group</h1>
+    <div class="card" style="text-align:center;padding:40px 20px">
+      <div style="font-size:22px;margin-bottom:12px"><span class="spin" style="width:20px;height:20px;border-width:3px"></span></div>
+      <b>Reading your Drive</b>
+      <p class="sub" style="margin:8px auto 0;max-width:46ch">Walking each folder, downloading every
+      document and sorting it into groups. A large folder can take a few minutes. You can leave this
+      page open.</p>
     </div>`;
-  }).join("");
+
+  if (indexError) return `
+    <h1>Analyse and group</h1>
+    <div class="info warn">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
+      <div><b>Indexing failed</b><p>${esc(indexError)}</p></div></div>
+    <button onclick="go('sources')">Back to sources</button>`;
+
+  if (!S.sources.length) return `<h1>Analyse and group</h1>
+    <p class="sub">Nothing indexed yet.</p><button onclick="go('sources')">Select sources</button>`;
+
+  const counts = Object.fromEntries(Object.keys(KINDS).map((k) =>
+    [k, S.sources.filter((x) => (x.kinds || []).includes(k)).length]));
+
+  const docs = S.sources.map((src) => `
+    <div class="doc">
+      <div class="doc-h">
+        <div><b>${esc(src.name)}</b>
+          <div class="doc-m">${esc(src.path || "")}${src.wordCount ? ` · ${plural(src.wordCount, "word", null, src.wordCount.toLocaleString())}` : ""}</div>
+        </div>
+      </div>
+      <div class="chips">
+        ${Object.entries(KINDS).map(([k, label]) => {
+          const on = (src.kinds || []).includes(k);
+          return `<button class="chip ${on ? "on" : ""}" onclick="toggleKind('${src.driveId}','${k}')">${label}</button>`;
+        }).join("")}
+      </div>
+    </div>`).join("");
+
+  const unassigned = S.sources.filter((x) => !(x.kinds || []).length).length;
 
   return `
-  <h1>Analyse &amp; group</h1>
-  <p class="sub">Every document was read and classified. Correct anything that landed in the wrong
-  column . This matters: only <b>Past series book</b> feeds the style corpus and canon, so a
-  reference book filed wrongly would push the writing toward another author's voice.</p>
-  ${needsReview.length ? `<div class="card" style="border-color:var(--warn)">
-    <b>${plural(needsReview.length, "document")} ${verb(needsReview.length, "needs", "need")} your confirmation</b>
-    <p class="hint">Low-confidence guesses: ${needsReview.map((s) => esc(s.name)).join(", ")}</p>
-    <button class="ghost sm" style="margin-top:8px" onclick="confirmAll(this)">Accept all as classified</button>
-  </div>` : ""}
-  <div class="board">${cols}</div>
-  <div class="row" style="margin-top:16px"><button onclick="go('intake')">Next: project shape →</button></div>`;
+  <h1>Analyse and group</h1>
+  <p class="sub">Every document was read and sorted. Correct anything in the wrong place by clicking the
+  labels. A document can belong to several groups at once, which is common: one file often holds a
+  timeline, an outline and loose notes.</p>
+
+  <div class="info">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+    <div><b>Past series book is the one that matters</b>
+      <p>Only documents marked <b>Past series book</b> feed your style corpus and canon. Mark your own
+      books that way even if you also use them as general reference; the two are not exclusive. Another
+      author's novel should be <b>Reference book</b> only, or it will pull your writing toward their voice.</p>
+    </div></div>
+
+  <div class="counts">${Object.entries(KINDS).map(([k, label]) =>
+    `<div class="count ${counts[k] ? "" : "zero"}"><b>${counts[k]}</b><span>${label}</span></div>`).join("")}</div>
+
+  <h2>${plural(S.sources.length, "document")}</h2>
+  ${unassigned ? `<div class="hint" style="margin-bottom:8px;color:var(--warn)">${plural(unassigned, "document")} ${verb(unassigned, "has", "have")} no group and will be ignored.</div>` : ""}
+  ${docs}
+
+  <div class="row" style="margin-top:18px">
+    <button onclick="finishReview(this)">Looks right, continue</button>
+    <button class="ghost" onclick="go('sources')">Back to sources</button>
+  </div>`;
 }
 
-async function regroup(driveId, kind) {
-  try { S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kind } }); render(); }
-  catch (e) { toast(e.message, true); }
+async function toggleKind(driveId, kind) {
+  const src = S.sources.find((x) => x.driveId === driveId);
+  if (!src) return;
+  const kinds = new Set(src.kinds || []);
+  kinds.has(kind) ? kinds.delete(kind) : kinds.add(kind);
+  src.kinds = [...kinds];          // optimistic: the board stays responsive
+  render();
+  try { S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kinds: src.kinds } }); }
+  catch (e) { toast(e.message, true); await reload(); }
 }
-async function confirmAll(btn) {
+
+async function finishReview(btn) {
   btn.disabled = true;
-  try { S = await api("/api/sources/confirm-all", { method: "POST" }); render(); }
-  catch (e) { toast(e.message, true); }
+  try { S = await api("/api/sources/reviewed", { method: "POST" }); go("intake"); }
+  catch (e) { toast(e.message, true); btn.disabled = false; }
 }
 
 function viewIntake() {

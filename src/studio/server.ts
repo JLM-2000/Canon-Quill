@@ -364,8 +364,14 @@ export function createStudioApp() {
     const found: Array<{ source: SelectedSource; text: string }> = [];
 
     for (const root of state.drive.referenceRoots) {
-      const tree = await drive.walkFolder(root, { maxDepth: 6, maxFiles: 400 });
-      for (const node of flatten(tree)) {
+      // A root may be a single file the author picked directly.
+      const meta = await drive.getMetadata(root).catch(() => undefined);
+      const nodes =
+        meta && meta.mimeType !== "application/vnd.google-apps.folder"
+          ? [{ id: meta.id, name: meta.name, path: `/${meta.name}`, mimeType: meta.mimeType, isFolder: false }]
+          : flatten(await drive.walkFolder(root, { maxDepth: 6, maxFiles: 400 }));
+
+      for (const node of nodes) {
         if (node.isFolder || !isReadable(node.mimeType)) continue;
         let text = "";
         try {
@@ -381,10 +387,7 @@ export function createStudioApp() {
             path: node.path,
             mimeType: node.mimeType,
             isFolder: false,
-            kind: classification.kind,
-            confidence: classification.confidence,
-            reasons: classification.reasons,
-            confirmedByUser: false,
+            kinds: [classification.kind],
             wordCount: computeMetrics(text).wordCount
           },
           text
@@ -403,6 +406,7 @@ export function createStudioApp() {
 
     const next = await updateState(slug, (current) => {
       current.sources = found.map((entry) => entry.source);
+      current.sourcesReviewed = false;
       current.drive.lastIndexedAt = new Date().toISOString();
     });
 
@@ -420,34 +424,32 @@ export function createStudioApp() {
 
   app.patch("/api/sources/:driveId", route(async (req, res) => {
     const slug = await requireSlug();
-    const kind = req.body?.kind as SourceKind | undefined;
-    if (!kind || !(kind in sourceKindLabels)) throw new HttpError(400, "Unknown source kind.");
+    const raw: unknown = req.body?.kinds;
+    if (!Array.isArray(raw)) throw new HttpError(400, "kinds must be an array.");
+
+    const kinds = [...new Set(raw.map(String))] as SourceKind[];
+    for (const kind of kinds) {
+      if (!(kind in sourceKindLabels)) throw new HttpError(400, `Unknown source kind: ${kind}`);
+    }
 
     const state = await updateState(slug, (current) => {
       const source = current.sources.find((entry) => entry.driveId === req.params.driveId);
-      if (source) {
-        source.kind = kind;
-        source.confirmedByUser = true;
-        source.confidence = 1;
-        source.reasons = ["confirmed by the author"];
-      }
+      // An empty list is allowed: it means "ignore this document".
+      if (source) source.kinds = kinds;
     });
     res.json(withDerived(state));
   }));
 
-  app.post("/api/sources/confirm-all", route(async (_req, res) => {
+  app.post("/api/sources/reviewed", route(async (_req, res) => {
     const slug = await requireSlug();
-    const state = await updateState(slug, (current) => {
-      for (const source of current.sources) source.confirmedByUser = true;
-    });
-    res.json(withDerived(state));
+    res.json(withDerived(await updateState(slug, (current) => void (current.sourcesReviewed = true))));
   }));
 
   // --- Style ----------------------------------------------------------------
   app.post("/api/style/build", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
-    const pastBooks = state.sources.filter((source) => source.kind === "past_book");
+    const pastBooks = state.sources.filter((source) => source.kinds.includes("past_book"));
 
     if (pastBooks.length === 0) {
       throw new HttpError(

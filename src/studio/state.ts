@@ -26,10 +26,13 @@ export interface SelectedSource {
   path: string;
   mimeType: string;
   isFolder: boolean;
-  kind: SourceKind;
-  confidence: number;
-  reasons: string[];
-  confirmedByUser: boolean;
+  /**
+   * Which groups this document belongs to. A single file can genuinely be
+   * several things at once: one document holding a timeline, an outline and
+   * loose notes is common, and an author's past book is both their style
+   * corpus and their canon reference.
+   */
+  kinds: SourceKind[];
   wordCount?: number;
 }
 
@@ -88,6 +91,8 @@ export interface StudioState {
     lastIndexedAt: string | null;
   };
   sources: SelectedSource[];
+  /** The author has looked at the grouping board and moved on. */
+  sourcesReviewed: boolean;
   questions: OpenQuestion[];
   chapters: ChapterRecord[];
   ledger: ContinuityLedger;
@@ -115,6 +120,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     intake: {},
     drive: { connected: false, referenceRoots: [], targetFolderId: null, lastIndexedAt: null },
     sources: [],
+    sourcesReviewed: false,
     questions: [],
     chapters: [],
     ledger: emptyLedger(projectName, 0),
@@ -169,7 +175,7 @@ export function derivePhase(state: StudioState): PhaseId {
   if (!state.drive.connected) return "connect";
   if (state.drive.referenceRoots.length === 0) return "sources";
   if (state.sources.length === 0) return "sources";
-  if (state.sources.some((source) => !source.confirmedByUser && source.confidence < 0.6)) return "analyze";
+  if (!state.sourcesReviewed) return "analyze";
   if (state.shape === null || state.draftingMode === null) return "intake";
   if (state.questions.some((question) => question.blocking && question.answer === undefined)) return "intake";
   if (!state.styleCorpus.built) return "preparation";

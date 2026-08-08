@@ -67,9 +67,11 @@ describe("phase derivation", () => {
     state.sources = [
       {
         driveId: "a", name: "book.md", path: "/book.md", mimeType: "text/markdown", isFolder: false,
-        kind: "past_book", confidence: 0.9, reasons: [], confirmedByUser: true
+        kinds: ["past_book"]
       }
     ];
+    expect(derivePhase(state)).toBe("analyze");
+    state.sourcesReviewed = true;
     expect(derivePhase(state)).toBe("intake");
   });
 
@@ -198,8 +200,32 @@ describe("studio api", () => {
   });
 
   it("rejects an unknown source kind", async () => {
-    const { status } = await call("/api/sources/abc", { method: "PATCH", body: { kind: "nonsense" } });
+    const { status } = await call("/api/sources/abc", { method: "PATCH", body: { kinds: ["nonsense"] } });
     expect(status).toBe(400);
+  });
+
+  it("requires kinds to be an array", async () => {
+    const { status } = await call("/api/sources/abc", { method: "PATCH", body: { kind: "notes" } });
+    expect(status).toBe(400);
+  });
+
+  it("accepts several groups for one document", async () => {
+    const { status } = await call("/api/sources/abc", {
+      method: "PATCH",
+      body: { kinds: ["timeline", "plot", "notes"] }
+    });
+    expect(status).toBe(200);
+  });
+
+  it("holds at analyze until the grouping is reviewed", async () => {
+    const state = emptyState("x");
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.drive.connected = true;
+    state.drive.referenceRoots = ["r"];
+    state.sources = [{ driveId: "a", name: "n", path: "/n", mimeType: "text/plain", isFolder: false, kinds: ["notes"] }];
+    expect(derivePhase(state)).toBe("analyze");
+    state.sourcesReviewed = true;
+    expect(derivePhase(state)).toBe("intake");
   });
 
   it("refuses to index without reference roots", async () => {
