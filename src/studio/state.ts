@@ -15,6 +15,7 @@ export type PhaseId =
   | "intake"
   | "draft"
   | "preparation"
+  | "intake_analysis"
   | "preflight"
   | "writing"
   | "review"
@@ -61,6 +62,18 @@ export interface ConversationMessage {
   questionId?: string;
   phase: PhaseId;
   createdAt: string;
+}
+
+export interface ProjectAnalysisState {
+  completed: boolean;
+  documentsRead: number;
+  wordsRead: number;
+  genre: string | null;
+  subgenre: string | null;
+  confidence: number;
+  evidence: string[];
+  unknowns: string[];
+  analysedAt: string | null;
 }
 
 export interface ChapterRecord {
@@ -151,7 +164,7 @@ export interface ExistingManuscript {
 }
 
 export interface StudioState {
-  version: 6;
+  version: 7;
   slug: string;
   projectName: string;
   phase: PhaseId;
@@ -174,6 +187,7 @@ export interface StudioState {
   conversation: ConversationMessage[];
   /** Set when the author opens the intake gate for the agent. */
   conversationStartedAt: string | null;
+  projectAnalysis: ProjectAnalysisState;
   chapters: ChapterRecord[];
   /** Null when starting from scratch. */
   manuscript: ExistingManuscript | null;
@@ -200,7 +214,7 @@ export interface StudioState {
 export function emptyState(slug: string, projectName = "Untitled Book"): StudioState {
   const now = new Date().toISOString();
   return {
-    version: 6,
+    version: 7,
     slug,
     projectName,
     phase: "engine",
@@ -221,6 +235,17 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     questions: [],
     conversation: [],
     conversationStartedAt: null,
+    projectAnalysis: {
+      completed: false,
+      documentsRead: 0,
+      wordsRead: 0,
+      genre: null,
+      subgenre: null,
+      confidence: 0,
+      evidence: [],
+      unknowns: [],
+      analysedAt: null
+    },
     chapters: [],
     manuscript: null,
     manuscriptReviewed: false,
@@ -244,9 +269,10 @@ export async function loadState(slug: string): Promise<StudioState> {
       ...base,
       ...parsed,
       slug,
-      version: 6 as const,
+      version: 7 as const,
       intake,
       drive: { ...base.drive, ...(parsed.drive ?? {}) },
+      projectAnalysis: { ...base.projectAnalysis, ...(parsed.projectAnalysis ?? {}) },
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       styleCorpus: { ...base.styleCorpus, ...(parsed.styleCorpus ?? {}) }
     };
@@ -324,6 +350,7 @@ export function derivePhase(state: StudioState): PhaseId {
   if (!state.manuscriptReviewed) return "draft";
   if (!state.styleCorpus.built) return "preparation";
   if (!state.styleCorpus.continuedAt) return "preparation";
+  if (!state.projectAnalysis.completed) return "intake_analysis";
   return "preflight";
 }
 

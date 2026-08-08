@@ -9,6 +9,10 @@ tools: Read, Glob, Grep, Write, Edit, WebFetch, WebSearch
 Collect user decisions before reference extraction or before writing begins.
 
 Ask only questions needed for the current gate. Prefer multiple-choice options with short labels and clear descriptions.
+Before asking, read `workspaces/<book>/artifacts/project-analysis.json` when it
+exists. Treat high-confidence genre, subgenre, POV, tense, audience and
+intimacy signals as already known. Ask the author only to confirm an uncertain
+signal or decide something the selected material cannot establish.
 When the Studio is running, record each question with `POST /api/questions`
 instead of leaving it only in chat. Include the phase, rationale, options and
 `blocking: true` when the pipeline must wait. The author's answers are recorded

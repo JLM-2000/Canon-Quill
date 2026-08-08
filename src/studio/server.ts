@@ -10,6 +10,7 @@ import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
+import { analyseProjectMaterial } from "../analysis/intake.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
 import { detectNarration, narrationOptions, povLabel, povOptions, tenseLabel, tenseOptions } from "../style/narration.js";
 import { analyseWriting, type WritingProfile } from "../style/profile.js";
@@ -111,6 +112,25 @@ export function createStudioApp() {
     });
 
     return { analysis, state: withDerived(state) };
+  }
+
+  async function analyseProject(slug: string) {
+    const state = await loadState(slug);
+    const documents: Array<{ name: string; text: string }> = [];
+    for (const source of state.sources) {
+      const text = await readCached(slug, source.driveId);
+      if (text) documents.push({ name: source.name, text });
+    }
+    const analysis = analyseProjectMaterial(documents);
+    const paths = workspacePaths(slug);
+    await mkdir(paths.artifacts, { recursive: true });
+    await writeFile(path.join(paths.artifacts, "project-analysis.json"), JSON.stringify(analysis, null, 2), "utf8");
+    const next = await updateState(slug, (current) => {
+      current.projectAnalysis = { ...analysis, completed: true };
+      if (analysis.genre && !current.intake.genre) current.intake.genre = analysis.genre;
+      if (analysis.subgenre && !current.intake.subgenre) current.intake.subgenre = analysis.subgenre;
+    });
+    return { analysis, state: withDerived(next) };
   }
 
   const route = (handler: (req: express.Request, res: express.Response) => Promise<void>) =>
@@ -702,10 +722,45 @@ export function createStudioApp() {
     });
   }));
 
+  app.post("/api/intake/analyse", route(async (_req, res) => {
+    const slug = await requireSlug();
+    res.json(await analyseProject(slug));
+  }));
+
   app.post("/api/conversation/start", route(async (_req, res) => {
     const slug = await requireSlug();
-    const state = await updateState(slug, (current) => {
-      current.conversationStartedAt ??= new Date().toISOString();
+    let state = await loadState(slug);
+    if (!state.projectAnalysis.completed) state = (await analyseProject(slug)).state;
+    state = await updateState(slug, (current) => {
+      const startedAt = current.conversationStartedAt ?? new Date().toISOString();
+      current.conversationStartedAt = startedAt;
+      if (current.questions.length === 0) {
+        const hasGenre = Boolean(current.projectAnalysis.genre || current.intake.genre);
+        const genre = current.projectAnalysis.subgenre || current.projectAnalysis.genre || current.intake.genre;
+        const question: OpenQuestion = {
+          id: randomUUID(),
+          phase: "intake",
+          askedBy: "book-01-intake",
+          question: hasGenre
+            ? `The selected material reads as ${genre}. What is the one-sentence story promise this book must deliver?`
+            : "What genre and subgenre should this book deliver?",
+          rationale: hasGenre
+            ? "The references already supplied the genre signal, so this asks for the story promise instead of repeating it."
+            : "The selected material did not state a reliable genre signal, so this is still an author decision.",
+          allowFreeText: true,
+          askedAt: startedAt,
+          blocking: true
+        };
+        current.questions.push(question);
+        current.conversation.push({
+          id: randomUUID(),
+          role: "agent",
+          text: question.question,
+          questionId: question.id,
+          phase: question.phase,
+          createdAt: question.askedAt
+        });
+      }
     });
     res.json(withDerived(state));
   }));

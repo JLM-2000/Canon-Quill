@@ -90,7 +90,7 @@ describe("phase derivation", () => {
     state.styleCorpus.built = true;
     expect(derivePhase(state)).toBe("preparation");
     state.styleCorpus.continuedAt = new Date().toISOString();
-    expect(derivePhase(state)).toBe("preflight");
+    expect(derivePhase(state)).toBe("intake_analysis");
   });
 
   it("moves to writing once chapters exist", () => {
@@ -231,7 +231,7 @@ describe("studio api", () => {
     const result = await call("/api/style/continue", { method: "POST" });
     expect(result.status).toBe(200);
     expect(result.body.styleCorpus.continuedAt).toBeTruthy();
-    expect(result.body.phase).toBe("preflight");
+    expect(result.body.phase).toBe("intake_analysis");
   });
 
   it("extracts intake suggestions from indexed prose", async () => {

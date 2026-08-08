@@ -305,6 +305,7 @@ let indexError = null;
 let draftAnalysisLoading = false;
 let selectionSave = Promise.resolve();
 let questionPoll = null;
+let projectAnalysisLoading = false;
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
@@ -322,6 +323,7 @@ const PHASES = [
   { id: "intake",      label: "Project shape",  group: "Prepare" },
   { id: "draft",       label: "Existing draft", group: "Prepare" },
   { id: "style",       label: "Style corpus",   group: "Prepare" },
+  { id: "intake_analysis", label: "Project analysis", group: "Prepare" },
   { id: "questions",   label: "Questions",      group: "Prepare" },
   { id: "chapters",    label: "Chapters",       group: "Write" }
 ];
@@ -644,6 +646,7 @@ function isDone(id) {
     case "draft":     return !!S.manuscriptReviewed;
     // Answered either way: a draft was picked, or starting fresh was chosen.
     case "style":     return S.styleCorpus.built;
+    case "intake_analysis": return S.projectAnalysis?.completed;
     // Green means "done", so an untouched step with no questions is not green.
     case "questions": return (S.questions || []).length > 0
       && !S.questions.some((q) => q.blocking && q.answer === undefined);
@@ -653,12 +656,12 @@ function isDone(id) {
 }
 
 /** Steps in order. You may revisit anything reached, but not skip ahead. */
-const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "draft", "style", "questions", "chapters"];
+const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "draft", "style", "intake_analysis", "questions", "chapters"];
 
 function furthestReached() {
   if (!S) return 0;
   const map = { engine: "engine", connect: "connect", sources: "sources", analyze: "analyze",
-    intake: "intake", draft: "draft", preparation: "style", preflight: "questions", writing: "chapters",
+    intake: "intake", draft: "draft", preparation: "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
     review: "chapters", export: "chapters", complete: "chapters" };
   const current = map[S.phase] || "engine";
   return Math.max(PHASE_ORDER.indexOf(current), 0);
@@ -683,6 +686,7 @@ function go(r) {
   if (r === "analyze") loadCheck();
   if (r === "intake") loadSuggestions();
   if (r === "style" && S.styleCorpus.built) loadFingerprint();
+  if (r === "intake_analysis") loadProjectAnalysis();
   if (r === "questions") { loadQuestions(); startQuestionPolling(); }
   else stopQuestionPolling();
   if (r === "draft" && S.manuscript) loadDraftAnalysis();
@@ -707,7 +711,7 @@ function render() {
   }
   v.innerHTML = ({
     engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
-    intake: viewIntake, draft: viewDraft, style: viewStyle, questions: viewQuestions, chapters: viewChapters
+    intake: viewIntake, draft: viewDraft, style: viewStyle, intake_analysis: viewIntakeAnalysis, questions: viewQuestions, chapters: viewChapters
   }[route] || viewConnect)();
 }
 
@@ -1627,7 +1631,7 @@ function viewStyle() {
     ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
     <div id="fp"><span class="spin"></span></div>
     <div class="row" style="margin-top:16px">
-      <button onclick="continueFromStyle(this)">Continue to questions</button>
+      <button onclick="continueFromStyle(this)">Continue to project analysis</button>
     </div>
     <div class="hint" style="margin-top:8px">The questions screen is where the writing agent records decisions instead of guessing.</div>
     </div>` : ""}
@@ -1648,13 +1652,60 @@ async function continueFromStyle(btn) {
   btn.disabled = true;
   try {
     S = await api("/api/style/continue", { method: "POST" });
-    route = "questions";
+    route = "intake_analysis";
     render();
-    await loadQuestions();
+    await loadProjectAnalysis();
   } catch (e) {
     toast(e.message, "error");
     btn.disabled = false;
   }
+}
+
+function viewIntakeAnalysis() {
+  const analysis = S.projectAnalysis || {};
+  const complete = analysis.completed;
+  return `<h1>Project analysis</h1>
+    <p class="sub">Canon Quill reads the selected material first and carries forward what it can prove. Questions are only for decisions the references do not settle.</p>
+    <div class="card">
+      ${projectAnalysisLoading || !complete
+        ? `<div style="text-align:center;padding:28px 12px"><span class="spin spin-lg"></span><h3 style="margin:14px 0 6px">Analyzing your project material</h3><p class="sub" style="margin:0 auto;max-width:48ch">Reading the cached references, plot material, character notes, and existing style signals. This is deterministic and stays on your machine.</p></div>`
+        : `<div class="row" style="margin-bottom:10px"><b>Analysis complete</b><span class="pill good">${plural(analysis.documentsRead || 0, "document")} read</span><span class="pill">${plural(analysis.wordsRead || 0, "word", null, (analysis.wordsRead || 0).toLocaleString())}</span></div>
+          <div class="info ${analysis.genre ? "ok" : "warn"}" style="margin:0 0 12px">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              ${analysis.genre ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+            </svg>
+            <div><b>${analysis.genre ? `Detected ${esc(analysis.subgenre || analysis.genre)}` : "No reliable genre signal"}</b>
+              <p>${analysis.genre ? `${Math.round((analysis.confidence || 0) * 100)}% confidence. This will be used as a prefill, not imposed.` : "The first question will ask you for the genre because the references do not state it clearly enough."}</p>
+            </div>
+          </div>
+          ${analysis.evidence?.length ? `<div class="hint"><b>Evidence:</b> ${analysis.evidence.map(esc).join(" ")}</div>` : ""}`}
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button ${complete ? "" : "disabled"} onclick="continueFromAnalysis(this)">Continue to questions</button>
+      ${!complete ? '<span class="hint">Analysis is still running.</span>' : ""}
+    </div>`;
+}
+
+async function loadProjectAnalysis() {
+  if (projectAnalysisLoading || S.projectAnalysis?.completed) return;
+  projectAnalysisLoading = true;
+  if (route === "intake_analysis") render();
+  try {
+    const r = await api("/api/intake/analyse", { method: "POST" });
+    S = r.state;
+  } catch (e) {
+    toast(e.message, "error");
+  }
+  projectAnalysisLoading = false;
+  if (route === "intake_analysis") render();
+}
+
+async function continueFromAnalysis(btn) {
+  btn.disabled = true;
+  route = "questions";
+  render();
+  await loadQuestions();
+  startQuestionPolling();
 }
 
 let FINGERPRINT = null;
@@ -1730,7 +1781,27 @@ function viewQuestions() {
     <button onclick="beginIntake(this)">Begin intake</button>
   </div>` : `${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}` : ""}
     ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}
-    ${!open.length && !done.length ? '<div class="card empty"><span class="spin"></span><br><br>Waiting for the intake agent to post its first question.</div>' : ""}`}`;
+    ${!open.length && !done.length ? intakeWaitingCard() : ""}`}`;
+}
+
+function intakeWaitingCard() {
+  const started = Date.parse(S.conversationStartedAt || "") || Date.now();
+  const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  const phases = [
+    [0, "Getting started", "Opening the intake conversation."],
+    [5, "Reviewing the project", "Checking the project shape, selected draft, and continuation notes."],
+    [12, "Analyzing references", "Reading the indexed material and style signals."],
+    [22, "Preparing the first question", "The agent is deciding what it needs from you first."],
+    [45, "Still working", "This can take a minute for a large reference set. Your project is saved."]
+  ];
+  const current = phases.reduce((chosen, phase) => elapsed >= phase[0] ? phase : chosen, phases[0]);
+  const progress = Math.min(92, 18 + elapsed * 1.7);
+  return `<div class="card" style="padding:22px 18px">
+    <div class="row"><span class="spin spin-lg"></span><b>${current[1]}</b><span class="pill">${elapsed}s</span></div>
+    <p class="sub" style="margin:12px 0 10px">${current[2]}</p>
+    <div class="meter" style="width:100%;height:5px"><i style="width:${progress}%"></i></div>
+    <div class="hint" style="margin-top:8px">The first question will appear here when the intake agent is ready.</div>
+  </div>`;
 }
 
 async function loadQuestions() {
@@ -1937,7 +2008,7 @@ async function setStatus(number, status) {
   loadVersion(true);
   setInterval(() => loadVersion(true), 10 * 60 * 1000);
   if (S) {
-    const persistedRoute = { preparation: "style", preflight: "questions", writing: "chapters",
+    const persistedRoute = { preparation: "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
       review: "chapters", export: "chapters", complete: "chapters" }[S.phase] || S.phase;
     route = PHASES.some((p) => p.id === persistedRoute) ? persistedRoute : "connect";
     render();
@@ -1946,6 +2017,7 @@ async function setStatus(number, status) {
     if (route === "connect") loadDrive();
     if (route === "draft" && S.manuscript) loadDraftAnalysis();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
+    if (route === "intake_analysis") loadProjectAnalysis();
     if (route === "questions") { loadQuestions(); startQuestionPolling(); }
   }
 })();
