@@ -69,6 +69,50 @@ export function createStudioApp() {
     return slug;
   }
 
+  async function refreshExistingManuscript(slug: string, driveId: string) {
+    const meta = await drive.getMetadata(driveId);
+    if (meta.mimeType === "application/vnd.google-apps.folder") {
+      throw new HttpError(400, "That is a folder. Pick the document the book is written in.");
+    }
+
+    const text = await drive.readFileText(driveId);
+    const analysis = analyseManuscript(text);
+    const prior = await loadState(slug);
+    const notes = prior.manuscript?.driveId === driveId ? prior.manuscript.notes ?? "" : "";
+    const paths = workspacePaths(slug);
+    await mkdir(paths.artifacts, { recursive: true });
+    await writeFile(
+      path.join(paths.artifacts, "existing-manuscript.json"),
+      JSON.stringify({ driveId, name: meta.name, analysis }, null, 2),
+      "utf8"
+    );
+    await writeFile(
+      path.join(paths.artifacts, "continuation-brief.md"),
+      renderContinuationBrief(analysis, meta.name, notes),
+      "utf8"
+    );
+
+    const state = await updateState(slug, (current) => {
+      current.manuscript = {
+        driveId,
+        name: meta.name,
+        target: current.manuscript?.driveId === driveId ? current.manuscript.target : "continue",
+        totalWords: analysis.totalWords,
+        storyWords: analysis.storyWords,
+        chapterCount: analysis.chapters.length,
+        lastChapterComplete: analysis.lastChapterComplete,
+        completenessReason: analysis.completenessReason,
+        backMatterHeading: analysis.backMatter?.heading,
+        backMatterWords: analysis.backMatter?.wordCount,
+        notes,
+        analysedAt: new Date().toISOString()
+      };
+      current.manuscriptReviewed = true;
+    });
+
+    return { analysis, state: withDerived(state) };
+  }
+
   const route = (handler: (req: express.Request, res: express.Response) => Promise<void>) =>
     (req: express.Request, res: express.Response) => {
       handler(req, res).catch((error: unknown) => {
@@ -841,50 +885,14 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const driveId = typeof req.body?.driveId === "string" ? extractDriveId(req.body.driveId) : null;
     if (!driveId) throw new HttpError(400, "A Drive file is required.");
+    res.json(await refreshExistingManuscript(slug, driveId));
+  }));
 
-    const meta = await drive.getMetadata(driveId);
-    if (meta.mimeType === "application/vnd.google-apps.folder") {
-      throw new HttpError(400, "That is a folder. Pick the document the book is written in.");
-    }
-
-    const text = await drive.readFileText(driveId);
-    const analysis = analyseManuscript(text);
-    const prior = await loadState(slug);
-    const notes = prior.manuscript?.driveId === driveId ? prior.manuscript.notes ?? "" : "";
-
-    // Cached so the brief can be rebuilt without refetching.
-    const paths = workspacePaths(slug);
-    await mkdir(paths.artifacts, { recursive: true });
-    await writeFile(
-      path.join(paths.artifacts, "existing-manuscript.json"),
-      JSON.stringify({ driveId, name: meta.name, analysis }, null, 2),
-      "utf8"
-    );
-    await writeFile(
-      path.join(paths.artifacts, "continuation-brief.md"),
-      renderContinuationBrief(analysis, meta.name, notes),
-      "utf8"
-    );
-
-    const state = await updateState(slug, (current) => {
-      current.manuscript = {
-        driveId,
-        name: meta.name,
-        target: current.manuscript?.driveId === driveId ? current.manuscript.target : "continue",
-        totalWords: analysis.totalWords,
-        storyWords: analysis.storyWords,
-        chapterCount: analysis.chapters.length,
-        lastChapterComplete: analysis.lastChapterComplete,
-        completenessReason: analysis.completenessReason,
-        backMatterHeading: analysis.backMatter?.heading,
-        backMatterWords: analysis.backMatter?.wordCount,
-        notes,
-        analysedAt: new Date().toISOString()
-      };
-      current.manuscriptReviewed = true;
-    });
-
-    res.json({ analysis, state: withDerived(state) });
+  app.post("/api/manuscript/reanalyse", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+    if (!state.manuscript) throw new HttpError(404, "No existing draft has been selected.");
+    res.json(await refreshExistingManuscript(slug, state.manuscript.driveId));
   }));
 
   app.patch("/api/manuscript", route(async (req, res) => {

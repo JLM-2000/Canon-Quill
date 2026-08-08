@@ -302,6 +302,7 @@ let target = null;         // {id, name} of the folder finished chapters go to
 let indexing = false;
 let draftPicker = false;
 let indexError = null;
+let draftAnalysisLoading = false;
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
@@ -661,6 +662,7 @@ function go(r) {
   if (r === "intake") loadSuggestions();
   if (r === "style" && S.styleCorpus.built) loadFingerprint();
   if (r === "questions") loadQuestions();
+  if (r === "draft" && S.manuscript) loadDraftAnalysis();
 }
 
 // --- views -----------------------------------------------------------------
@@ -1321,7 +1323,7 @@ function viewIntake() {
       <input id="pname" value="${esc(S.projectName)}" onchange="setProject({projectName:this.value})" />
       <div class="hint">Taken from the book you created. Change it here if it has moved on.</div></div>
 
-    <div style="margin-bottom:16px"><label>POV and tense</label>
+    <div style="margin-bottom:16px">
       <div class="intake-fields">
         <div class="intake-field"><label style="font-weight:500">POV</label>
           <select class="compact-select" onchange="setProject({intake:{pov:this.value}})">
@@ -1440,6 +1442,8 @@ function draftSection() {
           : "Writing will finish the chapter in progress before starting another. If that is wrong, say so in the instructions box on the chapter board."}</p>
        </div></div>
 
+    ${draftAnalysisLoading ? '<div class="hint" style="margin:0 0 12px"><span class="spin"></span> Checking the ending for closing material...</div>' : ""}
+
     ${m.backMatterHeading ? `<div class="info" style="margin:0 0 12px">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
@@ -1496,6 +1500,7 @@ async function useAsDraft(driveId, name, btn) {
   try {
     const r = await api("/api/manuscript/analyse", { method: "POST", body: { driveId } });
     S = r.state; render();
+    await loadDraftAnalysis();
     toast(`Read ${plural(r.analysis.totalWords, "word", null, r.analysis.totalWords.toLocaleString())} from "${name}".`);
   } catch (e) {
     toast(e.message, "error");
@@ -1545,6 +1550,20 @@ function closeDraftPicker() { draftPicker = false; render(); }
 
 function viewDraft() {
   return `<h1>Existing draft</h1>${draftSection()}`;
+}
+
+async function loadDraftAnalysis() {
+  if (!S?.manuscript || draftAnalysisLoading) return;
+  draftAnalysisLoading = true;
+  if (route === "draft") render();
+  try {
+    const r = await api("/api/manuscript/reanalyse", { method: "POST" });
+    S = r.state;
+  } catch (e) {
+    toast(`Could not refresh the draft analysis: ${e.message}`, "warn");
+  }
+  draftAnalysisLoading = false;
+  if (route === "draft") render();
 }
 
 function viewStyle() {
@@ -1893,6 +1912,7 @@ async function setStatus(number, status) {
     if (route === "sources") loadBrowse("root");
     if (route === "engine") loadEngine();
     if (route === "connect") loadDrive();
+    if (route === "draft" && S.manuscript) loadDraftAnalysis();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
     if (route === "questions") loadQuestions();
   }
