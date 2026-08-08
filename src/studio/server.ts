@@ -1,7 +1,7 @@
 import express from "express";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -10,7 +10,7 @@ import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
-import { analyseProjectMaterial } from "../analysis/intake.js";
+import { analyseProjectMaterial, buildIntakeQuestionPlan } from "../analysis/intake.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
 import { detectNarration, narrationOptions, povLabel, povOptions, tenseLabel, tenseOptions } from "../style/narration.js";
 import { analyseWriting, type WritingProfile } from "../style/profile.js";
@@ -116,12 +116,19 @@ export function createStudioApp() {
 
   async function analyseProject(slug: string) {
     const state = await loadState(slug);
-    const documents: Array<{ name: string; text: string }> = [];
+    const documents: Array<{ name: string; path: string; kinds: string[]; text: string }> = [];
     for (const source of state.sources) {
       const text = await readCached(slug, source.driveId);
-      if (text) documents.push({ name: source.name, text });
+      if (text) documents.push({ name: source.name, path: source.path, kinds: source.kinds, text });
     }
-    const analysis = analyseProjectMaterial(documents);
+    const context = {
+      shape: state.shape,
+      draftingMode: state.draftingMode,
+      intake: state.intake,
+      existingDraft: Boolean(state.manuscript)
+    };
+    const analysis = analyseProjectMaterial(documents, context);
+    analysis.questionPlan = buildIntakeQuestionPlan(analysis, context);
     const paths = workspacePaths(slug);
     await mkdir(paths.artifacts, { recursive: true });
     await writeFile(path.join(paths.artifacts, "project-analysis.json"), JSON.stringify(analysis, null, 2), "utf8");
@@ -143,8 +150,6 @@ export function createStudioApp() {
 
   // --- UI -------------------------------------------------------------------
   app.get("/", route(async (_req, res) => {
-    // The UI is one self-contained file, so there is no bundler step between
-    // editing it and running it.
     for (const candidate of [path.join(here, "ui.html"), path.join(here, "../../src/studio/ui.html")]) {
       try {
         res.type("html").send(await readFile(candidate, "utf8"));
@@ -157,8 +162,6 @@ export function createStudioApp() {
   }));
 
   app.get("/api/version", route(async (req, res) => {
-    // Checking the remote costs a network round trip, so the UI asks for it
-    // only when it opens the panel or on a slow timer.
     res.json(await getVersionInfo(req.query.remote === "1"));
   }));
 
@@ -166,16 +169,7 @@ export function createStudioApp() {
     res.json(await applyUpdate());
   }));
 
-  /**
-   * Restart into the updated code.
-   *
-   * The process cannot reload its own modules, so it spawns a replacement and
-   * exits. Two things make that harder than it looks. The Studio is normally
-   * run through tsx, so re-spawning `node server.ts` starts a process that
-   * cannot parse TypeScript and dies immediately; the loader flags in
-   * `execArgv` have to be carried across. And the replacement cannot bind the
-   * port until this process has released it, so it retries rather than racing.
-   */
+  /** Restart the Studio with the current executable arguments. */
   app.post("/api/version/restart", route(async (_req, res) => {
     const command = process.execPath;
     const args = [...process.execArgv, process.argv[1], ...process.argv.slice(2)];
@@ -186,16 +180,12 @@ export function createStudioApp() {
         cwd: process.cwd(),
         env: { ...process.env, CANON_QUILL_NO_OPEN: "1", CANON_QUILL_RESTARTING: "1" },
         detached: true,
-        // Inherited so a failure to start is visible in the terminal the author
-        // is already looking at, rather than disappearing into /dev/null.
         stdio: "inherit"
       });
     } catch (error) {
       throw new HttpError(500, `Could not start a replacement process: ${message(error)}`);
     }
 
-    // If it dies immediately, the old process should stay up rather than
-    // leaving nothing listening at all.
     let died = false;
     child.once("error", () => (died = true));
     child.once("exit", () => (died = true));
@@ -207,8 +197,6 @@ export function createStudioApp() {
 
     child.unref();
     res.json({ restarting: true, pid: child.pid });
-    // Released only after the reply is on the wire, so the client learns the
-    // restart began rather than seeing a dropped connection.
     setTimeout(() => process.exit(0), 300);
   }));
 
@@ -384,10 +372,7 @@ export function createStudioApp() {
   }));
 
   // --- Drive ----------------------------------------------------------------
-  /**
-   * Non-interactive. Never opens a browser and never blocks on the user, which
-   * is what made this endpoint hang for minutes before.
-   */
+  /** Report Drive status without starting authorization. */
   app.get("/api/drive/status", route(async (_req, res) => {
     const status = await driveAuthStatus();
     const slug = await activeSlug();
@@ -400,7 +385,6 @@ export function createStudioApp() {
       canBrowse: status.canBrowse ?? false,
       needsReauthorization: status.needsReauthorization ?? false,
       reason: status.detail,
-      // What the UI should offer next.
       next: status.configured ? (status.authorized ? "ready" : "connect") : "configure"
     });
   }));
@@ -425,7 +409,6 @@ export function createStudioApp() {
     res.json({
       folderId,
       canBrowse: status.canBrowse ?? false,
-      // An empty result under a narrow grant is not an empty folder.
       emptyBecauseScope: entries.length === 0 && !status.canBrowse,
       entries: entries.map((entry) => ({
         ...entry,
@@ -494,9 +477,7 @@ export function createStudioApp() {
             path: node.path,
             mimeType: node.mimeType,
             isFolder: false,
-            // Your own past book is both the style corpus and canon material,
-            // so it starts in both groups rather than making you add the
-            // second one by hand on every book you have ever written.
+            // Own past books supply both style and canon.
             kinds:
               classification.kind === "past_book"
                 ? ["past_book", "reference_book"]
@@ -509,7 +490,6 @@ export function createStudioApp() {
       }
     }
 
-    // Cached so building the corpus later does not refetch every document.
     const cache = workspacePaths(slug).driveCache;
     await mkdir(cache, { recursive: true });
     await Promise.all(
@@ -524,6 +504,7 @@ export function createStudioApp() {
       current.drive.lastIndexedAt = new Date().toISOString();
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
+      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
     });
 
     await appendLog(slug, "audit", {
@@ -550,29 +531,24 @@ export function createStudioApp() {
 
     const state = await updateState(slug, (current) => {
       const source = current.sources.find((entry) => entry.driveId === req.params.driveId);
-      // An empty list is allowed: it means "ignore this document".
       if (source) {
         source.kinds = kinds;
         current.styleCorpus.built = false;
         current.styleCorpus.continuedAt = null;
+        current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
       }
     });
     res.json(withDerived(state));
   }));
 
-  /**
-   * Drop a document from the analysis.
-   *
-   * Different from clearing its groups: an ungrouped document stays on the
-   * board so it can be classified later, whereas a removed one is gone until
-   * the next analysis. Nothing in Drive is touched.
-   */
+  /** Remove a document from the current source set. */
   app.delete("/api/sources/:driveId", route(async (req, res) => {
     const slug = await requireSlug();
     const state = await updateState(slug, (current) => {
       current.sources = current.sources.filter((entry) => entry.driveId !== req.params.driveId);
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
+      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
     });
     res.json(withDerived(state));
   }));
@@ -599,8 +575,6 @@ export function createStudioApp() {
     const own = state.sources.filter((source) => source.kinds.includes("past_book"));
     const reference = state.sources.filter((source) => source.kinds.includes("reference_book"));
 
-    // Someone else's prose is a valid style target when the author has none of
-    // their own yet, but it is a different thing and has to be asked for.
     const useReference = req.body?.useReference === true;
     const chosen = own.length > 0 ? own : useReference ? reference : [];
 
@@ -673,11 +647,7 @@ export function createStudioApp() {
     res.json(scoreAgainstFingerprint(typeof req.body?.text === "string" ? req.body.text : "", corpus.fingerprint));
   }));
 
-  /**
-   * Retrieve exemplar passages for a scene and render them as a prompt block.
-   * This is what the drafting agent calls before writing, so the model sees the
-   * author's actual paragraphs for the beat rather than a description of them.
-   */
+  /** Retrieve exemplar passages for a scene. */
   app.post("/api/style/exemplars", route(async (req, res) => {
     const corpus = await readCorpus(await requireSlug());
     if (!corpus) throw new HttpError(400, "Build the style corpus first.");
@@ -727,6 +697,22 @@ export function createStudioApp() {
     res.json(await analyseProject(slug));
   }));
 
+  app.post("/api/intake/reset", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.questions = [];
+      current.conversation = [];
+      current.conversationStartedAt = null;
+      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+    });
+    try {
+      await unlink(path.join(workspacePaths(slug).artifacts, "project-analysis.json"));
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    res.json(withDerived(state));
+  }));
+
   app.post("/api/conversation/start", route(async (_req, res) => {
     const slug = await requireSlug();
     let state = await loadState(slug);
@@ -735,31 +721,7 @@ export function createStudioApp() {
       const startedAt = current.conversationStartedAt ?? new Date().toISOString();
       current.conversationStartedAt = startedAt;
       if (current.questions.length === 0) {
-        const hasGenre = Boolean(current.projectAnalysis.genre || current.intake.genre);
-        const genre = current.projectAnalysis.subgenre || current.projectAnalysis.genre || current.intake.genre;
-        const question: OpenQuestion = {
-          id: randomUUID(),
-          phase: "intake",
-          askedBy: "book-01-intake",
-          question: hasGenre
-            ? `The selected material reads as ${genre}. What is the one-sentence story promise this book must deliver?`
-            : "What genre and subgenre should this book deliver?",
-          rationale: hasGenre
-            ? "The references already supplied the genre signal, so this asks for the story promise instead of repeating it."
-            : "The selected material did not state a reliable genre signal, so this is still an author decision.",
-          allowFreeText: true,
-          askedAt: startedAt,
-          blocking: true
-        };
-        current.questions.push(question);
-        current.conversation.push({
-          id: randomUUID(),
-          role: "agent",
-          text: question.question,
-          questionId: question.id,
-          phase: question.phase,
-          createdAt: question.askedAt
-        });
+        appendNextPlannedQuestion(current, startedAt);
       }
     });
     res.json(withDerived(state));
@@ -773,6 +735,7 @@ export function createStudioApp() {
     }
     const question: OpenQuestion = {
       id: randomUUID(),
+      key: typeof body.key === "string" ? body.key : undefined,
       phase: body.phase ?? "intake",
       askedBy: typeof body.askedBy === "string" ? body.askedBy : "agent",
       question: body.question.trim(),
@@ -807,6 +770,7 @@ export function createStudioApp() {
       if (!question) throw new HttpError(404, "Question not found.");
       question.answer = answer;
       question.answeredAt = new Date().toISOString();
+      if (question.key) current.intake[question.key] = answer;
       current.conversation.push({
         id: randomUUID(),
         role: "author",
@@ -815,6 +779,7 @@ export function createStudioApp() {
         phase: question.phase,
         createdAt: question.answeredAt
       });
+      appendNextPlannedQuestion(current, question.answeredAt);
     });
     res.json(withDerived(state));
   }));
@@ -1085,14 +1050,7 @@ export function createStudioApp() {
   }));
 
   // --- Run control -----------------------------------------------------------
-  /**
-   * An agent reports that a run stopped.
-   *
-   * Canon Quill's engine never calls a provider, so it cannot see a 401 or a
-   * spent balance itself. The runtime that does hit it says so here, and the
-   * board can then explain the stop and offer to pick up where it left off
-   * instead of the work simply going quiet.
-   */
+  /** Record a provider run halt. */
   app.post("/api/run/halt", route(async (req, res) => {
     const slug = await requireSlug();
     const reasons = ["no_credit", "rate_limited", "invalid_credentials", "provider_error", "cancelled", "other"];
@@ -1137,12 +1095,7 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
-  /**
-   * Clear a halt and report where to pick up.
-   *
-   * The credential is re-checked first: resuming into the same wall wastes the
-   * author's time and, on a rate limit, can make it worse.
-   */
+  /** Resume a halted run after credential checks. */
   app.post("/api/run/resume", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
@@ -1253,14 +1206,12 @@ function openBrowser(url: string): void {
   const command =
     process.platform === "darwin" ? "open"
     : process.platform === "win32" ? "explorer.exe"
-    // WSL reaches the Windows browser through the same binary.
     : existsSync("/proc/sys/fs/binfmt_misc/WSLInterop") ? "explorer.exe"
     : "xdg-open";
 
   try {
     spawn(command, [url], { stdio: "ignore", detached: true }).unref();
   } catch {
-    // Silent by design.
   }
 }
 
@@ -1270,17 +1221,10 @@ class HttpError extends Error {
   }
 }
 
-/**
- * Style needs enough prose for the fingerprint to mean anything: sentence
- * length spread and dialogue share are noise below a few thousand words.
- */
+/** Minimum prose for a useful style measurement. */
 const minimumStyleWords = 2000;
 
-/**
- * References are what the book is *about*, as opposed to how it sounds, so a
- * smaller amount is still useful: a character sheet and a timeline carry a lot
- * of canon in very few words.
- */
+/** Minimum material for a useful reference set. */
 const minimumReferenceWords = 1000;
 
 export interface SourceRequirement {
@@ -1299,13 +1243,7 @@ export interface SourcesCheck {
   fromReference: boolean;
 }
 
-/**
- * Two separate requirements, reported separately.
- *
- * Style decides how the book sounds; references decide what is in it. One
- * document can satisfy both, and for an author continuing their own series it
- * usually does: mark it as Your writing and References together.
- */
+/** Validate style and reference source requirements. */
 export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
   const own = sources.filter((source) => source.kinds?.includes("past_book"));
   const references = sources.filter((source) => source.kinds?.includes("reference_book"));
@@ -1452,8 +1390,41 @@ function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: n
   ].join("\n");
 }
 
+function appendNextPlannedQuestion(state: StudioState, askedAt: string): void {
+  const plan = state.projectAnalysis.questionPlan.find((candidate) =>
+    !state.intake[candidate.key] && !state.questions.some((question) => question.key === candidate.key)
+  );
+  if (!plan) return;
+
+  const question: OpenQuestion = {
+    id: randomUUID(),
+    key: plan.key,
+    phase: "intake",
+    askedBy: "book-01-intake",
+    question: plan.question,
+    rationale: plan.rationale,
+    options: plan.options,
+    allowFreeText: plan.allowFreeText !== false,
+    askedAt,
+    blocking: plan.blocking
+  };
+  state.questions.push(question);
+  state.conversation.push({
+    id: randomUUID(),
+    role: "agent",
+    text: question.question,
+    questionId: question.id,
+    phase: question.phase,
+    createdAt: askedAt
+  });
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {

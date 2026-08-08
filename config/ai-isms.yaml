@@ -1,203 +1,249 @@
-# ---------------------------------------------------------------------------
-# AI-ism policy
-#
-# This file used to be a ban list of about 200 words -- "whispered", "ache",
-# "shattered", "silence", "afraid", "slowly". That approach was wrong in both
-# directions at once:
-#
-#   False positives. Plenty of real novelists write "whispered" and "ache".
-#     Flagging them punishes an author for their own voice and pushes the
-#     editing pass to replace natural prose with thesaurus prose, which is
-#     how the output got stiff and airless.
-#
-#   False negatives. A model can avoid every listed word and still be
-#     obviously machine-written, because what actually gives it away is not
-#     vocabulary but UNIFORMITY: every sentence the same length, every
-#     paragraph the same shape, every character the same register, every
-#     emotion named instead of shown.
-#
-# So detection now works in two layers:
-#
-#   1. MEASURED  (src/style/) -- the draft's shape is compared against the
-#      author's own corpus. Deviation from *this author* is the signal. A word
-#      is only suspicious when the author does not use it at that rate. This
-#      layer needs no list and is where the real enforcement happens.
-#
-#   2. ADVISORY  (this file) -- constructions that are weak for structural
-#      reasons rather than lexical ones. These are prompts for a human or a
-#      model to look closer. Nothing here is auto-rejected, and anything the
-#      author's corpus does at a comparable rate is automatically exempt.
-#
-# Calibration against the author's corpus always wins over this file.
-# ---------------------------------------------------------------------------
-
-version: 2
+version: 3
 
 policy:
-  # Never flag a construction the author's own corpus uses at a similar rate.
-  # `tolerance` is how much more often the draft may use it before it counts.
+  purpose: >
+    Detect model-like construction, weak scene logic, and interchangeable
+    dialogue while preserving the author's actual vocabulary, rhythm, humor,
+    bluntness, dialect, and deliberate repetition.
   calibrate_against_corpus: true
   corpus_tolerance: 1.5
-  # Below this many corpus words the fingerprint is too noisy to calibrate on,
-  # and the advisory lists below are treated as weak hints only.
   min_corpus_words: 2000
-  # A construction is only worth reporting when it recurs. One instance of
-  # almost anything on this page is fine.
   min_occurrences: 2
+  lexical_bans: []
+  word_level_enforcement: false
+  auto_reject: false
+  evidence_required: true
+  priority_order:
+    - character_voice_and_dialogue
+    - scene_pressure_and_causality
+    - structural_repetition
+    - abstract_or_generic_emotion
+    - isolated_word_choice
 
-# ---------------------------------------------------------------------------
-# Structural tells. These are about how a sentence is built, not which words
-# it uses, so they survive paraphrase and are much harder to game.
-# ---------------------------------------------------------------------------
+dialogue:
+  principle: >
+    A line must belong to a particular person in a particular pressure state.
+    It should pursue, resist, hide, test, attack, repair, bargain, misdirect,
+    reveal, or change something. Natural dialogue is not uniformly efficient,
+    polite, articulate, or explanatory.
+  required_checks:
+    - id: speaker_separation
+      check: >
+        Build a voice map for every speaking character: syntax, sentence length,
+        vocabulary, contractions, profanity, humor, directness, evasions,
+        education or social register, recurring topics, and emotional restraint.
+        Compare the map across characters, not against a generic ideal.
+      failure: >
+        Two characters can exchange lines without changing the scene's meaning,
+        or every character shares the same polish, cadence, and emotional
+        vocabulary.
+      fix: >
+        Change the character's tactic, omission, syntax, register, or specific
+        knowledge. Do not give everyone a quirky catchphrase.
+      severity: blocker
+
+    - id: line_agenda
+      check: >
+        For sampled turns, identify what the speaker wants from the other person
+        and what tactic the line uses: probe, dodge, lie, threat, concession,
+        joke, bid, test, accusation, reassurance, or silence.
+      failure: >
+        A line only delivers information, confirms agreement, or restates what
+        the reader already understands without changing pressure.
+      fix: >
+        Give the speaker a competing want or make the information arrive as a
+        cost, evasion, misinterpretation, or choice.
+      severity: major
+
+    - id: subtext_and_misalignment
+      check: >
+        Compare what is said, what is meant, what the listener hears, and what
+        remains unsaid. Conflict, intimacy, fear, status, and secrets should
+        create misalignment when the scene's purpose calls for it.
+      failure: >
+        Characters state their exact feelings, theme, history, and desired
+        outcome with no resistance or social risk.
+      fix: >
+        Let the line approach the subject sideways. Use a wrong answer,
+        deflection, interruption, over-specific detail, joke, silence, or
+        action that contradicts the words.
+      severity: major
+
+    - id: exposition_pressure
+      check: >
+        Test every explanatory exchange for shared knowledge, listener need,
+        immediate stakes, and a reason this speaker chooses these words now.
+      failure: >
+        Characters explain their own world, relationship, or backstory for the
+        reader while pretending the other character needs the briefing.
+      fix: >
+        Attach the information to a present objective, let the speaker conceal
+        part of it, or move the information into conflict, memory, action, or
+        consequence.
+      severity: major
+
+    - id: turn_and_consequence
+      check: >
+        Each exchange has a turn: new information, changed leverage, a failed
+        bid, escalation, concession, interruption, decision, or exit.
+      failure: >
+        Dialogue alternates evenly without anyone being forced to adapt, or a
+        scene can lose the conversation without changing afterward.
+      fix: >
+        Track pressure after each meaningful turn and end the exchange when the
+        next action matters more than another line.
+      severity: blocker
+
+    - id: polished_convergence
+      check: >
+        Look for identical sentence completeness, emotional fluency, metaphor
+        density, wit, politeness, and willingness to answer directly.
+      failure: >
+        Every character sounds articulate, self-aware, balanced, and helpful in
+        the same way, including during anger, sex, grief, fear, or conflict.
+      fix: >
+        Preserve individual limits. One character may overtalk, another may
+        answer with a question, another may choose plain facts, and another may
+        weaponize precision.
+      severity: blocker
+
+    - id: dialogue_beats
+      check: >
+        Action beats and tags should reveal attention, physical state, choice,
+        or power. Count repeated smiles, sighs, glances, jaw actions, breath
+        actions, and other default placeholders across the scene.
+      failure: >
+        The same beat appears after every line or is used only to avoid a plain
+        "said" or a real reaction.
+      fix: >
+        Cut the beat, use a neutral attribution, or choose an action that alters
+        the conversation.
+      severity: major
+
+    - id: question_answer_shape
+      check: >
+        Questions may be answered, evaded, misunderstood, countered, ignored,
+        or punished according to the relationship and pressure.
+      failure: >
+        Every question receives a clean answer, making the exchange feel like a
+        form or an interview.
+      fix: >
+        Let the answer reveal the speaker's priority rather than merely satisfy
+        the grammatical question.
+      severity: major
+
+    - id: romantic_and_intimate_subtext
+      check: >
+        Attraction, consent, fear, power, and vulnerability should appear in
+        choices, boundaries, timing, and what characters risk saying, not only
+        in declarations.
+      failure: >
+        Intimacy is announced in generic language or characters speak with
+        identical confidence and emotional vocabulary.
+      fix: >
+        Preserve the approved boundary and make the exchange specific to these
+        bodies, histories, wants, and limits.
+      severity: major
+
+  dialogue_metrics:
+    compare_to_author_corpus: true
+    report_character_line_length_spread: true
+    report_speaker_turn_length_spread: true
+    report_question_answer_mismatch: true
+    report_dialogue_to_action_ratio: true
+    report_tag_and_beat_repetition: true
+    report_repeated_templates: true
+    minimum_voice_samples_per_character: 3
+
 structural_tells:
   - id: negation_pivot
-    pattern: "Not X, but Y" / "It wasn't X. It was Y."
-    why: >
-      Defines a thing by what it is not. Cheap profundity; reads as insight
-      without supplying any. Damning in clusters.
-    fix: State what it is. Cut the negated half.
-    severity_when_repeated: blocker
+    pattern: '"Not X, but Y" or "It was not X. It was Y."'
+    why: A repeated contrast template can create synthetic profundity without a scene-specific observation.
+    fix: State the concrete observation or let the character's interpretation be incomplete.
+    severity_when_repeated: major
 
   - id: abstract_resolution
-    pattern: An abstraction (silence, weight, understanding) resolves the scene's main beat.
-    why: >
-      The emotional turn is asserted rather than dramatised. This is the single
-      most common reason a chapter reads as hollow.
-    fix: Replace with what a character does, says, chooses, or physically notices.
+    pattern: An abstraction resolves a scene's main beat.
+    why: The turn is asserted instead of enacted through choice, behavior, dialogue, or consequence.
+    fix: Put the change on the page in a specific action or altered relationship.
     severity_when_repeated: blocker
 
   - id: uniform_cadence
-    pattern: Consecutive sentences of near-identical length and structure.
-    why: >
-      Human prose varies its rhythm with tension. Flat cadence is the clearest
-      machine fingerprint and is measured directly by `sentence.stdevWords`.
-    fix: Break the pattern -- a two-word sentence, then a long one.
+    pattern: Consecutive sentences or paragraphs share near-identical shape and length.
+    why: Machine-like uniformity ignores tension and character attention.
+    fix: Vary structure in response to pressure; use the corpus target, not a generic rhythm ideal.
     severity_when_repeated: blocker
 
   - id: summary_ending
-    pattern: A closing paragraph that restates the chapter's meaning.
-    why: Explains the story to a reader who just read it. Kills subtext.
-    fix: End on an image, an action, or a line of dialogue. Trust the reader.
+    pattern: A closing paragraph explains what the chapter meant after the turn already happened.
+    why: It removes reader participation and weakens the handoff.
+    fix: End on the changed pressure, action, image, or spoken choice.
     severity_when_repeated: blocker
 
-  - id: emotion_label
-    pattern: Naming a feeling (afraid, overwhelmed, devastated) with no evidence on the page.
-    why: Tells rather than shows. Reader is informed of emotion, not made to feel it.
-    fix: Render behaviour, physical detail, or a decision. Cut the label.
+  - id: unsupported_emotion_label
+    pattern: A feeling is named without behavior, thought, sensory detail, dialogue, or choice that earns it.
+    why: The prose reports an emotion instead of letting the reader infer it.
+    fix: Add evidence or cut the label. Keep the label when the author's corpus uses it deliberately.
     severity_when_repeated: major
 
-  - id: symmetrical_dialogue
-    pattern: Every character speaks in the same sentence length and register.
-    why: >
-      Real people have idiolects. Uniform dialogue is why exchanges read as one
-      voice talking to itself. Measured via dialogue line-length spread.
-    fix: Give at least two characters a distinct register -- clipped, rambling, formal, profane.
-    severity_when_repeated: blocker
-
-  - id: therapy_speak
-    pattern: Characters articulating their own psychology with clinical fluency.
-    why: >
-      People in conflict are evasive, defensive, and inarticulate. Fluent
-      self-diagnosis is a model explaining the scene through a character.
-    fix: Let them deflect, lie, change the subject, or say the wrong thing.
-    severity_when_repeated: major
-
-  - id: filtered_perception
-    pattern: "She saw / he felt / they noticed" before the actual detail.
-    why: Inserts a camera between reader and scene, weakening close POV.
-    fix: Delete the filter and render the detail directly.
+  - id: filter_stack
+    pattern: Perception filters stack between POV and concrete detail.
+    why: Repeated filtering can create distance the approved POV does not want.
+    fix: Measure against the author's distance profile and cut only excess filters.
     severity_when_repeated: minor
 
-  - id: decorative_metaphor
-    pattern: An image that does not reveal character, advance plot, or sharpen atmosphere.
-    why: Ornament in place of meaning; usually drawn from outside the POV's knowledge.
-    fix: Cut it, or re-source the image from what this character would actually reach for.
+  - id: decorative_image
+    pattern: A metaphor does not reveal character, sharpen atmosphere, advance plot, or fit POV knowledge.
+    why: Ornament substitutes for scene-specific perception.
+    fix: Source the image from the viewpoint character or remove it.
     severity_when_repeated: major
 
-  - id: hedged_action
-    pattern: "seemed to", "almost as if", "something like" attached to concrete events.
-    why: Refuses to commit. Drains the scene of consequence.
-    fix: Let the thing happen definitely.
+  - id: hedged_consequence
+    pattern: Repeated hedges weaken concrete actions or choices.
+    why: The prose avoids committing to what happened.
+    fix: Keep uncertainty where the character genuinely lacks knowledge; otherwise state the event.
     severity_when_repeated: minor
 
-# ---------------------------------------------------------------------------
-# Advisory phrases. Recurring constructions worth a second look -- NOT banned.
-# Each is exempt automatically when the author's corpus uses it comparably.
-# ---------------------------------------------------------------------------
-advisory_phrases:
-  # Bodily reactions that have become genre wallpaper.
-  autonomic_cliche:
-    - "let out a breath (he|she|they) didn't know (he|she|they) w(as|ere) holding"
-    - "breath caught"
-    - "heart skipped a beat"
-    - "a chill ran down (his|her|their) spine"
-    - "stomach dropped"
-    - "throat tightened"
-    - "swallowed hard"
-    - "jaw clenched"
-    - "blood roared"
+advisory_patterns:
+  - id: default_body_reaction
+    examples: [breath, heart, throat, stomach, jaw, shoulders, swallowed]
+    use: Inspect only when clustered, repeated by different characters, or substituting for a specific response.
+  - id: container_emotion
+    examples: [wave, surge, pang, flicker, rush, spark]
+    use: Inspect only when abstract containers carry the whole emotional turn.
+  - id: significance_time
+    examples: ["for a long moment", "in that moment", "time slowed"]
+    use: Inspect only when repeated or used instead of a concrete pause or action.
+  - id: essay_register
+    examples: [however, moreover, nevertheless, "it was clear"]
+    use: Inspect against POV and corpus register; never reject by frequency alone.
+  - id: explanatory_dialogue
+    examples: ["as you know", "let me explain", "this changes everything"]
+    use: Inspect the scene function, speaker agenda, and listener knowledge before judging.
 
-  # Container nouns that stand in for a rendered feeling.
-  quantum_of_emotion:
-    - "a wave of"
-    - "a surge of"
-    - "a pang of"
-    - "a flicker of"
-    - "a rush of"
-    - "a spark of"
-
-  # Time-dilation filler used to signal significance.
-  portentous_time:
-    - "for a long moment"
-    - "in that moment"
-    - "time seemed to slow"
-    - "for what felt like forever"
-    - "the silence stretched"
-
-  # Essayistic connectives that rarely belong in close-POV fiction.
-  essay_connectives:
-    - "however"
-    - "moreover"
-    - "furthermore"
-    - "nevertheless"
-    - "it was clear that"
-    - "at the end of the day"
-
-  # Lines that exist to deliver exposition to the reader.
-  exposition_dialogue:
-    - "as you know"
-    - "you don't understand"
-    - "this changes everything"
-    - "let me explain"
-    - "i had no choice"
-
-  # Register markers that read as machine-lyrical when clustered.
-  purple_cluster:
-    - "tapestry"
-    - "symphony"
-    - "kaleidoscope"
-    - "testament to"
-    - "palpable"
-    - "ineffable"
-    - "liminal"
-
-# ---------------------------------------------------------------------------
-# Explicit protections. These exist because the previous version's damage was
-# mostly in what it wrongly removed.
-# ---------------------------------------------------------------------------
 never_flag:
-  - Any construction present in the author's reference corpus at a comparable rate.
-  - Dialogue that is deliberately stilted because the character is stilted.
-  - Genre conventions the author's references establish (romance beats, noir cadence, epistolary form).
-  - Repetition used deliberately as a motif, when the chapter plan declares it.
-  - Profanity, bluntness, or plainness. Plain prose is a style, not a defect.
-  - Words that are simply common. Frequency alone is never evidence.
+  - Any individual word solely because it appears in a list.
+  - Dialogue tags or ordinary vocabulary that the author's corpus uses naturally.
+  - Fragments, repetition, profanity, bluntness, dialect, stilted speech, or plain prose when supported by character or corpus evidence.
+  - Genre conventions, motifs, deliberate refrains, or repeated phrases declared by the chapter plan.
+  - A construction from another author's reference book as a style target.
 
 rewrite_principles:
-  - Replace an asserted feeling with behaviour, choice, or physical detail.
-  - Prefer one exact verb to a verb plus an adverb.
-  - Vary sentence length deliberately; let rhythm follow tension.
-  - Keep subtext. Never let dialogue explain what the scene already shows.
-  - Give each character a register and hold it.
-  - When cutting a flagged phrase, cut it -- do not swap in a rarer synonym.
-  - If a fix would make the prose less like the author's corpus, do not make it.
+  - Diagnose the scene function before changing a line.
+  - Cut a weak construction before reaching for a thesaurus synonym.
+  - Give each speaker a want, tactic, limit, and consequence.
+  - Prefer specific behavior, choice, sensory detail, and subtext over explanation.
+  - Keep the author's measured rhythm and unusual habits when they are intentional.
+  - Never make dialogue more polished, therapeutic, witty, or literary than the character and corpus support.
+
+audit_output:
+  required_fields:
+    - location
+    - speaker_or_pov
+    - exact_text
+    - issue_id
+    - scene_function
+    - severity
+    - corpus_or_plan_evidence
+    - repair_direction
+  statuses: [pass, fail, not_checked, preserve]

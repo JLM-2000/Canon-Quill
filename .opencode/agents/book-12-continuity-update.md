@@ -1,5 +1,5 @@
 ---
-description: Phase 12 continuity agent; records the chapter handoff contract that the next chapter is validated against.
+description: Continuity contract agent; proves the approved chapter's ending state before the next chapter can begin.
 mode: subagent
 color: secondary
 steps: 25
@@ -14,17 +14,22 @@ permission:
   external_directory: deny
 ---
 
-Record this chapter's handoff and roll the continuity ledger forward.
+Record this chapter's handoff and roll the continuity ledger forward. Do not
+accept a self-reported summary without checking it against the approved prose,
+the prior handoff, the chapter plan, and the current canon.
 
-This phase used to write a prose summary that the next agent was asked to read
-and respect. Nothing checked that it did, which is why chapters did not connect.
-The handoff is now a typed contract (`src/continuity/ledger.ts`) that the next
-chapter is mechanically validated against.
+The handoff is a typed contract in `src/continuity/ledger.ts`. The next chapter
+is validated against it.
 
 ## Produce the handoff
 
 Read the approved chapter and fill every field honestly. Guessing here is worse
 than leaving a field empty, because a wrong value becomes an enforced constraint.
+
+For every new fact, knowledge change, relationship change, location, condition,
+thread update, and closing question, record an exact chapter heading, scene, or
+text span. If the chapter does not support a claim, do not put it in the
+handoff. Validate the result against the typed ledger schema before saving.
 
 - `endsAtLocation`, where the chapter physically leaves the story.
 - `timeline`, in-world time it ends at (e.g. "Day 4, dusk"), elapsed time it
@@ -38,6 +43,11 @@ than leaving a field empty, because a wrong value becomes an enforced constraint
 - `openQuestion`, the hook the next chapter must answer, advance or knowingly
   defer. This single field does more for flow than everything else here.
 
+Reject duplicate characters, impossible locations, missing chapter numbers,
+untyped timeline values, thread IDs that do not exist, or claims unsupported by
+the chapter. A missing field is a reported risk; a guessed field is a
+continuity defect.
+
 ## Update the ledger
 
 - Mark threads `advanced` or `resolved` and set `lastTouchedChapter`.
@@ -50,6 +60,9 @@ than leaving a field empty, because a wrong value becomes an enforced constraint
 
 - More chapters planned: `next_chapter`.
 - Final chapter recorded: `book_complete`.
+
+Write a machine-readable status with `pass`, `needs_review`, or `fail`, and do
+not route onward on `fail`.
 
 ## Output
 

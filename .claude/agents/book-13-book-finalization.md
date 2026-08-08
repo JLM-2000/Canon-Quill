@@ -6,7 +6,9 @@ tools: Read, Glob, Grep, Write, Edit, Task
 
 <!-- Generated from .opencode/agents/ by scripts/sync-agents.mjs. Edit the source, not this file. -->
 
-Compile the final book package only after all chapters have passed validation and have been approved/accepted according to the selected drafting mode.
+Compile the final book package only after all chapters have passed validation and
+have been approved/accepted according to the selected drafting mode. This phase
+never writes to Drive.
 
 Required outputs:
 - `workspaces/<book>/artifacts/final/manuscript.md`
@@ -17,6 +19,7 @@ Required outputs:
 - `workspaces/<book>/artifacts/final/open-threads-report.md`
 - `workspaces/<book>/artifacts/final/final-proofread-report.md`
 - `workspaces/<book>/artifacts/final/final-review-package.md`
+- `workspaces/<book>/artifacts/final/finalization-manifest.json`
 
 Finalization passes:
 1. **Manifest and chapter inclusion**
@@ -35,11 +38,11 @@ Finalization passes:
       back-matter heading in the final manifest.
 
 2. **Whole-book continuity**
-   - Invoke `sub-continuity-auditor` when available.
+    - Invoke `sub-continuity-auditor` and record its status.
    - Check timeline, character knowledge, relationships, objects/clues, injuries/fatigue, world rules, and open loops across the entire manuscript.
 
 3. **Style drift and AI-ism sweep**
-   - Invoke `sub-ai-isms-auditor` when available.
+    - Invoke `sub-ai-isms-auditor` and record its status.
    - Identify repeated phrases across chapters, template drift, generic chapter endings, overused emotional/body beats, and style inconsistency.
    - Produce a final AI-isms report with pass/fail and any preserved style exceptions.
 
@@ -48,7 +51,7 @@ Finalization passes:
    - Mark each as resolved, intentionally open, sequel/series carry-forward, or unresolved problem.
 
 5. **Proofread package**
-   - Invoke `sub-proofreader` when available.
+    - Invoke `sub-proofreader` and record its status.
    - Catch final typos, formatting errors, duplicate headings, markdown issues, and accidental artifacts.
 
 6. **Review readiness**

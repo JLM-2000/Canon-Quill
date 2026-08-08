@@ -305,6 +305,7 @@ let indexError = null;
 let draftAnalysisLoading = false;
 let selectionSave = Promise.resolve();
 let questionPoll = null;
+let questionSnapshot = null;
 let projectAnalysisLoading = false;
 
 // Filled from /api/state so there is only ever one definition of these.
@@ -523,22 +524,16 @@ async function restartStudio(btn) {
   try {
     await api("/api/version/restart", { method: "POST" });
   } catch (e) {
-    // The server refuses rather than exiting when it cannot start a
-    // replacement, so this is a real failure and the old one is still up.
     toast(e.message, "error");
     btn.disabled = false; btn.textContent = "Restart now";
     return;
   }
 
-  // The old process answers for a moment after replying, so polling
-  // immediately would reload the page into a server about to exit. Wait for it
-  // to go, then wait for the replacement.
   await new Promise((r) => setTimeout(r, 2000));
 
   for (let i = 0; i < 60; i++) {
     try {
       await api("/api/version");
-      // One more beat so the reload lands on a server that is fully up.
       await new Promise((r) => setTimeout(r, 400));
       location.reload();
       return;
@@ -555,6 +550,7 @@ async function reload(attempt = 0) {
   try {
     const r = await api("/api/state");
     S = r.state; PROJECTS = r.projects || [];
+    questionSnapshot = null;
     KINDS = r.kinds || KINDS; KIND_COUNTS = r.kindCounts || KIND_COUNTS;
     KIND_PURPOSE = r.kindPurpose || KIND_PURPOSE;
     NARRATION_OPTIONS = r.narrationOptions || NARRATION_OPTIONS;
@@ -1664,24 +1660,45 @@ async function continueFromStyle(btn) {
 function viewIntakeAnalysis() {
   const analysis = S.projectAnalysis || {};
   const complete = analysis.completed;
+  const findings = analysis.findings || {};
+  const findingRows = [
+    ["Story promise", findings.premise],
+    ["Protagonist / cast", findings.protagonist],
+    ["Relationship arc", findings.relationships],
+    ["Conflict and stakes", findings.centralConflict],
+    ["Setting", findings.setting],
+    ["Timeline", findings.timeline],
+    ["Structure / ending", findings.structure],
+    ["Narration", findings.narration],
+    ["Audience", findings.audience],
+    ["Intimacy signal", findings.intimacy]
+  ];
   return `<h1>Project analysis</h1>
-    <p class="sub">Canon Quill reads the selected material first and carries forward what it can prove. Questions are only for decisions the references do not settle.</p>
+    <p class="sub">The analyzer reads every selected document before the agent asks anything. It separates source-supported facts from author decisions, so the intake conversation is about this book rather than a generic form.</p>
     <div class="card">
       ${projectAnalysisLoading || !complete
         ? `<div style="text-align:center;padding:28px 12px"><span class="spin spin-lg"></span><h3 style="margin:14px 0 6px">Analyzing your project material</h3><p class="sub" style="margin:0 auto;max-width:48ch">Reading the cached references, plot material, character notes, and existing style signals. This is deterministic and stays on your machine.</p></div>`
         : `<div class="row" style="margin-bottom:10px"><b>Analysis complete</b><span class="pill good">${plural(analysis.documentsRead || 0, "document")} read</span><span class="pill">${plural(analysis.wordsRead || 0, "word", null, (analysis.wordsRead || 0).toLocaleString())}</span></div>
-          <div class="info ${analysis.genre ? "ok" : "warn"}" style="margin:0 0 12px">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-              ${analysis.genre ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
-            </svg>
-            <div><b>${analysis.genre ? `Detected ${esc(analysis.subgenre || analysis.genre)}` : "No reliable genre signal"}</b>
-              <p>${analysis.genre ? `${Math.round((analysis.confidence || 0) * 100)}% confidence. This will be used as a prefill, not imposed.` : "The first question will ask you for the genre because the references do not state it clearly enough."}</p>
-            </div>
-          </div>
-          ${analysis.evidence?.length ? `<div class="hint"><b>Evidence:</b> ${analysis.evidence.map(esc).join(" ")}</div>` : ""}`}
+           <div class="info ok" style="margin:0 0 12px">
+             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+               <path d="M20 6L9 17l-5-5"/>
+             </svg>
+             <div><b>${analysis.genre ? `Detected ${esc(analysis.subgenre || analysis.genre)}` : "Genre remains an author decision"}</b>
+               <p>${analysis.genre ? `${Math.round((analysis.confidence || 0) * 100)}% confidence. The signal is a prefill, not an imposed decision.` : "The analysis found no reliable genre signal, so the agent will ask about it only if it remains unresolved."}</p>
+             </div>
+           </div>
+           <h3 style="margin:16px 0 8px">What the material establishes</h3>
+           <table><tr><th>Area</th><th>Finding</th><th>Evidence</th></tr>
+             ${findingRows.map(([label, finding]) => finding
+               ? `<tr><td><b>${esc(label)}</b></td><td>${esc(finding.value)}</td><td class="hint">${esc((finding.evidence || []).join(" "))}</td></tr>`
+               : `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`).join("")}
+           </table>
+           ${analysis.unknowns?.length ? `<div class="info warn" style="margin-top:14px"><div><b>Still author-owned</b><p>${analysis.unknowns.map(esc).join(" · ")}</p></div></div>` : ""}
+           ${analysis.questionPlan?.length ? `<div class="hint" style="margin-top:12px"><b>Questions reserved for you:</b> ${analysis.questionPlan.length}. Each one is tied to an analysis gap and appears one at a time after you click Begin intake.</div>` : ""}`}
     </div>
     <div class="row" style="margin-top:14px">
       <button ${complete ? "" : "disabled"} onclick="continueFromAnalysis(this)">Continue to questions</button>
+      <button class="ghost" onclick="resetIntake()">Reset analysis and questions</button>
       ${!complete ? '<span class="hint">Analysis is still running.</span>' : ""}
     </div>`;
 }
@@ -1773,15 +1790,15 @@ function viewQuestions() {
 
   return `
   <h1>Questions</h1>
-  <p class="sub">When an agent hits a decision only you can make, it asks here instead of guessing
-  and burying the assumption in a document. Blocking questions hold the pipeline.</p>
+  <p class="sub">The intake agent has already read the project analysis. It asks one evidence-backed question at a time only when the selected material cannot safely decide something for you. Blocking questions hold the pipeline.</p>
   ${!started ? `<div class="card">
     <b>Ready to begin intake</b>
-    <p class="sub" style="margin:6px 0 12px">Start the agent-led conversation. It will ask the first question here instead of asking you to open with a message.</p>
+    <p class="sub" style="margin:6px 0 12px">Click when you are ready. The first question is prepared from the analysis, and the next one will not appear until you answer it.</p>
     <button onclick="beginIntake(this)">Begin intake</button>
   </div>` : `${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}` : ""}
     ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}
-    ${!open.length && !done.length ? intakeWaitingCard() : ""}`}`;
+    ${!open.length && !done.length ? intakeWaitingCard() : ""}`}
+  <div class="row" style="margin-top:16px"><button class="ghost" onclick="resetIntake()">Reset questions and project analysis</button></div>`;
 }
 
 function intakeWaitingCard() {
@@ -1807,6 +1824,9 @@ function intakeWaitingCard() {
 async function loadQuestions() {
   try {
     const r = await api("/api/questions");
+    const nextSnapshot = JSON.stringify({ questions: r.questions || [], conversation: r.conversation || [], conversationStartedAt: r.conversationStartedAt || null });
+    if (nextSnapshot === questionSnapshot) return;
+    questionSnapshot = nextSnapshot;
     if (S) S.questions = r.questions || [];
     if (S) S.conversation = r.conversation || S.conversation || [];
     if (S) S.conversationStartedAt = r.conversationStartedAt || S.conversationStartedAt || null;
@@ -1835,6 +1855,17 @@ function stopQuestionPolling() {
   if (!questionPoll) return;
   clearInterval(questionPoll);
   questionPoll = null;
+}
+
+async function resetIntake() {
+  try {
+    stopQuestionPolling();
+    S = await api("/api/intake/reset", { method: "POST" });
+    questionSnapshot = null;
+    route = "intake_analysis";
+    toast("Questions and project analysis reset.");
+    render();
+  } catch (e) { toast(e.message, "error"); }
 }
 
 async function answer(id, text) {

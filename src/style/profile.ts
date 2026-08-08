@@ -1,7 +1,3 @@
-// Deterministic craft signals that sit beside the numeric fingerprint.
-// These are evidence and suggestions, not a verdict about what the author
-// should write.
-
 import { dialogueSpans, per1k, splitParagraphs, words } from "./text.js";
 import { detectNarration, type Narration } from "./narration.js";
 import type { BeatType } from "./corpus.js";

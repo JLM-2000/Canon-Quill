@@ -1,42 +1,8 @@
-/**
- * Workspace layout.
- *
- * Canon Quill used to keep one book in a single `.canon-quill/` directory, and
- * "archiving" a finished project meant copying it away and then deleting the
- * original so the next book could reuse the same path. That made a second book
- * impossible to start without ending the first, and made a finished book
- * harder to reopen than it should be.
- *
- * Now every book is a workspace under `workspaces/<slug>/`, and finishing one
- * is a status change rather than a destructive move. Nothing is ever deleted to
- * make room.
- *
- *   workspaces/
- *     registry.json                  which projects exist, which is active
- *     the-tide-house/
- *       project.json                 Studio state for this book
- *       logs/                        phase, audit and error logs
- *       drive-cache/                 fetched Drive documents, by file id
- *       artifacts/
- *         style-corpus.json          beat-tagged passages + fingerprint
- *         style-fingerprint.md
- *         chapters/                  drafts, edits, per-chapter reports
- *         continuity/                ledger.json + per-chapter handoffs
- *         final/                     manuscript.md, manuscript.docx, reports
- *
- * The whole `workspaces/` tree is gitignored. The repo holds the engine; your
- * books live beside it, never in it.
- */
+/** Paths for one book workspace. */
 
 import path from "node:path";
 
-/**
- * Root of the workspaces tree.
- *
- * `CANON_QUILL_WORKSPACES_ROOT` overrides it. The test suite sets that to a
- * temp directory, because it deletes this root between cases and previously
- * did so against the author's real books.
- */
+/** Resolve the workspace root, with a test/runtime override. */
 export function workspacesRoot(): string {
   const override = process.env.CANON_QUILL_WORKSPACES_ROOT?.trim();
   return override ? path.resolve(override) : path.join(process.cwd(), "workspaces");

@@ -1,16 +1,13 @@
 ---
-description: Phase 16 project archive agent; archives completed Canon Quill project state and resets local workspace for a fresh book.
+description: Project archive agent; marks a completed workspace archived without deleting or resetting book data.
 mode: subagent
 color: success
-steps: 18
+steps: 24
 permission:
   edit:
-    "*": ask
     "workspaces/**": allow
-    ".canon-quill-archives/**": allow
-  bash:
     "*": ask
-    "npm run archive:project": allow
+  bash: deny
   task:
     "*": deny
     "sub-security-auditor": allow
@@ -19,11 +16,12 @@ permission:
   external_directory: deny
 ---
 
-Archive completed work and reset for the next book.
+Archive only after final package posting succeeds and the target manifest is
+complete. Each book remains under `workspaces/<slug>/`; do not move or delete
+project data to make room for another book.
 
-Rules:
-- Run `npm run archive:project` only after final package posting succeeds.
-- Archive `.canon-quill` under `.canon-quill-archives/<timestamp>/`.
-- Reset `.canon-quill` to a fresh state with `current.json` pointing to `setup`.
-- Do not remove `.canon-quill-archives`.
-- Do not touch files outside this project.
+Mark the project finished in the workspace registry, preserve every artifact,
+and write an archive manifest containing slug, final manuscript/DOCX hashes,
+Drive IDs, approval timestamps, and post status. Verify the registry and local
+workspace after the update. A fresh book gets a new workspace; completed books
+remain reopenable.

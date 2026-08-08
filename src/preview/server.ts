@@ -54,7 +54,7 @@ function parseArgs(args: string[]): PreviewOptions {
   };
 
   return {
-    file: path.resolve(get("--file", ".canon-quill/artifacts/final/manuscript.md")),
+    file: path.resolve(get("--file", "workspaces/default/artifacts/final/manuscript.md")),
     title: get("--title", "Canon Quill Preview"),
     port: Number(get("--port", process.env.CANON_QUILL_PREVIEW_PORT ?? "4181")),
     open: args.includes("--open") || !args.includes("--no-open"),

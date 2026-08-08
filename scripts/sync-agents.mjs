@@ -7,7 +7,7 @@
  * `npm run sync:agents`.
  */
 
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +64,12 @@ function yamlString(value) {
 
 const files = (await readdir(source)).filter((name) => name.endsWith(".md")).sort();
 await mkdir(target, { recursive: true });
+const current = new Set(files);
+await Promise.all(
+  (await readdir(target))
+    .filter((name) => name.endsWith(".md") && !current.has(name))
+    .map((name) => unlink(path.join(target, name)))
+);
 
 const written = [];
 for (const file of files) {

@@ -1,10 +1,3 @@
-// Working out how a body of prose is narrated.
-//
-// POV and tense are answerable from the text, so asking the author to type
-// them out when their own books are already indexed is asking for something
-// already known. Detected values are offered as a prefill, never imposed: a
-// new book may deliberately change either.
-
 import { dialogueSpans, splitSentences, words } from "./text.js";
 
 export type Pov = "first" | "second" | "third_limited" | "third_omniscient" | "mixed";

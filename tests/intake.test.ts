@@ -20,4 +20,32 @@ describe("project intake analysis", () => {
     expect(result.genre).toBeNull();
     expect(result.unknowns).toContain("genre and subgenre");
   });
+
+  it("extracts book architecture and avoids asking for explicit plot facts", () => {
+    const result = analyseProjectMaterial([
+      {
+        name: "Book plan",
+        kinds: ["plot"],
+        text: [
+          "Premise: Mara must choose between the love she wants and the family secret that can destroy her.",
+          "Conflict: the secret threatens her relationship.",
+          "Setting: a contemporary university town.",
+          "Ending: the couple stays together."
+        ].join("\n")
+      },
+      {
+        name: "Mara Profile",
+        kinds: ["characters"],
+        text: "Name: Mara. Want: freedom. Fear: disappointing her family."
+      }
+    ], { shape: "series" });
+
+    expect(result.findings.premise?.value).toMatch(/Mara/);
+    expect(result.findings.centralConflict?.value).toMatch(/secret/);
+    expect(result.findings.setting?.value).toMatch(/contemporary university town/);
+    expect(result.findings.structure?.value).toMatch(/couple stays together/);
+    expect(result.questionPlan.map((question) => question.key)).not.toEqual(expect.arrayContaining([
+      "storyPromise", "centralConflict", "settingRules", "endingAndStructure"
+    ]));
+  });
 });

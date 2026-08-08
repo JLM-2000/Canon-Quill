@@ -401,7 +401,7 @@ This is the last interactive decision until a gate.
 
 ### The drafting loop
 
-**Draft.** The prompt carries two things the old approach lacked: the opening contract from the previous chapter's handoff, and retrieved passages of your own prose matched to each beat in this chapter. No questions are asked here. If something is missing, the least invasive option is chosen and the assumption is logged.
+**Draft.** The prompt carries the opening contract from the previous chapter's handoff and retrieved passages of your own prose matched to each beat in this chapter. No questions are asked here. If something is missing, the least invasive option is chosen and the assumption is logged.
 
 **Edit.** The draft is scored, and the revision works from named deviations. Not a general polish pass. If a change would make the prose less like yours, it is not made.
 
@@ -542,7 +542,7 @@ revoked, and the Studio says which rather than reporting a generic failure.
 
 **The Studio is safe to leave running.** It reads state fresh on each request, so agents writing to a workspace and the UI reading it do not conflict. Writes go through a temp file and a rename, so a crash cannot leave a half-written state file.
 
-**Questions from agents appear in the Studio.** When an agent hits a decision only you can make, it posts it rather than guessing and burying the assumption. Blocking questions hold the pipeline.
+**Questions from agents appear in the Studio.** Project analysis runs first. The intake agent posts only decisions the selected material cannot settle, one at a time. Blocking questions hold the pipeline.
 
 **The classifier is a guess.** It is right often enough to save you the sorting, and it shows its reasoning so you can catch it when it is wrong. Treat the grouping board as a review step, not a result.
 

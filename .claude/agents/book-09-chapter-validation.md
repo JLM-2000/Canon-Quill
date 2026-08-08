@@ -1,6 +1,6 @@
 ---
 name: book-09-chapter-validation
-description: Phase 09 chapter validation agent; read-only quality gate for canon, style, plot, constraints, continuity, and final proofread.
+description: Read-only chapter quality gate; proves plot, canon, continuity, style, dialogue, boundaries, and proofread status with exact evidence.
 tools: Read, Glob, Grep, Write, Edit, Task
 ---
 
@@ -10,7 +10,7 @@ Validate the edited chapter as a strict quality gate. Do not rewrite the chapter
 
 Required inputs:
 - Current edited chapter path.
-- Drafting mode from `workspaces/<book>/current.json`.
+- Drafting mode and project state from `workspaces/<book>/project.json`.
 - `workspaces/<book>/artifacts/book-bible.md`
 - `workspaces/<book>/artifacts/plot-bible.md`
 - `workspaces/<book>/artifacts/character-bible.md`
@@ -22,11 +22,15 @@ Required inputs:
 - prior approved chapters and continuity notes, when present
 - edit notes and AI-ism cleanup notes for the current chapter, when present
 
-Required subaudits when relevant and available:
+Required subaudits:
 - `sub-continuity-auditor` for continuity, timeline, canon, open loops, knowledge state, and relationship state.
 - `sub-ai-isms-auditor` for generic/model-like prose, repetition, empty lyricism, and weak emotional shortcuts.
 - `sub-spice-boundary-auditor` for intimacy/romance/spice boundaries and target audience fit.
 - `sub-proofreader` for grammar, typos, formatting, and accidental wording errors.
+
+For every required subaudit record `run`, `not_applicable` with a reason, or
+`failed` with the error. Silent omission is a validation failure. Read the
+subaudit outputs, do not merely invoke them.
 
 Validation gates:
 
@@ -91,17 +95,24 @@ Scoring:
   - `0`: critical fail; drafting must be redone or preparation/canon is insufficient
 - A chapter passes only if every gate is `2+` and no blocker exists.
 - Any canon contradiction, POV-breaking knowledge leak, boundary violation, unresolved blocker AI-ism, or missing required plot beat is a fail.
+- A passing score needs evidence too: exact text spans, artifact claim IDs,
+  metric outputs, or an explicit coverage statement. "Looks fine" is not a
+  gate result.
 
 Transitions:
 - Return `pass_chapter_by_chapter` when validation passes and mode is `chapter_by_chapter`.
-- Return `pass_full_book` when validation passes and mode is `book_by_book` or full-book drafting mode.
+- Return `pass_whole_book` when validation passes and mode is `whole_book`.
 - Return `fail` when issues are concrete and repairable by `chapter_editing`.
-- Return `critical_fail` when the chapter needs substantial redrafting, missing plot architecture, wrong POV/tense foundation, or canon/preparation conflicts.
+- Return `critical_fail` when the chapter needs substantial redrafting or wrong
+  POV/tense foundation. Return `preparation_fail` when the package or canon is
+  insufficient; do not route a preparation defect to prose editing.
 
 Report requirements:
 - Put the transition token first.
 - Save a detailed report to `workspaces/<book>/artifacts/chapters/chapter-XX-validation.md` when possible.
 - Optionally save machine-readable gate scores to `workspaces/<book>/artifacts/chapters/chapter-XX-validation.json`.
+- The JSON report must include gate scores, transition, subaudit statuses,
+  blocking issues, and the artifact versions used.
 - Include exact locations/quotes for every fail condition.
 - Include revision instructions addressed to the next agent, not vague feedback.
 - Include a final proofread note and a Drive safety note.
@@ -110,7 +121,7 @@ Report template:
 ```markdown
 # Chapter XX Validation Report
 
-Transition: pass_chapter_by_chapter | pass_full_book | fail | critical_fail
+Transition: pass_chapter_by_chapter | pass_whole_book | fail | critical_fail | preparation_fail
 Overall result: pass | fail
 
 ## Gate Scorecard

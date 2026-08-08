@@ -117,6 +117,8 @@ describe("studio api", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("Canon Quill Studio");
+    expect(html).toContain("questionSnapshot");
+    expect(html).toContain("Reset questions and project analysis");
   });
 
   it("returns state with a derived phase", async () => {
@@ -187,6 +189,50 @@ describe("studio api", () => {
     const result = await call("/api/conversation/start", { method: "POST" });
     expect(result.status).toBe(200);
     expect(result.body.conversationStartedAt).toBeTruthy();
+  });
+
+  it("asks the analyzed question plan one decision at a time and resets it cleanly", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.shape = "series";
+    state.sources = [{
+      driveId: "plot",
+      name: "Book plan",
+      path: "/Book plan",
+      mimeType: "text/plain",
+      isFolder: false,
+      kinds: ["plot"]
+    }];
+    await save(state);
+    await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
+    await writeFile(
+      `${workspacePaths("test-book").driveCache}/plot.json`,
+      JSON.stringify({ text: "Premise: Mara must choose between the love she wants and the family secret that can destroy her. Conflict: the secret threatens her relationship. Ending: the couple stays together." }),
+      "utf8"
+    );
+
+    const started = await call("/api/conversation/start", { method: "POST" });
+    expect(started.body.questions).toHaveLength(1);
+    expect(started.body.questions[0].key).toBe("protagonistArc");
+    expect(started.body.questions[0].question).toMatch(/Mara|family secret/i);
+
+    const answered = await call(`/api/questions/${started.body.questions[0].id}/answer`, {
+      method: "POST",
+      body: { answer: "Mara is the protagonist and wants a life outside her family." }
+    });
+    expect(answered.body.questions).toHaveLength(2);
+    expect(answered.body.questions[1].key).toBe("relationshipArc");
+
+    const relationshipAnswered = await call(`/api/questions/${answered.body.questions[1].id}/answer`, {
+      method: "POST",
+      body: { answer: "Mara and her partner choose each other despite the family secret." }
+    });
+    expect(relationshipAnswered.body.questions[2].key).toBe("settingRules");
+
+    const reset = await call("/api/intake/reset", { method: "POST" });
+    expect(reset.body.questions).toEqual([]);
+    expect(reset.body.conversation).toEqual([]);
+    expect(reset.body.projectAnalysis.completed).toBe(false);
   });
 
   it("records starting without an existing draft", async () => {
@@ -487,7 +533,7 @@ describe("source removal", () => {
   });
 });
 
-describe("legacy source migration", () => {
+describe("stored source migration", () => {
   it("carries a single kind forward into the kinds list", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const seeded = await load("test-book");

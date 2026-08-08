@@ -1,10 +1,4 @@
-/**
- * Per-workspace structured logs.
- *
- * Every entry belongs to a specific book. The previous version wrote to one
- * global `.canon-quill/logs/` directory, so two projects would have interleaved
- * their phase history into the same file.
- */
+/** Per-workspace structured logs. */
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";

@@ -1,15 +1,5 @@
-// API keys entered through the Studio.
-//
-// I would rather these lived only in the environment, and said so. Since they
-// are being entered in the UI, the storage is built to limit the blast radius
-// rather than to be convenient:
-//
-//   - a dedicated file, never the project state that the UI renders and that
-//     agents read
-//   - .auth/ is gitignored, and the file is written 0600
-//   - the key is never sent back to the browser; only a mask is
-//   - "verify" makes a real, free call to the provider so a typo is caught
-//     here instead of halfway through drafting a chapter
+// Keys are stored outside project state, written with mode 0600, and returned
+// only as masks.
 
 import { chmod, mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";

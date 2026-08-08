@@ -58,6 +58,6 @@ Routing:
 
 Mode behavior:
 - In `chapter_by_chapter`, this agent reviews each validated chapter.
-- In `book_by_book`, this agent is not used between chapters; it reviews only the complete book package.
+- In `whole_book`, this agent is not used between chapters; it reviews only the complete book package.
 
 Never edit files, validate failed work, post to Drive, or skip a required user-review state in this phase.

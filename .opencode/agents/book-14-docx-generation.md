@@ -1,15 +1,16 @@
 ---
-description: Phase 14 DOCX generation agent; generates final DOCX after final user approval and before final package posting.
+description: DOCX generation agent; converts the approved final manuscript without changing its content.
 mode: subagent
 color: success
-steps: 18
+steps: 24
 permission:
   edit:
-    "*": ask
-    "workspaces/**": allow
+    "workspaces/**/artifacts/final/manuscript.docx": allow
+    "workspaces/**/artifacts/final/docx-manifest.json": allow
+    "*": deny
   bash:
-    "*": ask
     "npm run docx": allow
+    "*": deny
   task:
     "*": deny
     "sub-proofreader": allow
@@ -18,11 +19,12 @@ permission:
   external_directory: deny
 ---
 
-Generate the final DOCX only after the user approves the final manuscript package.
+Generate the DOCX only after the final manuscript package has passed validation
+and the author has approved it. Read the final manifest and record the source
+manuscript hash, output hash, generator version, and timestamp in
+`workspaces/<book>/artifacts/final/docx-manifest.json`.
 
-Rules:
-- Input is `workspaces/<book>/artifacts/final/manuscript.md`.
-- Output is `workspaces/<book>/artifacts/final/manuscript.docx`.
-- Run `npm run docx`.
-- If generation fails, report exact blocker and do not proceed to Drive posting.
-- Do not alter manuscript content in this phase except through an explicit user feedback loop routed back to book finalization.
+Run `npm run docx`. Before and after generation, verify the Markdown manuscript
+hash is unchanged. If generation fails or the source hash changes, stop and
+report the exact blocker. Do not post to Drive, alter manuscript content, or
+repair prose here; route content changes back to finalization.

@@ -14,9 +14,7 @@ global:
   logs_dir: workspaces/<book>/logs
   artifacts_dir: workspaces/<book>/artifacts
 
-  # Every gate that stops for the author. Nothing else may block on input --
-  # the pipeline used to interrupt mid-draft to ask questions it could have
-  # asked during intake, which broke the writing flow for no benefit.
+  # States where the author must decide or review.
   user_review_required_states:
     - preflight_review
     - user_chapter_review
@@ -72,23 +70,24 @@ states:
   setup:
     agent: book-00-setup
     description: Verify Node, build, OpenSpec, Drive credentials, and Studio availability.
-    on_success: intake
+    on_success: drive_selection
     on_failure: setup_repair
 
   setup_repair:
     agent: book-00-setup
     description: Repair missing prerequisites where possible, otherwise report exact blockers.
-    on_success: intake
+    on_success: drive_selection
     on_failure: cancelled
 
   intake:
     agent: book-01-intake
     description: >
-      Ask every project-level question before any reference is read: standalone
-      or series, audience, POV and tense, intimacy boundary, mystery policy.
-      Questions are posted to the Studio question inbox.
+      Read the deterministic project analysis and ask only unresolved,
+      book-specific decisions. Questions are posted to the Studio inbox one at
+      a time after the author clicks Begin intake; do not repeat source-supported
+      genre, POV, tense, audience, or intimacy findings.
     requires_user_input: true
-    on_success: drive_selection
+    on_success: reference_extraction
     on_incomplete: intake
     on_failure: intake
 
@@ -104,7 +103,7 @@ states:
 
   # --- Analyse --------------------------------------------------------------
   source_analysis:
-    agent: sub-drive-indexer
+    agent: book-orchestrator
     description: >
       Read every selected document and classify it into past series books,
       reference books by other authors, characters, timeline, worldbuilding,
@@ -122,13 +121,13 @@ states:
     on_failure: source_confirmation
 
   style_corpus_build:
-    agent: sub-style-fingerprint
+    agent: book-orchestrator
     description: >
       Build the exemplar corpus from PAST SERIES BOOKS ONLY, segment it into
       beat-tagged passages, and compute the author's quantitative fingerprint.
       Reference books by other authors are deliberately excluded -- including
       them would pull the fingerprint toward another writer's voice.
-    on_success: reference_extraction
+    on_success: intake
     on_failure: style_corpus_build
 
   reference_extraction:

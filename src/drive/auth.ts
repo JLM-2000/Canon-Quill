@@ -6,15 +6,8 @@ import type { AddressInfo } from "node:net";
 import { dirname, resolve } from "node:path";
 import { explainMissingPath, resolveExistingPath } from "../config/env.js";
 
-// Browsing needs `drive.readonly`. `drive.file` alone can only see files the
-// app itself created or that the user picked through Google's Picker widget,
-// so listing a folder with it returns nothing at all, which is what made the
-// Drive browser show an empty My Drive.
-//
-// `drive.readonly` grants read access to Drive and no write access whatsoever;
-// `drive.file` is kept alongside it so chapters can be written back to the one
-// target folder. Set CANON_QUILL_DRIVE_SCOPES to just `drive.file` to opt out
-// of browsing and paste folder links instead.
+// `drive.readonly` enables browsing; `drive.file` limits writes to app-created
+// files. Set CANON_QUILL_DRIVE_SCOPES to `drive.file` to use pasted links.
 const defaultScopes = [
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file"
@@ -120,9 +113,7 @@ export async function driveAuthStatus(): Promise<DriveAuthStatus> {
       authorized: false,
       needsReauthorization: true,
       canBrowse: canBrowse(token),
-      detail:
-        "Authorised, but with narrower access than is now configured. Reconnect to grant the rest.\n" +
-        "This is expected if you connected before browsing was supported: the old token could not list your Drive."
+      detail: "Authorised, but with narrower access than configured. Reconnect to grant the required Drive access."
     };
   }
 

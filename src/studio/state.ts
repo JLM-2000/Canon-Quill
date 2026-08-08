@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import type { Classification, SourceKind } from "../analysis/classify.js";
+import type { ProjectAnalysis } from "../analysis/intake.js";
 import type { ContinuityLedger } from "../continuity/ledger.js";
 import { emptyLedger } from "../continuity/ledger.js";
 import { workspacePaths } from "../workspace/paths.js";
@@ -42,6 +43,8 @@ export interface SelectedSource {
 
 export interface OpenQuestion {
   id: string;
+  /** Analysis gap this question resolves, when it came from the intake plan. */
+  key?: string;
   phase: PhaseId;
   askedBy: string;
   question: string;
@@ -64,15 +67,8 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
-export interface ProjectAnalysisState {
+export interface ProjectAnalysisState extends Omit<ProjectAnalysis, "analysedAt"> {
   completed: boolean;
-  documentsRead: number;
-  wordsRead: number;
-  genre: string | null;
-  subgenre: string | null;
-  confidence: number;
-  evidence: string[];
-  unknowns: string[];
   analysedAt: string | null;
 }
 
@@ -120,13 +116,7 @@ export interface RunState {
   startedAt: string | null;
 }
 
-/**
- * A standing instruction from the author to the drafting agent.
- *
- * The questions inbox runs the other way, agent to author. This is the return
- * channel: mid-run corrections, a change of direction, a note that applies to
- * everything from here on. Agents read the unapplied ones before drafting.
- */
+/** Author instruction for the drafting agent. */
 export interface Direction {
   id: string;
   text: string;
@@ -140,13 +130,7 @@ export interface Direction {
   appliedTo?: number;
 }
 
-/**
- * A draft that already exists before Canon Quill is involved.
- *
- * `target` decides where new chapters land. Continuing in place keeps one
- * document, which is what most authors want; writing separately leaves the
- * original untouched, which is what they want when they are not yet sure.
- */
+/** Existing manuscript and continuation policy. */
 export interface ExistingManuscript {
   driveId: string;
   name: string;
@@ -244,6 +228,21 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
       confidence: 0,
       evidence: [],
       unknowns: [],
+      sourceInventory: {},
+      documents: [],
+      findings: {
+        premise: null,
+        protagonist: null,
+        relationships: null,
+        centralConflict: null,
+        setting: null,
+        timeline: null,
+        structure: null,
+        narration: null,
+        audience: null,
+        intimacy: null
+      },
+      questionPlan: [],
       analysedAt: null
     },
     chapters: [],
@@ -261,8 +260,6 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
 export async function loadState(slug: string): Promise<StudioState> {
   try {
     const parsed = JSON.parse(await readFile(workspacePaths(slug).stateFile, "utf8")) as Partial<StudioState>;
-    // Merged onto a fresh default so a file written by an older version gains
-    // new fields rather than leaving them undefined at the call site.
     const base = emptyState(slug, parsed.projectName ?? "Untitled Book");
     const intake = migrateIntake({ ...base.intake, ...(parsed.intake ?? {}) });
     const merged = {
@@ -285,10 +282,10 @@ export async function loadState(slug: string): Promise<StudioState> {
 
 function migrateIntake(intake: Record<string, string>): Record<string, string> {
   const next = { ...intake };
-  const legacy = /^(.+?),\s*(past|present|mixed)$/i.exec(next.pov ?? "");
-  if (legacy) {
-    next.pov = legacy[1].trim();
-    next.tense = labelCase(legacy[2]);
+  const storedPov = /^(.+?),\s*(past|present|mixed)$/i.exec(next.pov ?? "");
+  if (storedPov) {
+    next.pov = storedPov[1].trim();
+    next.tense = labelCase(storedPov[2]);
   } else if (next.tense) {
     next.tense = labelCase(next.tense);
   }
@@ -299,15 +296,12 @@ function labelCase(value: string): string {
   return value.slice(0, 1).toUpperCase() + value.slice(1).toLowerCase();
 }
 
-/**
- * Sources used to carry a single `kind`. Carry those forward rather than
- * leaving an existing project with every document ungrouped.
- */
+/** Normalize source groups from persisted state. */
 function migrateSources(sources: SelectedSource[]): SelectedSource[] {
   return (sources ?? []).map((source) => {
     if (Array.isArray(source.kinds)) return source;
-    const legacy = (source as unknown as { kind?: SourceKind }).kind;
-    return { ...source, kinds: legacy ? [legacy] : [] };
+    const storedKind = (source as unknown as { kind?: SourceKind }).kind;
+    return { ...source, kinds: storedKind ? [storedKind] : [] };
   });
 }
 
@@ -315,8 +309,7 @@ export async function saveState(state: StudioState): Promise<StudioState> {
   const paths = workspacePaths(state.slug);
   await mkdir(paths.root, { recursive: true });
   const next = { ...state, updatedAt: new Date().toISOString() };
-  // Written via a temp file and renamed: agents and the Studio both write here,
-  // and a half-written state document would strand a book mid-draft.
+  // Atomic replacement protects concurrent Studio and agent writes.
   const temp = `${paths.stateFile}.${process.pid}.tmp`;
   await writeFile(temp, JSON.stringify(next, null, 2), "utf8");
   await rename(temp, paths.stateFile);
@@ -331,10 +324,7 @@ export async function updateState(
   return saveState(mutate(current) ?? current);
 }
 
-/**
- * Which phase a project is in, derived from what exists rather than stored.
- * Storing it let the UI show a phase the data no longer supported.
- */
+/** Derive the phase from persisted work. */
 export function derivePhase(state: StudioState): PhaseId {
   if (state.chapters.length > 0 && state.chapters.every((chapter) => chapter.status === "approved")) {
     return "export";

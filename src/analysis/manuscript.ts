@@ -1,12 +1,3 @@
-// Reading a book that is already underway.
-//
-// Someone may already have chapters written before Canon Quill is pointed at
-// the project. Starting from nothing would either duplicate that work or
-// contradict it, so the existing draft is read the way a co-author would read
-// it: how far it goes, whether the last chapter finished, and what its
-// typographic habits are, so anything appended is indistinguishable from what
-// is already there.
-
 import { splitParagraphs, words } from "../style/text.js";
 import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
 
@@ -20,10 +11,7 @@ export interface ManuscriptChapter {
   offset: number;
 }
 
-/**
- * How the existing text is laid out. Appended prose has to match these or the
- * seam is visible, which is the whole reason for reading them.
- */
+/** Layout conventions for continuation text. */
 export interface Conventions {
   /** A heading line as written, to copy the shape of. */
   headingExample: string | null;

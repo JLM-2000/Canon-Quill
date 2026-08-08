@@ -9,8 +9,16 @@ rules:
   proposal:
     - Include security implications and Drive scope impact.
     - Identify affected agents and workflow states.
+    - Name affected workspace artifacts, state fields, stale-path migrations, and rollback behavior.
   specs:
     - Use SHALL requirements and Given/When/Then scenarios.
     - Include failure paths and user-review gates.
+    - Require scenarios for missing evidence, conflicting references, unanswered author decisions, stale handoffs, provider failure, cancellation, and Drive overwrite refusal.
+    - Define the authoritative state path and every artifact entry/exit contract.
   tasks:
     - Include validation and security audit tasks.
+    - Include agent permission checks, workflow transition tests, artifact contract fixtures, and an end-to-end handoff test.
+  agents:
+    - Treat selected-source evidence and current author decisions as separate provenance classes.
+    - Do not replace deterministic engine checks with model judgment.
+    - Require explicit run, not-applicable, or failed status for delegated audits.
