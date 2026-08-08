@@ -71,7 +71,9 @@ providers:
     auth:
       subscription:
         label: Claude Pro or Max, through Claude Code
-        setup: Run `claude` and sign in. No key goes in this repo.
+        setup: >
+          Run `claude` and sign in once. A Claude plan cannot be used through
+          OpenCode; on that runtime Anthropic needs an API key.
       api_key:
         label: API key
         env: ANTHROPIC_API_KEY
@@ -114,10 +116,10 @@ providers:
     label: OpenAI
     auth:
       subscription:
-        label: ChatGPT plan
+        label: ChatGPT plan, through OpenCode
         setup: >
-          Only usable if your agent runtime supports signing in with a ChatGPT
-          plan. Claude Code does not. Check your runtime's documentation.
+          Run `opencode auth login`, pick OpenAI, and choose the sign-in option.
+          Claude Code cannot use a ChatGPT plan; OpenCode can.
       api_key:
         label: API key
         env: OPENAI_API_KEY
@@ -132,22 +134,22 @@ providers:
         notes: Reasoning and coding tier. The drafting choice on this provider.
       - id: gpt-5.6-terra
         label: GPT-5.6 Terra
-        context: unverified
-        input_per_mtok: null
-        output_per_mtok: null
-        verified: null
+        context: 1.05M
+        input_per_mtok: 2.00
+        output_per_mtok: 12.00
+        verified: 2026-08-08
         notes: >
-          Positioned between Sol and Luna on capability and cost. Pricing not
-          confirmed here. Check developers.openai.com/api/docs/pricing before
-          budgeting against it.
+          Balances intelligence and cost. Cheaper than Claude Sonnet 5 on both
+          sides. Cut 20% from its launch price of 2.50 / 15.00.
       - id: gpt-5.6-luna
         label: GPT-5.6 Luna
-        context: unverified
-        input_per_mtok: null
-        output_per_mtok: null
-        verified: null
+        context: 1.05M
+        input_per_mtok: 0.20
+        output_per_mtok: 1.20
+        verified: 2026-08-08
         notes: >
-          Cost-sensitive, high-volume tier. Pricing not confirmed here.
+          Cost-sensitive, high-volume tier and by far the cheapest option here.
+          Cut 80% from its launch price of 1.00 / 6.00.
 
 # ---------------------------------------------------------------------------
 # Rough cost per book, per provider. Order of magnitude only.
@@ -176,18 +178,17 @@ estimates:
 
   openai:
     premium:
-      label: GPT-5.6 Sol for drafting, Terra elsewhere
-      cost: roughly 20 to 50 USD
+      label: Sol for drafting, Terra elsewhere
+      cost: 15 to 40 USD
       note: >
-        Sol is confirmed at 5.00 in / 30.00 out. Terra and Luna pricing is not
-        confirmed here, so the "elsewhere" half of this figure is an estimate.
+        Sol costs a little more than Opus 5 on output; Terra costs less than
+        Sonnet 5 on both sides, so the two providers land in the same range.
     budget:
-      label: GPT-5.6 Terra throughout
-      cost: unverified
-      note: Terra pricing is not confirmed. Check the OpenAI pricing page.
+      label: Terra throughout
+      cost: 4 to 9 USD
+      note: Cheaper than the equivalent Anthropic route.
     subscription:
       label: On a ChatGPT subscription
-      cost: not available
+      cost: no marginal cost
       note: >
-        Claude Code cannot sign in with a ChatGPT plan. OpenAI runs on an API
-        key here unless your agent runtime supports ChatGPT sign-in.
+        Through OpenCode, not Claude Code. Subject to your plan's usage limits.

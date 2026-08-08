@@ -110,27 +110,32 @@ Node 20.19 or newer.
 npm run setup
 ```
 
-That checks your Node version, installs OpenCode and OpenSpec if missing, builds, and validates the workflow. If you would rather use Claude Code, install it with `npm install -g @anthropic-ai/claude-code`; the guide covers connecting a subscription to either.
+That checks your Node version, installs OpenCode and OpenSpec if missing, builds, and validates the workflow.
+
+You also need a runtime to do the writing, and either one works:
+
+```bash
+npm install -g @anthropic-ai/claude-code   # Anthropic, plan or key
+npm install -g opencode-ai                 # Anthropic or OpenAI, plan or key
+```
+
+Connect a plan with `claude` (sign in once) or `opencode auth login`. Or paste an API key straight into the Studio, which stores it in `.auth/credentials.json` (gitignored, mode 0600) and verifies it against the provider. [The guide](docs/GUIDE.md) covers all of it.
 
 ### Google Drive
 
-You need a Google OAuth client of type **Desktop app**.
-
-1. Open the [Google Cloud console](https://console.cloud.google.com/) and pick or create a project.
-2. Enable the **Google Drive API**.
-3. Under **Credentials**, create an OAuth client ID, application type **Desktop app**.
-4. Download the JSON.
-5. Create `.env` in this folder:
+You need a Google OAuth client of type **Desktop app**, then one line in `.env`:
 
 ```
-GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/your/credentials.json
+GOOGLE_OAUTH_CLIENT_JSON=/path/to/your/credentials.json
 ```
 
-6. In `opencode.json`, set `canon_drive.enabled` to `true`.
+Windows, WSL, macOS and Linux path styles all work; Canon Quill translates between them, so a `C:\Users\...` path pasted into WSL resolves fine.
 
-Then open the Studio and press **Check connection**.
+Then open **Connect Drive** in the Studio and press **Connect Google Drive**.
 
-Two things catch people out: while the OAuth consent screen is in Testing you must add your own Google address as a **test user**, and test-mode refresh tokens expire after **seven days** unless you publish the consent screen. [docs/GUIDE.md](docs/GUIDE.md) walks the whole console flow step by step, including the errors and what causes them.
+The console flow has a few steps that are easy to get wrong, and two that will bite you later: while the consent screen is in Testing you must add yourself as a **test user**, and test-mode refresh tokens expire after **seven days** unless you publish it.
+
+**[docs/GUIDE.md](docs/GUIDE.md) walks the whole thing**, along with everything else: the phases, both writing modes, choosing a provider and connecting a subscription, how to read a style report, and a table of the errors each mistake produces.
 
 The scope is `drive.file`, so Canon Quill only ever sees files you explicitly choose, never your whole Drive.
 

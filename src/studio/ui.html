@@ -339,6 +339,7 @@ function go(r) {
   route = r; render();
   if (r === "sources") loadBrowse(browse.folderId);
   if (r === "engine") loadEngine();
+  if (r === "connect") loadDrive();
 }
 
 // --- views -----------------------------------------------------------------
@@ -390,16 +391,16 @@ function viewEngine() {
   <div class="sectionlabel">Choose</div>
   <h2 style="margin-top:0">Provider</h2>
   <div class="choices">
-    ${providerCard("anthropic", "Anthropic", "Claude. Works with a Pro or Max subscription through Claude Code, or with an API key.")}
-    ${providerCard("openai", "OpenAI", "GPT. API key only, unless your agent runtime supports ChatGPT sign-in.")}
+    ${providerCard("anthropic", "Anthropic", "Claude. Works with a Pro or Max plan, or an API key. Either runtime.")}
+    ${providerCard("openai", "OpenAI", "GPT. Works with a ChatGPT plan through OpenCode, or an API key.")}
   </div>
 
   ${choice.provider ? `
   <h2>How to authenticate</h2>
   <div class="choices">
     ${authCard("subscription", "Subscription", choice.provider === "anthropic"
-        ? "Your Claude Pro or Max plan, through Claude Code. No key, no per-token cost."
-        : "Only if your runtime can sign in with a ChatGPT plan. Claude Code cannot.")}
+        ? "Your Claude Pro or Max plan, through Claude Code. Sign in once with <code>claude</code>. No key, no per-token cost."
+        : "Your ChatGPT plan, through OpenCode: <code>opencode auth login</code>. Claude Code cannot use one.")}
     ${authCard("api_key", "API key", "Pay per token. The key stays in your environment.")}
   </div>` : ""}
 
@@ -409,17 +410,32 @@ function viewEngine() {
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
       ${cred.ready ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
     </svg>
-    <div><b>${cred.ready ? "Credential found" : "Credential needed"}</b>
+    <div><b>${cred.ready ? "Credential found" : "Credential needed"}${
+      cred.runtime ? ` <span class="pill" style="margin-left:4px">${esc({ "claude-code": "Claude Code", opencode: "OpenCode", environment: "environment" }[cred.runtime] || cred.runtime)}</span>` : ""}</b>
       <p>${esc(cred.detail)}</p>
       ${cred.env && !cred.ready ? `<p style="margin-top:6px"><code>export ${esc(cred.env)}=...</code>, then restart the Studio.</p>` : ""}
     </div></div>` : ""}
 
-  ${choice.provider ? `<div class="info">
-    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
-    <div><b>Canon Quill never stores your key</b>
-      <p>There is no field here to paste one, and the API rejects any attempt to send one. Keys are read
-      from your environment; subscriptions stay inside your agent runtime's own login.</p></div></div>` : ""}
+  ${choice.provider && choice.authMethod === "api_key" ? `<div class="card">
+    <label>${esc(cat?.providers?.[choice.provider]?.label || choice.provider)} API key</label>
+    ${ENGINE?.storedKey ? `<div class="row" style="margin-bottom:8px">
+        <span class="pill good">stored</span>
+        <code>${esc(ENGINE.storedKey)}</code>
+        <button class="ghost sm" onclick="verifyKey(this)">Verify</button>
+        <button class="ghost sm" onclick="removeKey(this)">Remove</button>
+      </div>` : ""}
+    <div class="row">
+      <input id="apikey" type="password" autocomplete="off" spellcheck="false"
+        placeholder="${choice.provider === "anthropic" ? "sk-ant-..." : "sk-..."}"
+        onkeydown="if(event.key==='Enter')saveKey(this.nextElementSibling)" />
+      <button onclick="saveKey(this)">${ENGINE?.storedKey ? "Replace" : "Save and verify"}</button>
+    </div>
+    <div id="keyresult" class="hint" style="margin-top:8px"></div>
+    <div class="hint" style="margin-top:8px">Saved to <code>.auth/credentials.json</code> in this project,
+    file mode 0600 and gitignored. It is never written into your book's state and never sent back to this
+    page, only a mask. An environment variable takes precedence if you set one.</div>
+  </div>` : ""}
+
 
   ${choice.provider && cat ? `
   <h2>Models per phase</h2>
@@ -473,38 +489,123 @@ function renderEstimates(cat, provider) {
     </div></div>`;
 }
 
+async function saveKey(btn) {
+  const input = document.getElementById("apikey");
+  const key = input?.value?.trim();
+  const out = document.getElementById("keyresult");
+  if (!key) { toast("Paste a key first.", true); return; }
+
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Verifying…';
+  try {
+    const r = await api("/api/engine/key", { method: "POST", body: { provider: S.engine.provider, key } });
+    if (input) input.value = "";
+    if (out) out.innerHTML = `<span style="color:var(--${r.verification.ok ? "good" : "warn"})">${
+      r.verification.ok ? "✓" : "!"} ${esc(r.verification.detail)}</span>`;
+    toast(r.verification.ok ? "Key saved and verified." : "Key saved, but it did not verify.", !r.verification.ok);
+    await loadEngine(); await reload();
+  } catch (e) { toast(e.message, true); }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Save and verify"; } }
+}
+
+async function verifyKey(btn) {
+  const out = document.getElementById("keyresult");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const r = await api("/api/engine/key/verify", { method: "POST", body: { provider: S.engine.provider } });
+    if (out) out.innerHTML = `<span style="color:var(--${r.ok ? "good" : "bad"})">${r.ok ? "✓" : "✗"} ${esc(r.detail)}</span>`;
+    toast(r.ok ? "Key works." : "Key did not verify.", !r.ok);
+  } catch (e) { toast(e.message, true); }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Verify"; } }
+}
+
+async function removeKey(btn) {
+  btn.disabled = true;
+  try {
+    await api(`/api/engine/key/${S.engine.provider}`, { method: "DELETE" });
+    toast("Key removed."); await loadEngine(); await reload();
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
 async function setEngine(patch) {
   try { ENGINE = await api("/api/engine", { method: "PATCH", body: patch }); await reload(); loadEngine(); }
   catch (e) { toast(e.message, true); }
 }
 
+let DRIVE = null;
+
+async function loadDrive() {
+  try { DRIVE = await api("/api/drive/status"); if (route === "connect") render(); }
+  catch (e) { toast(e.message, true); }
+}
+
 function viewConnect() {
-  const c = S.drive.connected;
+  const d = DRIVE;
+  const next = d?.next;
+
   return `
   <h1>Connect Google Drive</h1>
   <p class="sub">Canon Quill reads your reference material straight from Drive and writes approved
-  chapters back to a folder you choose. Access is limited to the
-  <code>drive.file</code> scope, so only files you explicitly pick.</p>
-  <div class="card spread">
-    <div>
-      <div class="row"><b>Status</b>
-        <span class="pill ${c ? "good" : "bad"}">${c ? "Connected" : "Not connected"}</span></div>
-      <div class="hint">${c ? "Drive responded to a live request." : "Set GOOGLE_OAUTH_CLIENT_JSON in .env, then check again."}</div>
+  chapters back to a folder you choose. Access is limited to the <code>drive.file</code> scope, so
+  only files you explicitly pick.</p>
+
+  ${!d ? '<div class="card empty"><span class="spin"></span> Checking…</div>' : `
+    <div class="info ${next === "ready" ? "ok" : next === "connect" ? "" : "warn"}">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        ${next === "ready" ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+      </svg>
+      <div><b>${next === "ready" ? "Connected" : next === "connect" ? "Credentials found, not authorised yet" : "Not configured"}</b>
+        <p style="white-space:pre-wrap">${esc(d.reason || "")}</p></div>
     </div>
-    <button onclick="checkDrive(this)">Check connection</button>
-  </div>
-  ${c ? `<div class="card"><b>Next</b><p class="sub" style="margin:6px 0 12px">
-    Pick the folders holding your past books, character notes, timelines and references.</p>
-    <button onclick="go('sources')">Select sources →</button></div>` : ""}`;
+
+    ${next === "configure" ? `<div class="card">
+      <b>Set up the credentials file</b>
+      <p class="sub" style="margin:6px 0 10px">You need a Google OAuth client of type <b>Desktop app</b>.
+      The guide walks the whole console flow, including the test-users step people miss.</p>
+      <div class="hint">Put the path in <code>.env</code> as <code>GOOGLE_OAUTH_CLIENT_JSON</code>. A Windows
+      path works from WSL; it is translated automatically. Restart the Studio afterwards, since
+      <code>.env</code> is read at startup.</div>
+      <div class="row" style="margin-top:12px"><button class="ghost" onclick="checkDrive(this)">Check again</button></div>
+    </div>` : ""}
+
+    ${next === "connect" ? `<div class="card">
+      <b>Authorise access</b>
+      <p class="sub" style="margin:6px 0 10px">Opens Google in your browser once. You will see an
+      unverified-app warning: choose <b>Advanced</b>, then <b>Go to (unsafe)</b>. It is your own OAuth
+      client talking to your own Drive.</p>
+      <div class="row"><button onclick="connectDrive(this)">Connect Google Drive</button>
+        <button class="ghost" onclick="checkDrive(this)">Check again</button></div>
+      <div id="authlink" class="hint" style="margin-top:10px"></div>
+    </div>` : ""}
+
+    ${next === "ready" ? `<div class="card"><b>Next</b>
+      <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
+      notes, timelines and references.</p>
+      <button onclick="go('sources')">Select sources</button></div>` : ""}
+  `}`;
+}
+
+async function connectDrive(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Opening Google…';
+  try {
+    const { url } = await api("/api/drive/connect", { method: "POST" });
+    window.open(url, "_blank", "noopener");
+    const link = document.getElementById("authlink");
+    if (link) link.innerHTML = `If the window did not open, <a href="${esc(url)}" target="_blank" rel="noopener">authorise here</a>. This page updates once you approve.`;
+    // The exchange finishes server-side; poll until the token lands.
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const status = await api("/api/drive/status");
+      if (status.connected) { DRIVE = status; toast("Drive connected."); await reload(); render(); return; }
+    }
+    toast("Still waiting for authorisation. Press Check again once you have approved.", true);
+  } catch (e) { toast(e.message, true); }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Connect Google Drive"; } }
 }
 
 async function checkDrive(btn) {
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking';
-  try {
-    const r = await api("/api/drive/status");
-    toast(r.connected ? "Drive connected." : `Not connected: ${r.reason || "unknown"}`, !r.connected);
-    await reload();
-  } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = "Check connection"; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking'; }
+  try { DRIVE = await api("/api/drive/status"); await reload(); render(); }
+  catch (e) { toast(e.message, true); if (btn) { btn.disabled = false; btn.textContent = "Check again"; } }
 }
 
 function viewSources() {
@@ -814,6 +915,7 @@ async function setStatus(number, status) {
     render();
     if (route === "sources") loadBrowse("root");
     if (route === "engine") loadEngine();
+    if (route === "connect") loadDrive();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
   }
 })();

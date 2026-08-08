@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import { SafeDriveClient } from "../drive/client.js";
+import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindLabels, type SourceKind } from "../analysis/classify.js";
 import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
@@ -36,7 +37,8 @@ import {
 } from "../workspace/registry.js";
 import { workspacePaths } from "../workspace/paths.js";
 import { appendLog } from "../project/logs.js";
-import { checkCredentials, defaultModels, loadCatalog } from "./engine.js";
+import { checkCredentials, defaultModels, loadCatalog, type ProviderId } from "./engine.js";
+import { deleteApiKey, maskKey, readApiKey, saveApiKey, verifyApiKey } from "./credentials.js";
 import { loadDotEnv } from "../config/env.js";
 
 // Read .env before anything looks at process.env.
@@ -154,6 +156,8 @@ export function createStudioApp() {
     const catalog = await loadCatalog();
     const provider = state.engine.provider;
 
+    const storedKey = provider ? await readApiKey(provider) : undefined;
+
     res.json({
       choice: state.engine,
       catalog,
@@ -163,7 +167,9 @@ export function createStudioApp() {
       credentials:
         provider && state.engine.authMethod
           ? await checkCredentials(provider, state.engine.authMethod)
-          : null
+          : null,
+      // A mask only. The key never leaves the server.
+      storedKey: storedKey ? maskKey(storedKey) : null
     });
   }));
 
@@ -177,10 +183,10 @@ export function createStudioApp() {
     if (authMethod !== undefined && authMethod !== "subscription" && authMethod !== "api_key") {
       throw new HttpError(400, "Auth method must be subscription or api_key.");
     }
-    // Refuse anything that looks like a secret. Keys belong in the environment.
+    // Keys go to /api/engine/key, which stores them outside the project state.
     for (const key of Object.keys(req.body ?? {})) {
       if (/key|token|secret|password/i.test(key) && key !== "authMethod") {
-        throw new HttpError(400, "Canon Quill does not accept credentials. Set the environment variable instead.");
+        throw new HttpError(400, "Send API keys to /api/engine/key, not here.");
       }
     }
 
@@ -209,19 +215,69 @@ export function createStudioApp() {
     });
   }));
 
+  /** Store a key. The response carries a mask, never the key itself. */
+  app.post("/api/engine/key", route(async (req, res) => {
+    const provider = req.body?.provider as ProviderId | undefined;
+    const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
+    if (provider !== "anthropic" && provider !== "openai") throw new HttpError(400, "Unknown provider.");
+    if (!key) throw new HttpError(400, "A key is required.");
+
+    const verification = await verifyApiKey(provider, key);
+    // Stored either way: a network failure during verification should not lose
+    // a key the author just pasted.
+    await saveApiKey(provider, key);
+    res.json({ saved: true, masked: maskKey(key), verification });
+  }));
+
+  app.post("/api/engine/key/verify", route(async (req, res) => {
+    const provider = req.body?.provider as ProviderId | undefined;
+    if (provider !== "anthropic" && provider !== "openai") throw new HttpError(400, "Unknown provider.");
+
+    const key = (typeof req.body?.key === "string" && req.body.key.trim())
+      || (await readApiKey(provider))
+      || process.env[provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"];
+    if (!key) throw new HttpError(400, "No key stored or supplied for this provider.");
+
+    res.json(await verifyApiKey(provider, key));
+  }));
+
+  app.delete("/api/engine/key/:provider", route(async (req, res) => {
+    const provider = req.params.provider as ProviderId;
+    if (provider !== "anthropic" && provider !== "openai") throw new HttpError(400, "Unknown provider.");
+    await deleteApiKey(provider);
+    res.json({ removed: true });
+  }));
+
   // --- Drive ----------------------------------------------------------------
+  /**
+   * Non-interactive. Never opens a browser and never blocks on the user, which
+   * is what made this endpoint hang for minutes before.
+   */
   app.get("/api/drive/status", route(async (_req, res) => {
-    // Probed with a real request: a token file on disk is not proof that OAuth
-    // still works.
-    try {
-      await drive.listFolder("root");
-    } catch (error) {
-      res.json({ connected: false, reason: message(error) });
-      return;
-    }
+    const status = await driveAuthStatus();
     const slug = await activeSlug();
-    if (slug) await updateState(slug, (current) => void (current.drive.connected = true));
-    res.json({ connected: true });
+    if (slug) {
+      await updateState(slug, (current) => void (current.drive.connected = status.authorized));
+    }
+    res.json({
+      connected: status.authorized,
+      configured: status.configured,
+      reason: status.detail,
+      // What the UI should offer next.
+      next: status.configured ? (status.authorized ? "ready" : "connect") : "configure"
+    });
+  }));
+
+  /** Start authorization and hand back the consent URL straight away. */
+  app.post("/api/drive/connect", route(async (_req, res) => {
+    const pending = await beginDriveAuthorization();
+    pending.completed
+      .then(async () => {
+        const slug = await activeSlug();
+        if (slug) await updateState(slug, (current) => void (current.drive.connected = true));
+      })
+      .catch(() => undefined);
+    res.json({ url: pending.url });
   }));
 
   app.get("/api/drive/browse", route(async (req, res) => {

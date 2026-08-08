@@ -43,6 +43,114 @@ export interface DriveAuth {
   getAccessToken(): Promise<string>;
 }
 
+export interface DriveAuthStatus {
+  /** GOOGLE_OAUTH_CLIENT_JSON is set and points at a valid OAuth client. */
+  configured: boolean;
+  /** A stored token exists, so Drive can be used without a browser. */
+  authorized: boolean;
+  detail: string;
+}
+
+/**
+ * Report Drive readiness without ever starting a browser flow.
+ *
+ * `createDriveAuth().getAccessToken()` will happily open a consent page and
+ * block until the user finishes, which is correct for a CLI and wrong for a
+ * status endpoint: it made "Check connection" hang for minutes and then fail.
+ */
+export async function driveAuthStatus(): Promise<DriveAuthStatus> {
+  let credentials: OAuthClientConfig;
+  try {
+    credentials = await loadOAuthCredentials();
+  } catch (error) {
+    return {
+      configured: false,
+      authorized: false,
+      detail: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  const token = await loadStoredToken(resolveTokenPath());
+  if (!token) {
+    return {
+      configured: true,
+      authorized: false,
+      detail: "Credentials found. Not authorised yet: connect to grant access to the folders you pick."
+    };
+  }
+
+  if (isUsable(token)) {
+    return { configured: true, authorized: true, detail: "Connected. The stored access token is still valid." };
+  }
+
+  if (token.refresh_token) {
+    try {
+      await refreshAccessToken(credentials, resolveTokenPath(), token);
+      return { configured: true, authorized: true, detail: "Connected. The access token was refreshed." };
+    } catch (error) {
+      return {
+        configured: true,
+        authorized: false,
+        detail:
+          `The stored token could not be refreshed: ${error instanceof Error ? error.message : String(error)}\n` +
+          "If your OAuth consent screen is still in Testing, Google expires refresh tokens after seven days. Connect again, then publish the consent screen."
+      };
+    }
+  }
+
+  return { configured: true, authorized: false, detail: "The stored token expired and has no refresh token. Connect again." };
+}
+
+export interface PendingAuthorization {
+  /** Send the user here. */
+  url: string;
+  /** Resolves once the callback lands; rejects on failure or timeout. */
+  completed: Promise<void>;
+}
+
+/**
+ * Begin authorization and return the consent URL immediately.
+ *
+ * The caller gets the URL straight away and can render a link; the exchange
+ * finishes in the background. Nothing blocks on the user's browser.
+ */
+export async function beginDriveAuthorization(): Promise<PendingAuthorization> {
+  const credentials = await loadOAuthCredentials();
+  const scopes = configuredScopes();
+  const tokenPath = resolveTokenPath();
+
+  const state = randomUUID();
+  const receiver = await startOAuthReceiver(state);
+  const authUrl = new URL(credentials.auth_uri);
+  authUrl.searchParams.set("client_id", credentials.client_id);
+  authUrl.searchParams.set("redirect_uri", receiver.redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", scopes.join(" "));
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("state", state);
+
+  const completed = (async () => {
+    try {
+      const code = await receiver.code;
+      const body = new URLSearchParams({
+        client_id: credentials.client_id,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: receiver.redirectUri
+      });
+      if (credentials.client_secret) body.set("client_secret", credentials.client_secret);
+      await saveStoredToken(tokenPath, normalizeToken(await postToken(credentials.token_uri, body)));
+    } finally {
+      await closeServer(receiver.server);
+    }
+  })();
+  // The caller may not await this; do not crash the process if it rejects.
+  completed.catch(() => undefined);
+
+  return { url: authUrl.toString(), completed };
+}
+
 export async function createDriveAuth(): Promise<DriveAuth> {
   const credentials = await loadOAuthCredentials();
   const scopes = configuredScopes();

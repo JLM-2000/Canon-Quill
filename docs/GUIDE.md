@@ -113,25 +113,52 @@ npm install -g opencode-ai
 
 Only needed if you picked **Subscription** above. On an API key there is nothing to connect.
 
-**Anthropic (Claude Pro or Max).** Run this once, from anywhere:
+Which runtime you use depends on the provider. Canon Quill detects either.
+
+**Anthropic plan (Claude Pro or Max): Claude Code.**
 
 ```bash
 claude
 ```
 
-The first run opens your browser and asks you to sign in with the Google or email account your plan is on. Approve it, and the login is stored in `~/.claude`. Then type `/exit`.
+The first run opens your browser and asks you to sign in with the account your plan is on. Approve it, and the login is stored in `~/.claude`. Then type `/exit`. Run `claude` again to confirm: it should go straight to a prompt with no sign-in step. `/logout` then `claude` switches account.
 
-To confirm it worked, run `claude` again: it should start straight into a prompt with no sign-in step. If you are ever unsure which account it is using, `/logout` then `claude` signs you in fresh.
+A Claude plan **cannot** be used through OpenCode. On that runtime, Anthropic needs an API key.
 
-Back in the Studio, **Writing engine** will now show *Credential found*.
+**OpenAI plan (ChatGPT): OpenCode.**
 
-**OpenAI (ChatGPT plan).** Claude Code cannot sign in with a ChatGPT plan, so on this provider a subscription only works if your runtime supports it. Check OpenCode's own documentation. Otherwise use an API key.
+```bash
+opencode auth login
+```
+
+Pick OpenAI, then choose the sign-in option rather than the API-key option. Your browser opens; approve it. Credentials land in `~/.local/share/opencode/auth.json`.
+
+Check what you have connected at any time:
+
+```bash
+opencode auth list
+```
+
+```
+┌  Credentials  ~/.local/share/opencode/auth.json
+│
+●  Anthropic   oauth
+●  OpenAI      oauth
+│
+└  2 credentials
+```
+
+`oauth` means a plan sign-in. `api` means a stored key. `opencode auth logout` removes one.
+
+Back in the Studio, **Writing engine** will now show *Credential found* and a tag saying which runtime holds it.
 
 ### If the Studio says a credential is needed
 
-- **Anthropic, subscription:** you have not run `claude` and signed in yet, or you signed in as a different OS user. The check looks for `~/.claude`.
-- **Anthropic, API key:** `ANTHROPIC_API_KEY` is not visible to the Studio's process. Export it in the same shell, or add it to `.env`, then restart the Studio.
-- **Either, after adding to `.env`:** `.env` is read at startup only. Restart the Studio.
+- **Subscription:** no plan sign-in was found. For Anthropic it looks for `~/.claude`; for OpenAI, an `oauth` entry in OpenCode's `auth.json`. Run `opencode auth list` to see what is actually connected. Signing in as a different OS user will also hide it.
+- **API key:** the environment variable is not visible to the Studio's process and no runtime has a key stored. Export it in the same shell, or add it to `.env`.
+- **After editing `.env`:** it is read at startup only. Restart the Studio.
+
+Canon Quill reads only the provider names and whether each entry is `oauth` or `api` from those files. It never reads the tokens.
 
 **There is no field to paste a key, by design.** Anything typed into a web form ends up in a plaintext state file, so the API refuses credentials outright. Keys stay in your environment; subscriptions stay inside the runtime's own login.
 
@@ -187,19 +214,36 @@ Google will not let you create an OAuth client until this exists.
 
 ### Point Canon Quill at it
 
-12. Create `.env` in the project root:
+12. Create `.env` in the project root and point it at the file you just downloaded:
 
 ```
 GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/credentials.json
 ```
 
-An absolute path. `~` is not expanded.
+**Any platform's path style works.** Canon Quill translates between them, so you can paste whatever your file browser gave you:
+
+| You are on | Write | Notes |
+|---|---|---|
+| **Windows** | `C:\Users\you\Downloads\creds.json` | Forward slashes work too |
+| **WSL** | `C:\Users\you\Downloads\creds.json` | Translated to `/mnt/c/...` for you |
+| **WSL**, file inside Linux | `/home/you/creds.json` | |
+| **macOS / Linux** | `/Users/you/creds.json`, `~/creds.json` | `~` is expanded |
+
+Quotes around the value are fine, and so are spaces in the path. If your WSL mounts drives somewhere other than `/mnt`, `/c/...` is tried as well.
+
+If the file cannot be found, the error prints exactly which paths were tried and why, rather than claiming the file is the wrong type.
 
 13. If you are using OpenCode, change `canon_drive.enabled` from `false` to `true` in `opencode.json` and restart it. Claude Code needs nothing here; the Studio talks to Drive directly.
 
-14. In the Studio, press **Check connection**. A browser window opens once to authorise.
+14. Restart the Studio. `.env` is read at startup only.
 
-### The warning you will see
+15. Open **Connect Drive**. It reports one of three states without ever blocking:
+
+- **Not configured** means the credentials file was not found or is not an OAuth client. The message says which paths it tried.
+- **Credentials found, not authorised yet** means everything is right and you just need to grant access. Press **Connect Google Drive**; Google opens in a new tab, and the page updates itself once you approve.
+- **Connected** means you are done.
+
+### The warning you will see when authorising
 
 Because the app is in Testing and unverified, Google shows **"Google hasn't verified this app"**. Click **Advanced**, then **Go to <your app name> (unsafe)**. This is your own OAuth client talking to your own Drive; verification only matters for apps distributed to other people.
 

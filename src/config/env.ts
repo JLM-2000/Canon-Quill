@@ -52,33 +52,61 @@ export function isWsl(): boolean {
   );
 }
 
+/** Strip one optional layer of surrounding quotes and trim. */
+function unquote(raw: string): string {
+  const value = raw.trim();
+  if (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1).trim();
+  }
+  return value;
+}
+
 /**
  * Every place a user-supplied path might really live, most likely first.
  *
- * A Windows path given to a Linux process is translated to its mount point.
- * `/mnt/c` is the WSL default but is configurable, so the common alternatives
- * are tried too rather than assumed.
+ * The same `.env` should work whether it is read by Node on Windows, in WSL,
+ * on macOS or on Linux, so a path written for one is translated for whichever
+ * is actually running. Platform is passed in so this is testable off-platform.
  */
-export function candidatePaths(raw: string): string[] {
-  let value = raw.trim();
-  if (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-    value = value.slice(1, -1).trim();
-  }
+export function candidatePaths(raw: string, platform: NodeJS.Platform = process.platform): string[] {
+  let value = unquote(raw);
   if (!value) return [];
 
   if (value === "~" || value.startsWith("~/") || value.startsWith("~\\")) {
-    value = path.join(homedir(), value.slice(1).replace(/\\/g, "/"));
+    value = homedir() + value.slice(1).replace(/\\/g, "/");
   }
 
+  const onWindows = platform === "win32";
   const windowsDrive = /^([A-Za-z]):[\\/](.*)$/.exec(value);
-  if (windowsDrive && process.platform !== "win32") {
-    const drive = windowsDrive[1].toLowerCase();
+  const wslMount = /^\/mnt\/([a-zA-Z])\/(.*)$/.exec(value);
+  const unc = /^\\\\wsl(?:\$|\.localhost)[\\/][^\\/]+[\\/](.*)$/.exec(value);
+
+  if (windowsDrive) {
+    const drive = windowsDrive[1];
     const rest = windowsDrive[2].replace(/\\/g, "/");
-    return [`/mnt/${drive}/${rest}`, `/${drive}/${rest}`, `/mnt/${drive.toUpperCase()}/${rest}`];
+    if (onWindows) return [`${drive.toUpperCase()}:\\${rest.replace(/\//g, "\\")}`];
+    // Linux or macOS reading a Windows path: try the usual mount points.
+    return [
+      `/mnt/${drive.toLowerCase()}/${rest}`,
+      `/${drive.toLowerCase()}/${rest}`,
+      `/mnt/${drive.toUpperCase()}/${rest}`
+    ];
   }
 
-  // A UNC path (\\wsl$\...) or a plain relative/absolute path.
-  return [path.resolve(value.replace(/\\/g, path.sep === "\\" ? "\\" : "/"))];
+  if (wslMount && onWindows) {
+    // A WSL path handed to native Windows: map the mount back to a drive.
+    const rest = wslMount[2].replace(/\//g, "\\");
+    return [`${wslMount[1].toUpperCase()}:\\${rest}`, path.resolve(value)];
+  }
+
+  if (unc && !onWindows) {
+    // \\wsl$\Distro\home\me\x is just /home/me/x from inside the distro.
+    return [`/${unc[1].replace(/\\/g, "/")}`];
+  }
+
+  if (onWindows) return [path.resolve(value)];
+  // POSIX: backslashes are legal filename characters, so leave them alone.
+  return [path.resolve(value)];
 }
 
 /** The first candidate that exists, or undefined. */

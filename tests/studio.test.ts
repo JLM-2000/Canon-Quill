@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { createStudioApp } from "../src/studio/server.js";
 import { derivePhase, emptyState, loadState } from "../src/studio/state.js";
 import { workspacesRoot } from "../src/workspace/paths.js";
+import path from "node:path";
 import type { Server } from "node:http";
 
 let server: Server;
@@ -29,6 +30,7 @@ async function call(path: string, init?: { method?: string; body?: unknown }) {
 
 beforeEach(async () => {
   await rm(workspacesRoot(), { recursive: true, force: true });
+  await rm(path.join(process.cwd(), ".auth", "credentials.json"), { force: true });
   if (!server) await listen();
   await call("/api/projects", { method: "POST", body: { title: "Test Book" } });
 });
@@ -36,6 +38,7 @@ beforeEach(async () => {
 afterAll(async () => {
   server?.close();
   await rm(workspacesRoot(), { recursive: true, force: true });
+  await rm(path.join(process.cwd(), ".auth", "credentials.json"), { force: true });
 });
 
 describe("phase derivation", () => {
@@ -259,13 +262,13 @@ describe("studio api", () => {
     expect(body.credentials.env).toBe("ANTHROPIC_API_KEY");
   });
 
-  it("refuses to accept a credential through the API", async () => {
+  it("keeps credentials out of the project state endpoint", async () => {
     const { status, body } = await call("/api/engine", {
       method: "PATCH",
       body: { provider: "anthropic", apiKey: "sk-ant-should-never-be-stored" }
     });
     expect(status).toBe(400);
-    expect(body.error).toMatch(/does not accept credentials/i);
+    expect(body.error).toMatch(/\/api\/engine\/key/);
   });
 
   it("rejects an unknown provider", async () => {
@@ -284,5 +287,47 @@ describe("studio api", () => {
     const { status, body } = await call("/api/does-not-exist");
     expect(status).toBe(404);
     expect(body.error).toBe("Not found");
+  });
+});
+
+describe("api keys", () => {
+  it("stores a key and returns only a mask, never the key", async () => {
+    await call("/api/engine", { method: "PATCH", body: { provider: "anthropic", authMethod: "api_key" } });
+    const saved = await call("/api/engine/key", {
+      method: "POST",
+      body: { provider: "anthropic", key: "sk-ant-test-0000000000000000abcd" }
+    });
+    expect(saved.body.saved).toBe(true);
+    expect(saved.body.masked).toBe("sk-ant-t...abcd");
+
+    const engine = await call("/api/engine");
+    expect(engine.body.storedKey).toBe("sk-ant-t...abcd");
+    expect(JSON.stringify(engine.body)).not.toContain("0000000000000000");
+  });
+
+  it("counts a stored key as a ready credential", async () => {
+    await call("/api/engine", { method: "PATCH", body: { provider: "anthropic", authMethod: "api_key" } });
+    await call("/api/engine/key", { method: "POST", body: { provider: "anthropic", key: "sk-ant-test-0000000000000000abcd" } });
+    const { body } = await call("/api/engine");
+    expect(body.credentials.ready).toBe(true);
+    expect(body.credentials.runtime).toBe("studio");
+  });
+
+  it("removes a key", async () => {
+    await call("/api/engine", { method: "PATCH", body: { provider: "anthropic", authMethod: "api_key" } });
+    await call("/api/engine/key", { method: "POST", body: { provider: "anthropic", key: "sk-ant-test-0000000000000000abcd" } });
+    await call("/api/engine/key/anthropic", { method: "DELETE" });
+    const { body } = await call("/api/engine");
+    expect(body.storedKey).toBeNull();
+  });
+
+  it("rejects an unknown provider and an empty key", async () => {
+    expect((await call("/api/engine/key", { method: "POST", body: { provider: "gemini", key: "x" } })).status).toBe(400);
+    expect((await call("/api/engine/key", { method: "POST", body: { provider: "openai", key: "  " } })).status).toBe(400);
+  });
+
+  it("refuses to verify when nothing is stored", async () => {
+    const { status } = await call("/api/engine/key/verify", { method: "POST", body: { provider: "openai" } });
+    expect(status).toBe(400);
   });
 });
