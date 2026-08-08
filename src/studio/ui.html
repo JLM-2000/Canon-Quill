@@ -72,9 +72,12 @@
   main { padding: 26px 32px 80px; max-width: 1080px; }
   .verline { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
   .ver { color: var(--faint); font-size: 10.5px; font-family: var(--mono); }
-  .newver { background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700; padding: 1px 5px;
-    border-radius: 999px; cursor: pointer; border: none; letter-spacing: .02em; }
-  .newver:hover { filter: brightness(1.12); }
+  .newver { width: 15px; height: 15px; border-radius: 50%; border: none; cursor: pointer;
+    font-size: 10px; font-weight: 700; line-height: 15px; padding: 0; color: #fff;
+    display: inline-flex; align-items: center; justify-content: center; }
+  .newver:hover { filter: brightness(1.15); }
+  .newver.attn { background: var(--warn); color: #1a1205; }
+  .newver.up { background: var(--accent); }
   .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60; display: flex;
     align-items: center; justify-content: center; padding: 20px; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -324,13 +327,15 @@ function renderVersion() {
   const badge = document.getElementById("verbadge");
   if (!v || !badge) return;
   if (!VERSION) { v.textContent = ""; badge.innerHTML = ""; return; }
-  v.textContent = `v${VERSION.version}${VERSION.commit ? " · " + VERSION.commit : ""}`;
-  // Running stale local code is the more urgent of the two, and the more
-  // confusing to hit blind: requests fail against fields the process predates.
+  // The commit sha belongs in the panel, not next to the name.
+  v.textContent = `v${VERSION.version}`;
+  // Neither of these is an emergency, so neither shouts. Running stale local
+  // code comes first because it is the more confusing to hit blind: requests
+  // fail against fields the process predates.
   badge.innerHTML = VERSION.localStale
-    ? `<button class="newver" style="background:var(--warn);color:#1a1205" onclick="openUpdate()">RESTART</button>`
+    ? `<button class="newver attn" title="This Studio is running older code than is on disk" onclick="openUpdate()">!</button>`
     : VERSION.behind > 0
-      ? `<button class="newver" onclick="openUpdate()">UPDATE</button>`
+      ? `<button class="newver up" title="${VERSION.behind} update${VERSION.behind === 1 ? "" : "s"} available" onclick="openUpdate()">${VERSION.behind > 9 ? "9+" : VERSION.behind}</button>`
       : "";
 }
 
@@ -417,24 +422,35 @@ function renderModal() {
       ${st.ok ? "✓" : "✗"} ${esc(st.label)}</b>
       ${st.output ? `<div class="steplog">${esc(st.output)}</div>` : ""}</div>`).join("");
 
+  const staleOnly = v.localStale && v.behind === 0;
   wrap.innerHTML = `<div class="modal">
-    <h3>${plural(v.behind, "update")} available</h3>
-    <p class="hint" style="margin:0 0 14px">You are on <code>${esc(v.commit || "?")}</code> of
-      <code>${esc(v.branch || "?")}</code>. Updating pulls, reinstalls dependencies and rebuilds.</p>
+    <h3>${staleOnly ? "Restart to pick up your changes" : plural(v.behind, "update") + " available"}</h3>
+    <p class="hint" style="margin:0 0 14px">Version ${esc(v.version)}${
+      v.commit ? `, commit <code>${esc(v.commit)}</code>` : ""}${v.branch ? ` on <code>${esc(v.branch)}</code>` : ""}.</p>
+
+    ${v.localStale ? `<div class="info warn"><svg class="ic" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/>
+        <path d="M12 8v5M12 16.5v.01"/></svg><div><b>Running older code than is on disk</b>
+        <p>Source files changed after this process started. The screens reload, but the behaviour behind
+        them does not, so a request can fail against a field this process has never heard of. Restarting
+        fixes it and loses nothing.</p></div></div>` : ""}
+
+    ${!staleOnly ? `<p class="hint" style="margin:0 0 14px">Updating pulls, reinstalls dependencies and
+      rebuilds.</p>` : ""}
 
     ${v.blocked ? `<div class="info warn"><svg class="ic" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/>
         <path d="M12 8v5M12 16.5v.01"/></svg><div><b>Cannot update automatically</b>
         <p>${esc(v.blocked)}</p></div></div>` : ""}
 
-    ${updateResult ? `<div style="margin-bottom:14px">
+    ${!staleOnly && updateResult ? `<div style="margin-bottom:14px">
         <b style="font-size:13px">${updateResult.ok ? "Update applied" : "Update failed"}</b>${steps}
         ${updateResult.ok ? `<p class="hint" style="margin-top:12px">Restart to run the new code.
           The page reconnects on its own.</p>` : ""}
-      </div>` : `<div style="max-height:220px;overflow-y:auto;margin-bottom:14px">${commits}</div>`}
+      </div>` : (staleOnly ? "" : `<div style="max-height:220px;overflow-y:auto;margin-bottom:14px">${commits}</div>`)}
 
     <div class="row">
-      ${updateResult?.ok
+      ${updateResult?.ok || staleOnly
         ? `<button onclick="restartStudio(this)">Restart now</button>`
         : `<button ${v.blocked || updating ? "disabled" : ""} onclick="runUpdate(this)">
              ${updating ? '<span class="spin"></span> Updating…' : "Download and install"}</button>`}
@@ -830,7 +846,16 @@ function viewConnect() {
     ${next === "ready" ? `<div class="card"><b>Next</b>
       <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
       notes, timelines and references.</p>
-      <button onclick="go('sources')">Select sources</button></div>` : ""}
+      <button onclick="go('sources')">Select sources</button></div>
+
+    <div class="card">
+      <b>Reconnect</b>
+      <p class="sub" style="margin:6px 0 10px">Sign in again to use a different Google account, or to
+      re-grant access if something stops working. Your selections and indexed documents are kept.</p>
+      <div class="row"><button class="ghost" onclick="connectDrive(this)">Reconnect Google Drive</button>
+        <button class="ghost" onclick="checkDrive(this)">Check again</button></div>
+      <div id="authlink" class="hint" style="margin-top:10px"></div>
+    </div>` : ""}
   `}`;
 }
 
