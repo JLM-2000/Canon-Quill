@@ -434,6 +434,21 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
+  /**
+   * Drop a document from the analysis.
+   *
+   * Different from clearing its groups: an ungrouped document stays on the
+   * board so it can be classified later, whereas a removed one is gone until
+   * the next analysis. Nothing in Drive is touched.
+   */
+  app.delete("/api/sources/:driveId", route(async (req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.sources = current.sources.filter((entry) => entry.driveId !== req.params.driveId);
+    });
+    res.json(withDerived(state));
+  }));
+
   app.post("/api/sources/reviewed", route(async (_req, res) => {
     const slug = await requireSlug();
     res.json(withDerived(await updateState(slug, (current) => void (current.sourcesReviewed = true))));

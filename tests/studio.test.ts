@@ -357,3 +357,38 @@ describe("api keys", () => {
     expect(status).toBe(400);
   });
 });
+
+describe("source removal", () => {
+  it("removes a document from the analysis without touching the others", async () => {
+    await call("/api/engine", { method: "PATCH", body: { provider: "anthropic", authMethod: "subscription" } });
+    // Seed two sources through the state file, since indexing needs Drive.
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const seeded = await load("test-book");
+    seeded.sources = [
+      { driveId: "a", name: "Keep", path: "/a", mimeType: "text/plain", isFolder: false, kinds: ["notes"] },
+      { driveId: "b", name: "Drop", path: "/b", mimeType: "text/plain", isFolder: false, kinds: [] }
+    ];
+    await save(seeded);
+
+    const { body } = await call("/api/sources/b", { method: "DELETE" });
+    expect(body.sources.map((s: any) => s.driveId)).toEqual(["a"]);
+  });
+
+  it("is a no-op for an id that is not there", async () => {
+    const { status } = await call("/api/sources/nope", { method: "DELETE" });
+    expect(status).toBe(200);
+  });
+});
+
+describe("legacy source migration", () => {
+  it("carries a single kind forward into the kinds list", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const seeded = await load("test-book");
+    // Write the pre-multi-group shape directly.
+    (seeded as any).sources = [{ driveId: "old", name: "Old", path: "/o", mimeType: "text/plain", isFolder: false, kind: "past_book" }];
+    await save(seeded);
+
+    const reloaded = await load("test-book");
+    expect(reloaded.sources[0].kinds).toEqual(["past_book"]);
+  });
+});

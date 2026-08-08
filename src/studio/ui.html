@@ -150,6 +150,13 @@
   .count.zero b { color: var(--faint); }
   .doc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 12px 14px; margin-bottom: 8px; }
+  .doc.ignored { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 5%, var(--surface)); }
+  .doc-h { display: flex; align-items: flex-start; gap: 10px; }
+  .doc-h > div:first-child { flex: 1; min-width: 0; }
+  .doc-x { background: none; border: none; color: var(--faint); cursor: pointer; font-size: 15px;
+    line-height: 1; padding: 2px 4px; flex: none; }
+  .doc-x:hover { color: var(--bad); }
+  .doc-warn { color: var(--warn); font-size: 11.5px; margin-top: 7px; display: flex; gap: 5px; align-items: center; }
   .doc-h b { font-size: 13.5px; word-break: break-word; }
   .doc-m { color: var(--faint); font-size: 11.5px; margin-top: 1px; word-break: break-all; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
@@ -1000,12 +1007,15 @@ function viewAnalyze() {
   const counts = Object.fromEntries(Object.keys(KINDS).map((k) =>
     [k, S.sources.filter((x) => (x.kinds || []).includes(k)).length]));
 
-  const docs = S.sources.map((src) => `
-    <div class="doc">
+  const docs = S.sources.map((src) => {
+    const ungrouped = !(src.kinds || []).length;
+    return `
+    <div class="doc ${ungrouped ? "ignored" : ""}">
       <div class="doc-h">
         <div><b>${esc(src.name)}</b>
           <div class="doc-m">${esc(src.path || "")}${src.wordCount ? ` · ${plural(src.wordCount, "word", null, src.wordCount.toLocaleString())}` : ""}</div>
         </div>
+        <button class="doc-x" title="Remove from this analysis" onclick="removeSource('${src.driveId}')">✕</button>
       </div>
       <div class="chips">
         ${Object.entries(KINDS).map(([k, label]) => {
@@ -1013,7 +1023,12 @@ function viewAnalyze() {
           return `<button class="chip ${on ? "on" : ""}" onclick="toggleKind('${src.driveId}','${k}')">${label}</button>`;
         }).join("")}
       </div>
-    </div>`).join("");
+      ${ungrouped ? `<div class="doc-warn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+          style="width:12px;height:12px;flex:none"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
+        No group, so this document will be ignored. Pick a label, or remove it.</div>` : ""}
+    </div>`;
+  }).join("");
 
   const unassigned = S.sources.filter((x) => !(x.kinds || []).length).length;
 
@@ -1036,7 +1051,7 @@ function viewAnalyze() {
     `<div class="count ${counts[k] ? "" : "zero"}"><b>${counts[k]}</b><span>${label}</span></div>`).join("")}</div>
 
   <h2>${plural(S.sources.length, "document")}</h2>
-  ${unassigned ? `<div class="hint" style="margin-bottom:8px;color:var(--warn)">${plural(unassigned, "document")} ${verb(unassigned, "has", "have")} no group and will be ignored.</div>` : ""}
+  ${unassigned ? `<div class="hint" style="margin-bottom:8px;color:var(--warn)">${plural(unassigned, "document")} ${verb(unassigned, "has", "have")} no group, highlighted below.</div>` : ""}
   ${docs}
 
   <div class="row" style="margin-top:18px">
@@ -1054,6 +1069,24 @@ async function toggleKind(driveId, kind) {
   render();
   try { S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kinds: src.kinds } }); }
   catch (e) { toast(e.message, true); await reload(); }
+}
+
+async function removeSource(driveId) {
+  const src = S.sources.find((x) => x.driveId === driveId);
+  if (!src) return;
+  showModal({
+    title: "Remove from this analysis?",
+    body: `<p class="hint" style="margin:0"><b>${esc(src.name)}</b> will be dropped from the board and
+      not read again until you analyse your sources afresh. Nothing in your Drive is changed.</p>`,
+    actions: `<button onclick="confirmRemoveSource('${driveId}')">Remove</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function confirmRemoveSource(driveId) {
+  closeModal();
+  try { S = await api(`/api/sources/${driveId}`, { method: "DELETE" }); render(); toast("Removed."); }
+  catch (e) { toast(e.message, true); }
 }
 
 async function finishReview(btn) {
