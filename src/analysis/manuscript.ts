@@ -255,7 +255,7 @@ function assessCompleteness(
   text: string,
   chapters: ManuscriptChapter[]
 ): { complete: boolean; reason: string } {
-  const trimmed = text.trimEnd();
+  const trimmed = stripTrailingLayout(text);
   if (!trimmed) return { complete: true, reason: "The document is empty." };
 
   const lastChar = trimmed.slice(-1);
@@ -293,7 +293,7 @@ function assessCompleteness(
 
 /** The closing passage, cut at a paragraph boundary. */
 function tailOf(text: string, targetWords: number): string {
-  const paragraphs = splitParagraphs(text);
+  const paragraphs = splitParagraphs(stripTrailingLayout(text));
   const kept: string[] = [];
   let count = 0;
   for (let i = paragraphs.length - 1; i >= 0 && count < targetWords; i -= 1) {
@@ -301,6 +301,14 @@ function tailOf(text: string, targetWords: number): string {
     count += words(paragraphs[i].text).length;
   }
   return kept.join("\n\n");
+}
+
+/** Page-break rules are document layout, not prose or an unfinished ending. */
+function stripTrailingLayout(text: string): string {
+  return text
+    .replace(/[\u000b\u000c\u0085\u2028\u2029]/g, "\n")
+    .replace(/(?:\s*(?:_{3,}|-{3,}|={3,}|\*{3,}|~{3,}|·{3,})\s*)+$/u, "")
+    .trimEnd();
 }
 
 function readConventions(text: string, lines: string[]): Conventions {

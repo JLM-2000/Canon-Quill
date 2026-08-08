@@ -177,6 +177,14 @@ Scan the QR code below or click here to leave a quick review`;
     expect(a.completenessReason).not.toMatch(/Julian blinked/);
   });
 
+  it("ignores a trailing page-break rule when judging the ending", () => {
+    const text = `${chapter("Chapter One", "Julian blinked at the doorway, then turned back to the stove, face burning as his boyfriend's laugh echoed from the bedroom.\n\n\"Oh my God,\" he muttered to himself, trying very hard not to burn their breakfast.")}________________`;
+    const a = analyseManuscript(text);
+    expect(a.lastChapterComplete).toBe(true);
+    expect(a.completenessReason).toContain("complete sentence");
+    expect(a.tail).not.toContain("________________");
+  });
+
   it("counts story words separately from the whole document", () => {
     const text = chapter("# Chapter One", body) + reviewRequest;
     const a = analyseManuscript(text);
