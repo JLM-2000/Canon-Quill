@@ -507,14 +507,36 @@ async function runUpdate(btn) {
 
 async function restartStudio(btn) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Restarting…';
-  try { await api("/api/version/restart", { method: "POST" }); } catch { /* the process exits mid-request */ }
-  // Poll until the replacement answers, then reload the page.
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    try { await api("/api/version"); location.reload(); return; } catch { /* still down */ }
+
+  try {
+    await api("/api/version/restart", { method: "POST" });
+  } catch (e) {
+    // The server refuses rather than exiting when it cannot start a
+    // replacement, so this is a real failure and the old one is still up.
+    toast(e.message, "error");
+    btn.disabled = false; btn.textContent = "Restart now";
+    return;
   }
+
+  // The old process answers for a moment after replying, so polling
+  // immediately would reload the page into a server about to exit. Wait for it
+  // to go, then wait for the replacement.
+  await new Promise((r) => setTimeout(r, 2000));
+
+  for (let i = 0; i < 60; i++) {
+    try {
+      await api("/api/version");
+      // One more beat so the reload lands on a server that is fully up.
+      await new Promise((r) => setTimeout(r, 400));
+      location.reload();
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
   btn.disabled = false; btn.textContent = "Restart now";
-  toast("The Studio did not come back. Check the terminal.", "error");
+  toast("The Studio did not come back. Check the terminal and start it again.", "error");
 }
 
 async function reload() {

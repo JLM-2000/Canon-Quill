@@ -103,23 +103,47 @@ export function createStudioApp() {
   /**
    * Restart into the updated code.
    *
-   * The process cannot reload its own modules, so it spawns a detached
-   * replacement and exits once that has had time to bind the port. The client
-   * polls /api/version until the new process answers.
+   * The process cannot reload its own modules, so it spawns a replacement and
+   * exits. Two things make that harder than it looks. The Studio is normally
+   * run through tsx, so re-spawning `node server.ts` starts a process that
+   * cannot parse TypeScript and dies immediately; the loader flags in
+   * `execArgv` have to be carried across. And the replacement cannot bind the
+   * port until this process has released it, so it retries rather than racing.
    */
   app.post("/api/version/restart", route(async (_req, res) => {
-    res.json({ restarting: true });
-    setTimeout(() => {
-      const child = spawn(process.argv[0], [process.argv[1]], {
+    const command = process.execPath;
+    const args = [...process.execArgv, process.argv[1], ...process.argv.slice(2)];
+
+    let child;
+    try {
+      child = spawn(command, args, {
         cwd: process.cwd(),
-        env: { ...process.env, CANON_QUILL_NO_OPEN: "1" },
+        env: { ...process.env, CANON_QUILL_NO_OPEN: "1", CANON_QUILL_RESTARTING: "1" },
         detached: true,
-        stdio: "ignore"
+        // Inherited so a failure to start is visible in the terminal the author
+        // is already looking at, rather than disappearing into /dev/null.
+        stdio: "inherit"
       });
-      child.unref();
-      // Give the replacement a moment to start before releasing the port.
-      setTimeout(() => process.exit(0), 1500);
-    }, 250);
+    } catch (error) {
+      throw new HttpError(500, `Could not start a replacement process: ${message(error)}`);
+    }
+
+    // If it dies immediately, the old process should stay up rather than
+    // leaving nothing listening at all.
+    let died = false;
+    child.once("error", () => (died = true));
+    child.once("exit", () => (died = true));
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    if (died) {
+      throw new HttpError(500, "The replacement process exited immediately. Restart the Studio by hand and check the terminal.");
+    }
+
+    child.unref();
+    res.json({ restarting: true, pid: child.pid });
+    // Released only after the reply is on the wire, so the client learns the
+    // restart began rather than seeing a dropped connection.
+    setTimeout(() => process.exit(0), 300);
   }));
 
   // --- Projects -------------------------------------------------------------
@@ -916,7 +940,7 @@ export function startStudio(options: StudioServerOptions = {}) {
   const port = options.port ?? Number(process.env.CANON_QUILL_STUDIO_PORT ?? 4180);
   // Loopback only. This surface exposes manuscripts and Drive contents.
   const host = options.host ?? "127.0.0.1";
-  return createStudioApp().listen(port, host, () => {
+  const server = createStudioApp().listen(port, host, () => {
     const url = `http://${host}:${port}`;
     console.log("");
     console.log("  Canon Quill Studio is running.");
@@ -927,6 +951,25 @@ export function startStudio(options: StudioServerOptions = {}) {
     console.log("");
     if (process.env.CANON_QUILL_NO_OPEN !== "1") openBrowser(url);
   });
+
+  /**
+   * A replacement started by a restart begins before its predecessor has let
+   * go of the port, so the address being in use is expected for a moment
+   * rather than fatal.
+   */
+  const startedAt = Date.now();
+  const patience = process.env.CANON_QUILL_RESTARTING === "1" ? 20_000 : 3_000;
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EADDRINUSE") throw error;
+    if (Date.now() - startedAt > patience) {
+      console.error(`\n  Port ${port} is still in use after waiting.`);
+      console.error(`  Another Studio may already be running, or set CANON_QUILL_STUDIO_PORT to a free port.\n`);
+      process.exit(1);
+    }
+    setTimeout(() => server.listen(port, host), 400);
+  });
+
+  return server;
 }
 
 /**
