@@ -408,7 +408,7 @@ describe("style source requirement", () => {
     await seed([doc("a", ["notes"], 50000)]);
     const { status, body } = await call("/api/sources/reviewed", { method: "POST" });
     expect(status).toBe(400);
-    expect(body.error).toMatch(/nothing is marked as your writing/i);
+    expect(body.error).toMatch(/no series book is marked/i);
   });
 
   it("requires references as well as a style source", async () => {
@@ -416,7 +416,7 @@ describe("style source requirement", () => {
     const { body } = await call("/api/sources/check");
     expect(body.style.ok).toBe(true);
     expect(body.references.ok).toBe(false);
-    expect(body.references.reason).toMatch(/nothing is marked as references/i);
+    expect(body.references.reason).toMatch(/nothing is marked as a reference/i);
     expect((await call("/api/sources/reviewed", { method: "POST" })).status).toBe(400);
   });
 

@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
-import { classifySource, sourceKindCounts, sourceKindLabels, type SourceKind } from "../analysis/classify.js";
+import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
 import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
 import { scoreAgainstFingerprint } from "../style/score.js";
 import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
@@ -160,7 +160,7 @@ export function createStudioApp() {
   app.get("/api/state", route(async (_req, res) => {
     const slug = await activeSlug();
     if (!slug) {
-      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts });
+      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts, kindPurpose: sourceKindPurpose });
       return;
     }
     res.json({
@@ -168,7 +168,8 @@ export function createStudioApp() {
       projects: await listProjects(),
       // Sent with the state so the client never keeps its own copy to drift.
       kinds: sourceKindLabels,
-      kindCounts: sourceKindCounts
+      kindCounts: sourceKindCounts,
+      kindPurpose: sourceKindPurpose
     });
   }));
 
@@ -790,7 +791,7 @@ export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
     ok: styleSources.length > 0 && styleWords >= minimumStyleWords,
     reason:
       styleSources.length === 0
-        ? "Nothing is marked as Your writing. Mark whatever you wrote, or mark what you want to write like as References and it will learn from that."
+        ? "No series book is marked. Mark a book you wrote in this series, or mark what you want to write like as a Reference and the voice is learned from that instead."
         : styleWords < minimumStyleWords
           ? `Only ${styleWords.toLocaleString()} words to learn the voice from. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by.`
           : ""
@@ -804,7 +805,7 @@ export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
     ok: references.length > 0 && referenceWords >= minimumReferenceWords,
     reason:
       references.length === 0
-        ? "Nothing is marked as References. The book needs material to be about, not just a voice to be in. If you are continuing your own series, mark your past books as References as well as Your writing."
+        ? "Nothing is marked as a Reference. The book needs material to draw on, not just a voice to write in. Series books count here too and are marked as references automatically."
         : referenceWords < minimumReferenceWords
           ? `Only ${referenceWords.toLocaleString()} words of reference material. Below about ${minimumReferenceWords.toLocaleString()} there is little for the book to draw on.`
           : ""

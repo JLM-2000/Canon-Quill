@@ -40,14 +40,14 @@ export interface ClassifyInput {
 export const reviewThreshold = 0.6;
 
 /**
- * The category name, used on the group chips. The ids stay as they are; these
- * are what the author reads. "Book" was wrong twice over: a style source is
- * often a short story or a draft, and a first-time author has no past series.
+ * What a single document *is*, used on the group chips, so these read in the
+ * singular: a chip says "this document is a series book". The ids stay as they
+ * are; only the wording changes.
  */
 export const sourceKindLabels: Record<SourceKind, string> = {
-  past_book: "Your writing",
-  reference_book: "References",
-  characters: "Characters",
+  past_book: "Series book",
+  reference_book: "Reference",
+  characters: "Character sheet",
   timeline: "Timeline",
   world: "Worldbuilding",
   plot: "Plot & outline",
@@ -59,8 +59,20 @@ export const sourceKindLabels: Record<SourceKind, string> = {
  * nouns that read the same either way, so the pair is explicit rather than
  * derived by appending an s.
  */
+/** One line on what each group does, shown as help under the chips. */
+export const sourceKindPurpose: Record<SourceKind, string> = {
+  past_book:
+    "A book you wrote in this series. Gives both the voice to write in and the canon to stay consistent with.",
+  reference_book: "Material the book should draw on: lore, research, comparison titles, anything not a series book of yours.",
+  characters: "Who exists, what they want, what they look like.",
+  timeline: "What happened when.",
+  world: "Setting, factions, rules of the world.",
+  plot: "Outlines, synopses, beat sheets.",
+  notes: "Everything else worth keeping to hand."
+};
+
 export const sourceKindCounts: Record<SourceKind, { one: string; many: string }> = {
-  past_book: { one: "Your writing", many: "Your writing" },
+  past_book: { one: "Series book", many: "Series books" },
   reference_book: { one: "Reference", many: "References" },
   characters: { one: "Character sheet", many: "Character sheets" },
   timeline: { one: "Timeline", many: "Timelines" },

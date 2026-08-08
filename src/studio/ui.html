@@ -233,13 +233,28 @@
   .toast {
     position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-    padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 50;
-    box-shadow: 0 8px 28px rgba(0,0,0,.35); max-width: 90vw;
+    padding: 10px 16px 10px 13px; border-radius: 8px; font-size: 13px; z-index: 70;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35); max-width: min(90vw, 520px);
+    display: flex; gap: 9px; align-items: flex-start; border-left-width: 3px;
   }
-  .toast.err { border-color: var(--bad); color: var(--bad); }
+  .toast svg { width: 15px; height: 15px; flex: none; margin-top: 1px; }
+  .toast.success { border-left-color: var(--good); }
+  .toast.success svg { color: var(--good); }
+  .toast.error { border-left-color: var(--bad); }
+  .toast.error svg { color: var(--bad); }
+  .toast.warn { border-left-color: var(--warn); }
+  .toast.warn svg { color: var(--warn); }
+  .toast.info { border-left-color: var(--accent); }
+  .toast.info svg { color: var(--accent); }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border);
-    border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite;
+    box-sizing: border-box; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* A ring reads as progress at size; a thin arc reads as a flickering bar. */
+  .spin-lg { width: 34px; height: 34px; border-width: 3px; vertical-align: 0;
+    border-color: var(--border); border-top-color: var(--accent);
+    border-right-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    animation-duration: .9s; }
   code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
   @media (max-width: 760px) {
     .app { grid-template-columns: 1fr; }
@@ -281,6 +296,7 @@ let indexError = null;
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
 let KIND_COUNTS = {};
+let KIND_PURPOSE = {};
 
 const PHASES = [
   { id: "engine",      label: "Writing engine", group: "Set up" },
@@ -305,12 +321,27 @@ async function api(path, options) {
   return data;
 }
 
-function toast(msg, isError) {
+const TOAST_ICONS = {
+  success: '<path d="M20 6L9 17l-5-5"/>',
+  error: '<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>',
+  warn: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>'
+};
+
+/**
+ * `kind` is one of success, error, warn, info. A boolean is still accepted so
+ * older call sites keep working, mapping true to error.
+ */
+function toast(msg, kind = "success") {
+  const type = kind === true ? "error" : kind === false ? "success" : kind;
   const el = document.createElement("div");
-  el.className = "toast" + (isError ? " err" : "");
-  el.textContent = msg;
+  el.className = `toast ${type}`;
+  el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"
+    stroke-linecap="round" stroke-linejoin="round">${TOAST_ICONS[type] || TOAST_ICONS.info}</svg>
+    <span></span>`;
+  el.querySelector("span").textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), isError ? 6000 : 3000);
+  setTimeout(() => el.remove(), type === "error" ? 7000 : type === "warn" ? 5500 : 3500);
 }
 
 let VERSION = null;
@@ -476,7 +507,7 @@ async function restartStudio(btn) {
     try { await api("/api/version"); location.reload(); return; } catch { /* still down */ }
   }
   btn.disabled = false; btn.textContent = "Restart now";
-  toast("The Studio did not come back. Check the terminal.", true);
+  toast("The Studio did not come back. Check the terminal.", "error");
 }
 
 async function reload() {
@@ -484,15 +515,16 @@ async function reload() {
     const r = await api("/api/state");
     S = r.state; PROJECTS = r.projects || [];
     KINDS = r.kinds || KINDS; KIND_COUNTS = r.kindCounts || KIND_COUNTS;
+    KIND_PURPOSE = r.kindPurpose || KIND_PURPOSE;
     render();
-  } catch (e) { toast(e.message, true); }
+  } catch (e) { toast(e.message, "error"); }
 }
 
 
 
 async function switchProject(slug) {
   try { await api(`/api/projects/${slug}/activate`, { method: "POST" }); await reload(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -577,7 +609,7 @@ function go(r) {
   if (isLocked(r)) {
     const need = PHASE_ORDER[furthestReached()];
     const label = PHASES.find((p) => p.id === need)?.label || need;
-    toast(`Finish ${label} first.`, true);
+    toast(`Finish ${label} first.`, "info");
     return;
   }
   route = r; render();
@@ -614,7 +646,7 @@ let ENGINE = null;
 
 async function loadEngine() {
   try { ENGINE = await api("/api/engine"); if (route === "engine") render(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 function viewEngine() {
@@ -747,7 +779,7 @@ async function saveKey(btn) {
   const input = document.getElementById("apikey");
   const key = input?.value?.trim();
   const out = document.getElementById("keyresult");
-  if (!key) { toast("Paste a key first.", true); return; }
+  if (!key) { toast("Paste a key first.", "warn"); return; }
 
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Verifying…';
   try {
@@ -755,9 +787,9 @@ async function saveKey(btn) {
     if (input) input.value = "";
     if (out) out.innerHTML = `<span style="color:var(--${r.verification.ok ? "good" : "warn"})">${
       r.verification.ok ? "✓" : "!"} ${esc(r.verification.detail)}</span>`;
-    toast(r.verification.ok ? "Key saved and verified." : "Key saved, but it did not verify.", !r.verification.ok);
+    toast(r.verification.ok ? "Key saved and verified." : "Key saved, but it did not verify.", r.verification.ok ? "success" : "warn");
     await loadEngine(); await reload();
-  } catch (e) { toast(e.message, true); }
+  } catch (e) { toast(e.message, "error"); }
   finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Save and verify"; } }
 }
 
@@ -767,8 +799,8 @@ async function verifyKey(btn) {
   try {
     const r = await api("/api/engine/key/verify", { method: "POST", body: { provider: S.engine.provider } });
     if (out) out.innerHTML = `<span style="color:var(--${r.ok ? "good" : "bad"})">${r.ok ? "✓" : "✗"} ${esc(r.detail)}</span>`;
-    toast(r.ok ? "Key works." : "Key did not verify.", !r.ok);
-  } catch (e) { toast(e.message, true); }
+    toast(r.ok ? "Key works." : "Key did not verify.", r.ok ? "success" : "error");
+  } catch (e) { toast(e.message, "error"); }
   finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Verify"; } }
 }
 
@@ -777,19 +809,19 @@ async function removeKey(btn) {
   try {
     await api(`/api/engine/key/${S.engine.provider}`, { method: "DELETE" });
     toast("Key removed."); await loadEngine(); await reload();
-  } catch (e) { toast(e.message, true); btn.disabled = false; }
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 async function setEngine(patch) {
   try { ENGINE = await api("/api/engine", { method: "PATCH", body: patch }); await reload(); loadEngine(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 let DRIVE = null;
 
 async function loadDrive() {
   try { DRIVE = await api("/api/drive/status"); if (route === "connect") render(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 function viewConnect() {
@@ -877,15 +909,15 @@ async function connectDrive(btn) {
         toast("Drive connected."); await reload(); render(); return;
       }
     }
-    toast("Still waiting for authorisation. Press Check again once you have approved.", true);
-  } catch (e) { toast(e.message, true); }
+    toast("Still waiting for authorisation. Press Check again once you have approved.", "warn");
+  } catch (e) { toast(e.message, "error"); }
   finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Connect Google Drive"; } }
 }
 
 async function checkDrive(btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking'; }
   try { DRIVE = await api("/api/drive/status"); await reload(); render(); }
-  catch (e) { toast(e.message, true); if (btn) { btn.disabled = false; btn.textContent = "Check again"; } }
+  catch (e) { toast(e.message, "error"); if (btn) { btn.disabled = false; btn.textContent = "Check again"; } }
 }
 
 function viewSources() {
@@ -971,7 +1003,7 @@ async function loadBrowse(folderId) {
     const r = await api(`/api/drive/browse?folderId=${encodeURIComponent(folderId)}`);
     browse.entries = r.entries; browse.folderId = folderId;
     browse.emptyBecauseScope = r.emptyBecauseScope; browse.canBrowse = r.canBrowse;
-  } catch (e) { toast(e.message, true); browse.entries = []; }
+  } catch (e) { toast(e.message, "error"); browse.entries = []; }
   browse.loading = false; render();
 }
 function openFolder(id, name) { browse.crumbs.push({ id, name }); loadBrowse(id); }
@@ -1012,11 +1044,11 @@ async function runAnalysis(btn) {
     S = await api("/api/sources/index", { method: "POST" });
     indexing = false;
     await loadCheck();
-    toast(`Indexed ${plural(S.sources.length, "document")}.`);
+    toast(`Indexed ${plural(S.sources.length, "document")} from your Drive.`);
   } catch (e) {
     indexing = false;
     indexError = e.message;
-    toast(e.message, true);
+    toast(e.message, "error");
   }
   render();
 }
@@ -1024,8 +1056,8 @@ async function runAnalysis(btn) {
 function viewAnalyze() {
   if (indexing) return `
     <h1>Analyse and group</h1>
-    <div class="card" style="text-align:center;padding:40px 20px">
-      <div style="font-size:22px;margin-bottom:12px"><span class="spin" style="width:20px;height:20px;border-width:3px"></span></div>
+    <div class="card" style="text-align:center;padding:44px 20px">
+      <div style="margin-bottom:16px;line-height:0"><span class="spin spin-lg"></span></div>
       <b>Reading your Drive</b>
       <p class="sub" style="margin:8px auto 0;max-width:46ch">Walking each folder, downloading every
       document and sorting it into groups. A large folder can take a few minutes. You can leave this
@@ -1059,7 +1091,8 @@ function viewAnalyze() {
       <div class="chips">
         ${Object.entries(KINDS).map(([k, label]) => {
           const on = (src.kinds || []).includes(k);
-          return `<button class="chip ${on ? "on" : ""}" onclick="toggleKind('${src.driveId}','${k}')">${label}</button>`;
+          return `<button class="chip ${on ? "on" : ""}" title="${esc(KIND_PURPOSE[k] || "")}"
+            onclick="toggleKind('${src.driveId}','${k}')">${esc(label)}</button>`;
         }).join("")}
       </div>
       ${ungrouped ? `<div class="doc-warn">
@@ -1078,8 +1111,8 @@ function viewAnalyze() {
   timeline, an outline and loose notes.</p>
 
   ${check ? `<div class="reqs">
-    ${[["Your writing", check.style, "sets how the book sounds"],
-       ["References", check.references, "sets what the book is about"]].map(([title, r, purpose]) => `
+    ${[["Series books", check.style, "your prose, so the writing sounds like you"],
+       ["References", check.references, "material the book draws on"]].map(([title, r, purpose]) => `
       <div class="req ${r.ok ? "ok" : "todo"}">
         <div class="req-h">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
@@ -1089,17 +1122,26 @@ function viewAnalyze() {
           <b>${title}</b>
           <span class="req-n">${r.documents ? `${plural(r.documents, "document")} · ${r.words.toLocaleString()} words` : "none yet"}</span>
         </div>
-        <p>${r.ok
-          ? `Enough. This ${purpose}.`
-          : esc(r.reason)}</p>
+        <p>${r.ok ? `Enough: ${purpose}.` : esc(r.reason)}</p>
       </div>`).join("")}
   </div>
+
+  <div class="info">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+    <div><b>What the two do</b>
+      <p>A <b>series book</b> is one you wrote in this series. It does both jobs at once: the prose teaches
+      the voice, and the story is canon the new book has to stay consistent with. Anything classified that
+      way is marked as a reference automatically, since it is both.</p>
+      <p style="margin-top:6px">A <b>reference</b> is anything else the book should draw on: lore documents,
+      research, a comparison title. References carry material, not voice, unless you have no series book at
+      all, in which case the voice is learned from them instead.</p></div></div>
 
   ${check.fromReference && check.style.ok ? `<div class="info warn">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
       <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
     <div><b>Learning the voice from someone else</b>
-      <p>Nothing is marked as <b>Your writing</b>, so the style will be learned from your references. The
+      <p>No series book is marked, so the style will be learned from your references. The
       book will read like whoever wrote those pages rather than like you. That is a legitimate way to start
       a first book, but it should be a decision rather than an accident.</p></div></div>` : ""}` : ""}
 
@@ -1137,7 +1179,7 @@ async function toggleKind(driveId, kind) {
   try {
     S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kinds: src.kinds } });
     await loadCheck();
-  } catch (e) { toast(e.message, true); await reload(); }
+  } catch (e) { toast(e.message, "error"); await reload(); }
 }
 
 async function removeSource(driveId) {
@@ -1154,14 +1196,18 @@ async function removeSource(driveId) {
 
 async function confirmRemoveSource(driveId) {
   closeModal();
-  try { S = await api(`/api/sources/${driveId}`, { method: "DELETE" }); await loadCheck(); render(); toast("Removed."); }
-  catch (e) { toast(e.message, true); }
+  const name = S.sources.find((x) => x.driveId === driveId)?.name ?? "Document";
+  try {
+    S = await api(`/api/sources/${driveId}`, { method: "DELETE" });
+    await loadCheck(); render();
+    toast(`Removed "${name}" from the analysis.`);
+  } catch (e) { toast(e.message, "error"); }
 }
 
 async function finishReview(btn) {
   btn.disabled = true;
   try { S = await api("/api/sources/reviewed", { method: "POST" }); go("intake"); }
-  catch (e) { toast(e.message, true); btn.disabled = false; }
+  catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 function viewIntake() {
@@ -1210,7 +1256,7 @@ function viewIntake() {
 
 async function setProject(patch) {
   try { S = await api("/api/project", { method: "PATCH", body: patch }); render(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 function viewStyle() {
@@ -1250,7 +1296,7 @@ async function buildStyle(btn) {
     S = await api("/api/style/build", { method: "POST", body: { useReference: books.length === 0 } });
     toast("Style corpus built."); render(); loadFingerprint();
   }
-  catch (e) { toast(e.message, true); render(); }
+  catch (e) { toast(e.message, "error"); render(); }
 }
 
 async function loadFingerprint() {
@@ -1306,7 +1352,7 @@ async function answer(id, text) {
   if (!text || !String(text).trim()) return;
   try { S = await api(`/api/questions/${id}/answer`, { method: "POST", body: { answer: String(text) } });
     toast("Answer recorded."); render(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 function viewChapters() {
@@ -1351,7 +1397,7 @@ function viewChapters() {
 
 async function setStatus(number, status) {
   try { S = await api(`/api/chapters/${number}/status`, { method: "POST", body: { status } }); render(); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 // --- boot ------------------------------------------------------------------
