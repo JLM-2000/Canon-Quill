@@ -12,9 +12,11 @@ There are three pieces, and it helps to keep them separate.
 
 **The engine** is plain TypeScript. It measures prose, retrieves passages, checks continuity. It has no opinions and calls no models. Everything it reports is reproducible.
 
-**The agents** are OpenCode prompts in `.opencode/agents/`. They do the writing. They read from the engine and write back to it.
+**The agents** are the prompts that do the writing. They read from the engine and write back to it. The same prompts ship for both runtimes: `.claude/agents/` for Claude Code, `.opencode/agents/` for OpenCode. The OpenCode files are the source and the Claude Code ones are generated from them by `npm run sync:agents`, so edit the OpenCode copies.
 
-You can use the Studio without ever opening OpenCode. You will not get chapters that way, but every setup and analysis step works standalone.
+**The runtime** is Claude Code or OpenCode. It runs the agents and owns the model connection.
+
+You can use the Studio without opening either. You will not get chapters that way, but every setup and analysis step works standalone.
 
 ---
 
@@ -84,10 +86,52 @@ The first screen in the Studio. Canon Quill's own engine needs no model at all, 
 
 **How to authenticate.**
 
-- **Subscription.** A Claude Pro or Max plan through Claude Code. No key, no per-token cost, and the cheapest way to run this. OpenAI's ChatGPT plan only works if your agent runtime supports signing in with it, which Claude Code does not.
-- **API key.** Pay per token. Export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the shell you start the Studio from, or put it in `.env`.
+- **Subscription.** A Claude Pro or Max plan. No key, no per-token cost, and the cheapest way to run this if you already pay for one. Setup below.
+- **API key.** Pay per token. Export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, or put it in `.env`.
 
-The Studio then checks whether a usable credential is actually present and tells you exactly what to set if not.
+The Studio then checks whether a usable credential is present and tells you exactly what to set if not.
+
+### Install a runtime
+
+The runtime is the program that actually talks to the model. You need one; Canon Quill drives it.
+
+**Claude Code** is the simpler choice, and the only one that can use a Claude subscription.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+**OpenCode** is the alternative, and the one to use if you want OpenAI.
+
+```bash
+npm install -g opencode-ai
+```
+
+`npm run setup` installs OpenCode for you if it is missing. Neither is installed automatically if you already have the other.
+
+### Connect a subscription
+
+Only needed if you picked **Subscription** above. On an API key there is nothing to connect.
+
+**Anthropic (Claude Pro or Max).** Run this once, from anywhere:
+
+```bash
+claude
+```
+
+The first run opens your browser and asks you to sign in with the Google or email account your plan is on. Approve it, and the login is stored in `~/.claude`. Then type `/exit`.
+
+To confirm it worked, run `claude` again: it should start straight into a prompt with no sign-in step. If you are ever unsure which account it is using, `/logout` then `claude` signs you in fresh.
+
+Back in the Studio, **Writing engine** will now show *Credential found*.
+
+**OpenAI (ChatGPT plan).** Claude Code cannot sign in with a ChatGPT plan, so on this provider a subscription only works if your runtime supports it. Check OpenCode's own documentation. Otherwise use an API key.
+
+### If the Studio says a credential is needed
+
+- **Anthropic, subscription:** you have not run `claude` and signed in yet, or you signed in as a different OS user. The check looks for `~/.claude`.
+- **Anthropic, API key:** `ANTHROPIC_API_KEY` is not visible to the Studio's process. Export it in the same shell, or add it to `.env`, then restart the Studio.
+- **Either, after adding to `.env`:** `.env` is read at startup only. Restart the Studio.
 
 **There is no field to paste a key, by design.** Anything typed into a web form ends up in a plaintext state file, so the API refuses credentials outright. Keys stay in your environment; subscriptions stay inside the runtime's own login.
 
@@ -103,7 +147,15 @@ Defaults come from `config/models.yaml` and can be changed per phase in the Stud
 | **Analysis** | Claude Haiku 4.5 | GPT-5.6 Luna | Extraction and summarising. High volume, low difficulty. |
 | **Orchestration** | Claude Haiku 4.5 | GPT-5.6 Luna | Routing between phases. Almost no reasoning. |
 
-Rough cost for a 90,000-word book at three passes per chapter: **$15 to $40** on Anthropic with Opus drafting and Sonnet elsewhere, **$5 to $12** on Sonnet throughout, and **nothing extra** on a Claude subscription. Verify prices before budgeting; the `verified` dates in `config/models.yaml` say when each was last checked, and the OpenAI entries below Sol are unverified.
+Rough cost for a 90,000-word book at three passes per chapter:
+
+| | Anthropic | OpenAI |
+|---|---|---|
+| Top tier for drafting, mid tier elsewhere | $15 to $40 | roughly $20 to $50 |
+| Mid tier throughout | $5 to $12 | unverified |
+| On a subscription | no marginal cost (Claude Pro or Max) | not available through Claude Code |
+
+The Studio shows the figures for whichever provider you picked, with the other alongside for comparison. Verify prices before budgeting: the `verified` dates in `config/models.yaml` record when each was last checked, and only GPT-5.6 Sol's pricing is confirmed on the OpenAI side.
 
 ---
 
@@ -143,7 +195,7 @@ GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/credentials.json
 
 An absolute path. `~` is not expanded.
 
-13. In `opencode.json`, change `canon_drive.enabled` from `false` to `true`. Restart OpenCode if it is running.
+13. If you are using OpenCode, change `canon_drive.enabled` from `false` to `true` in `opencode.json` and restart it. Claude Code needs nothing here; the Studio talks to Drive directly.
 
 14. In the Studio, press **Check connection**. A browser window opens once to authorise.
 
@@ -369,4 +421,4 @@ A low score is not automatically bad. If you deliberately wrote a chapter in a d
 
 **A chapter keeps failing style.** Read which metrics are drifting. If they are all the same direction, the drafting prompt is probably missing the fingerprint. If the score is fine but the prose feels wrong, the corpus may be too small or built from the wrong documents.
 
-**OpenCode does not list `book-orchestrator`.** Restart it from this folder; agents are read at startup.
+**The orchestrator agent is not listed.** Restart the runtime from this folder; both Claude Code and OpenCode read their agent files at startup. If it is missing under Claude Code specifically, run `npm run sync:agents` to regenerate `.claude/agents/` from the OpenCode sources.

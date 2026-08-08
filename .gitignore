@@ -29,6 +29,7 @@ credentials.json
 client_secret*.json
 token.json
 *token*.json
+.auth/
 *.pem
 *.key
 *.secret.*

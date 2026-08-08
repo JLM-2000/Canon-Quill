@@ -4,6 +4,10 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { z } from "zod";
 import { SafeDriveClient } from "../drive/client.js";
 import { extractDriveId } from "../drive/id.js";
+import { loadDotEnv } from "../config/env.js";
+
+// Read .env before anything looks at process.env.
+loadDotEnv();
 
 const drive = new SafeDriveClient();
 

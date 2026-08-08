@@ -30,9 +30,16 @@
 
 import path from "node:path";
 
-/** Root of the workspaces tree. */
+/**
+ * Root of the workspaces tree.
+ *
+ * `CANON_QUILL_WORKSPACES_ROOT` overrides it. The test suite sets that to a
+ * temp directory, because it deletes this root between cases and previously
+ * did so against the author's real books.
+ */
 export function workspacesRoot(): string {
-  return path.join(process.cwd(), "workspaces");
+  const override = process.env.CANON_QUILL_WORKSPACES_ROOT?.trim();
+  return override ? path.resolve(override) : path.join(process.cwd(), "workspaces");
 }
 
 export function registryPath(): string {

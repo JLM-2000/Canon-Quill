@@ -110,7 +110,7 @@ Node 20.19 or newer.
 npm run setup
 ```
 
-That checks your Node version, installs OpenCode and OpenSpec if missing, builds, and validates the workflow.
+That checks your Node version, installs OpenCode and OpenSpec if missing, builds, and validates the workflow. If you would rather use Claude Code, install it with `npm install -g @anthropic-ai/claude-code`; the guide covers connecting a subscription to either.
 
 ### Google Drive
 

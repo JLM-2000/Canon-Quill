@@ -150,19 +150,44 @@ providers:
           Cost-sensitive, high-volume tier. Pricing not confirmed here.
 
 # ---------------------------------------------------------------------------
-# Rough cost per book. Order of magnitude only.
+# Rough cost per book, per provider. Order of magnitude only.
 #
 # Assumes a 90,000-word book, three drafting passes per chapter, and exemplars
 # and canon re-sent on every call. Real usage varies enormously with how much
 # reference material you index and how often you request changes.
 # ---------------------------------------------------------------------------
 estimates:
-  assumptions: 90k-word book, 3 passes per chapter, exemplars resent per call
-  anthropic_mixed: Roughly 15 to 40 USD using Opus 5 for drafting and Sonnet 5 elsewhere
-  anthropic_budget: Roughly 5 to 12 USD using Sonnet 5 throughout
-  subscription: >
-    Zero marginal cost on a Claude Pro or Max plan through Claude Code, subject
-    to that plan's usage limits. This is the cheapest way to run Canon Quill.
-  note: >
-    The engine itself is free. Style scoring, corpus building, exemplar
+  assumptions: 90k-word book, 3 passes per chapter, exemplars resent on every call
+  engine_note: >
+    Canon Quill's own engine is free. Style scoring, corpus building, exemplar
     retrieval and flow validation never call a model.
+
+  anthropic:
+    premium:
+      label: Opus 5 for drafting, Sonnet 5 elsewhere
+      cost: 15 to 40 USD
+    budget:
+      label: Sonnet 5 throughout
+      cost: 5 to 12 USD
+    subscription:
+      label: On a Claude Pro or Max subscription
+      cost: no marginal cost
+      note: Subject to your plan's usage limits.
+
+  openai:
+    premium:
+      label: GPT-5.6 Sol for drafting, Terra elsewhere
+      cost: roughly 20 to 50 USD
+      note: >
+        Sol is confirmed at 5.00 in / 30.00 out. Terra and Luna pricing is not
+        confirmed here, so the "elsewhere" half of this figure is an estimate.
+    budget:
+      label: GPT-5.6 Terra throughout
+      cost: unverified
+      note: Terra pricing is not confirmed. Check the OpenAI pricing page.
+    subscription:
+      label: On a ChatGPT subscription
+      cost: not available
+      note: >
+        Claude Code cannot sign in with a ChatGPT plan. OpenAI runs on an API
+        key here unless your agent runtime supports ChatGPT sign-in.

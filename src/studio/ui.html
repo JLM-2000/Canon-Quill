@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Canon Quill Studio</title>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%237aa2f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4C11 5 7 10 6 16l-2 4"/><path d="M13 5c3 3 4 7 3 11-3 1-7 0-10-3"/></svg>' />
 <style>
   :root {
     --bg: #0e1116;
@@ -131,6 +132,18 @@
   .src .n { font-weight: 600; word-break: break-word; }
   .src .why { color: var(--faint); font-size: 11px; margin-top: 2px; }
   .src select { margin-top: 6px; padding: 3px 6px; font-size: 11.5px; }
+
+  /* informational panels: never clickable, visually distinct from choices */
+  .info { display: flex; gap: 10px; align-items: flex-start; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+  .info .ic { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--faint); }
+  .info.ok .ic { color: var(--good); }
+  .info.warn .ic { color: var(--warn); }
+  .info b { display: block; font-size: 12.5px; margin-bottom: 2px; }
+  .info p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .info code { font-size: 11.5px; }
+  .sectionlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--faint); font-weight: 700; margin: 22px 0 8px; }
 
   /* questions */
   .q { border-left: 3px solid var(--accent); }
@@ -271,6 +284,12 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 function fidelityClass(v) { return v >= 80 ? "good" : v >= 60 ? "warn" : "bad"; }
 
+/** "1 book" / "2 books". Pass an explicit plural for irregular words, and
+ *  `display` when the number needs formatting (thousands separators). */
+function plural(n, one, many, display) { return `${display ?? n} ${n === 1 ? one : (many || one + "s")}`; }
+/** The verb to agree with a count. */
+function verb(n, one, many) { return n === 1 ? one : many; }
+
 // --- nav -------------------------------------------------------------------
 function renderNav() {
   const nav = document.getElementById("nav");
@@ -297,7 +316,8 @@ function renderNav() {
     }
   }
   nav.innerHTML = html;
-  document.getElementById("proj").textContent = S?.projectName || "no book selected";
+  // The book name lives in the picker above, so the brand block stays static.
+  document.getElementById("proj").textContent = "Studio";
 }
 
 function isDone(id) {
@@ -367,7 +387,8 @@ function viewEngine() {
   corpus, retrieving exemplars and checking continuity are plain functions, so they cost nothing and
   work offline. A model is only needed to write the chapters, and this is where you choose which.</p>
 
-  <h2>Provider</h2>
+  <div class="sectionlabel">Choose</div>
+  <h2 style="margin-top:0">Provider</h2>
   <div class="choices">
     ${providerCard("anthropic", "Anthropic", "Claude. Works with a Pro or Max subscription through Claude Code, or with an API key.")}
     ${providerCard("openai", "OpenAI", "GPT. API key only, unless your agent runtime supports ChatGPT sign-in.")}
@@ -382,20 +403,23 @@ function viewEngine() {
     ${authCard("api_key", "API key", "Pay per token. The key stays in your environment.")}
   </div>` : ""}
 
-  ${cred ? `<div class="card" style="border-color:${cred.ready ? "var(--good)" : "var(--warn)"}">
-    <div class="row"><b>Credential check</b>
-      <span class="pill ${cred.ready ? "good" : "warn"}">${cred.ready ? "ready" : "action needed"}</span></div>
-    <div class="hint" style="margin-top:6px">${esc(cred.detail)}</div>
-    ${cred.env && !cred.ready ? `<div class="hint" style="margin-top:8px">
-      <code>export ${esc(cred.env)}=...</code> then restart the Studio.</div>` : ""}
-  </div>` : ""}
+  ${cred || choice.provider ? '<div class="sectionlabel">Status</div>' : ""}
 
-  <div class="card" style="border-color:var(--border)">
-    <b>Canon Quill never stores your key</b>
-    <div class="hint" style="margin-top:6px">There is no field here to paste one, and the API rejects
-    any attempt to send one. Keys are read from the environment; subscriptions stay inside your agent
-    runtime's own login.</div>
-  </div>
+  ${cred ? `<div class="info ${cred.ready ? "ok" : "warn"}">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      ${cred.ready ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+    </svg>
+    <div><b>${cred.ready ? "Credential found" : "Credential needed"}</b>
+      <p>${esc(cred.detail)}</p>
+      ${cred.env && !cred.ready ? `<p style="margin-top:6px"><code>export ${esc(cred.env)}=...</code>, then restart the Studio.</p>` : ""}
+    </div></div>` : ""}
+
+  ${choice.provider ? `<div class="info">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+    <div><b>Canon Quill never stores your key</b>
+      <p>There is no field here to paste one, and the API rejects any attempt to send one. Keys are read
+      from your environment; subscriptions stay inside your agent runtime's own login.</p></div></div>` : ""}
 
   ${choice.provider && cat ? `
   <h2>Models per phase</h2>
@@ -417,15 +441,36 @@ function viewEngine() {
         <td class="num">${price}</td></tr>`;
     }).join("")}
   </table></div>
-  ${cat.estimates ? `<div class="card"><b>Rough cost per book</b>
-    <div class="hint" style="margin-top:6px">${esc(cat.estimates.assumptions || "")}</div>
-    <table style="margin-top:8px">
-      <tr><td>Opus for drafting, Sonnet elsewhere</td><td class="num">${esc(cat.estimates.anthropic_mixed || "")}</td></tr>
-      <tr><td>Sonnet throughout</td><td class="num">${esc(cat.estimates.anthropic_budget || "")}</td></tr>
-      <tr><td>On a Claude subscription</td><td class="num">no marginal cost</td></tr>
-    </table></div>` : ""}` : ""}
+  ${cat.estimates ? renderEstimates(cat, choice.provider) : ""}` : ""}
 
   ${choice.provider && choice.authMethod ? `<button onclick="go('connect')">Next: connect Drive</button>` : ""}`;
+}
+
+function renderEstimates(cat, provider) {
+  const e = cat.estimates || {};
+  const mine = e[provider];
+  if (!mine) return "";
+  const otherId = provider === "anthropic" ? "openai" : "anthropic";
+  const other = e[otherId];
+  const otherLabel = cat.providers?.[otherId]?.label || otherId;
+
+  const row = (r) => r ? `<tr><td>${esc(r.label)}${
+    r.note ? `<div style="color:var(--faint);font-size:11.5px">${esc(r.note.trim())}</div>` : ""
+  }</td><td class="num">${esc(r.cost)}</td></tr>` : "";
+
+  return `<div class="card"><b>Rough cost per book</b>
+    <div class="hint" style="margin-top:6px">${esc(e.assumptions || "")}</div>
+    <table style="margin-top:8px">${row(mine.premium)}${row(mine.budget)}${row(mine.subscription)}</table>
+  </div>
+  <div class="info">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <path d="M8 7h12M8 12h12M8 17h12M4 7v.01M4 12v.01M4 17v.01"/></svg>
+    <div><b>For comparison: ${esc(otherLabel)}</b>
+      <p>${other
+        ? `${esc(other.premium.label)}, ${esc(other.premium.cost)}. Subscription: ${esc(other.subscription.cost)}.`
+        : "No figures recorded."}</p>
+      <p style="margin-top:4px">Switching provider above swaps every model in the table.</p>
+    </div></div>`;
 }
 
 async function setEngine(patch) {
@@ -499,7 +544,7 @@ function viewSources() {
     <div class="row" style="margin-top:14px">
       <button ${picked.size ? "" : "disabled"} onclick="saveRoots(this)">Save selection</button>
       <button class="ghost" ${S.drive.referenceRoots.length ? "" : "disabled"} onclick="indexSources(this)">
-        Analyse ${S.drive.referenceRoots.length || ""} folder(s)</button>
+        Analyse ${S.drive.referenceRoots.length ? plural(S.drive.referenceRoots.length, "folder") : "folders"}</button>
     </div>
     <div class="hint">Analysing walks each folder, reads every document, and groups them automatically.</div>
   </div>`;
@@ -563,7 +608,7 @@ function viewAnalyze() {
   column . This matters: only <b>Past series book</b> feeds the style corpus and canon, so a
   reference book filed wrongly would push the writing toward another author's voice.</p>
   ${needsReview.length ? `<div class="card" style="border-color:var(--warn)">
-    <b>${needsReview.length} document(s) need your confirmation</b>
+    <b>${plural(needsReview.length, "document")} ${verb(needsReview.length, "needs", "need")} your confirmation</b>
     <p class="hint">Low-confidence guesses: ${needsReview.map((s) => esc(s.name)).join(", ")}</p>
     <button class="ghost sm" style="margin-top:8px" onclick="confirmAll(this)">Accept all as classified</button>
   </div>` : ""}
@@ -641,15 +686,15 @@ function viewStyle() {
   scored against your measured fingerprint, not against a generic idea of good writing.</p>
 
   <div class="card spread">
-    <div><b>${books.length} past book(s) available</b>
-      <div class="hint">${books.map((b) => esc(b.name)).join(", ") || "None grouped as past series books yet."}</div></div>
+    <div><b>${books.length === 0 ? "No past books indexed yet" : plural(books.length, "past book") + " available"}</b>
+      <div class="hint">${books.map((b) => esc(b.name)).join(", ") || "Group at least one of your own books as a past series book on the Analyse screen."}</div></div>
     <button ${books.length ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild" : "Build corpus"}</button>
   </div>
 
   ${sc.built ? `<div class="card">
     <div class="row" style="margin-bottom:10px"><b>Corpus built</b>
-      <span class="pill good">${sc.passageCount} passages</span>
-      <span class="pill">${sc.wordCount.toLocaleString()} words</span></div>
+      <span class="pill good">${plural(sc.passageCount, "passage")}</span>
+      <span class="pill">${plural(sc.wordCount, "word", null, sc.wordCount.toLocaleString())}</span></div>
     ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
     <div id="fp"><span class="spin"></span></div></div>` : ""}`;
 }
@@ -733,9 +778,9 @@ function viewChapters() {
         : "Pick a drafting mode under Project shape."}</p>
 
   <div class="card spread">
-    <div><b>${approved} of ${cs.length} approved</b>
+    <div><b>${approved} of ${plural(cs.length, "chapter")} approved</b>
       <div class="meter" style="width:180px;margin-top:6px"><i style="width:${cs.length ? (approved / cs.length) * 100 : 0}%"></i></div></div>
-    <span class="pill">${cs.reduce((n, c) => n + (c.wordCount || 0), 0).toLocaleString()} words</span>
+    <span class="pill">${(() => { const t = cs.reduce((n, c) => n + (c.wordCount || 0), 0); return plural(t, "word", null, t.toLocaleString()); })()}</span>
   </div>
 
   <div class="card" style="padding:0">

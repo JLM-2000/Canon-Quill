@@ -37,6 +37,10 @@ import {
 import { workspacePaths } from "../workspace/paths.js";
 import { appendLog } from "../project/logs.js";
 import { checkCredentials, defaultModels, loadCatalog } from "./engine.js";
+import { loadDotEnv } from "../config/env.js";
+
+// Read .env before anything looks at process.env.
+loadDotEnv();
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 

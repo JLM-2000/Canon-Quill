@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, resolve } from "node:path";
+import { explainMissingPath, resolveExistingPath } from "../config/env.js";
 
 const defaultScopes = ["https://www.googleapis.com/auth/drive.file"];
 const tokenRefreshSkewMs = 60_000;
@@ -76,16 +77,44 @@ function isUsable(token: StoredToken): boolean {
 }
 
 async function loadOAuthCredentials(): Promise<OAuthClientConfig> {
-  const keyfilePath = process.env.GOOGLE_OAUTH_CLIENT_JSON;
-  if (!keyfilePath) {
-    throw new Error("GOOGLE_OAUTH_CLIENT_JSON must point to a Google OAuth desktop credentials JSON file.");
+  const configured = process.env.GOOGLE_OAUTH_CLIENT_JSON?.trim();
+
+  if (!configured) {
+    throw new Error(
+      "GOOGLE_OAUTH_CLIENT_JSON is not set.\n" +
+        "  Add it to .env in the project root, or export it before starting the Studio:\n" +
+        "    GOOGLE_OAUTH_CLIENT_JSON=/absolute/path/to/credentials.json\n" +
+        "  Then restart the Studio so it picks up the change."
+    );
   }
 
-  const raw = JSON.parse(await readFile(resolve(keyfilePath), "utf8")) as OAuthCredentialsFile;
+  const file = resolveExistingPath(configured);
+  if (!file) {
+    throw new Error(explainMissingPath("GOOGLE_OAUTH_CLIENT_JSON", configured));
+  }
+
+  let raw: OAuthCredentialsFile;
+  try {
+    raw = JSON.parse(await readFile(file, "utf8")) as OAuthCredentialsFile;
+  } catch (error) {
+    throw new Error(
+      `Could not read ${file}: ${error instanceof Error ? error.message : String(error)}\n` +
+        "  If this is a permissions error on a Windows drive, copy the file into the project instead."
+    );
+  }
+
   const credentials = raw.installed ?? raw.web;
   if (!credentials?.client_id || !credentials.auth_uri || !credentials.token_uri) {
-    throw new Error("GOOGLE_OAUTH_CLIENT_JSON must contain installed or web OAuth client credentials.");
+    // Being specific here matters: a service-account key is the usual mistake,
+    // and it is a valid JSON file, so a generic parse error would mislead.
+    const hint =
+      "type" in (raw as Record<string, unknown>) &&
+      (raw as unknown as { type?: string }).type === "service_account"
+        ? "\n  That file is a service account key. Canon Quill needs an OAuth client ID of type Desktop app."
+        : "\n  Expected a top-level \"installed\" (Desktop app) or \"web\" key. Re-download the OAuth client JSON from the Google Cloud console.";
+    throw new Error(`${file} is not an OAuth client credentials file.${hint}`);
   }
+
   return credentials;
 }
 
@@ -98,7 +127,9 @@ function configuredScopes(): string[] {
 }
 
 function resolveTokenPath(): string {
-  return resolve(process.env.GOOGLE_OAUTH_TOKEN_JSON ?? ".canon-quill/auth/google-drive-token.json");
+  // Drive auth is one Google account across every book, so it sits outside
+  // the per-book workspaces.
+  return resolve(process.env.GOOGLE_OAUTH_TOKEN_JSON ?? ".auth/google-drive-token.json");
 }
 
 async function loadStoredToken(tokenPath: string): Promise<StoredToken | undefined> {

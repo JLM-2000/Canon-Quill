@@ -10,6 +10,10 @@ import {
   listProjects,
   setActiveProject
 } from "./workspace/registry.js";
+import { loadDotEnv } from "./config/env.js";
+
+// Read .env before anything looks at process.env.
+loadDotEnv();
 
 const usage = `Canon Quill
 
