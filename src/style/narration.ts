@@ -94,29 +94,33 @@ export function detectNarration(text: string): Narration {
 
 /** The intake option this corresponds to. */
 export function narrationLabel(pov: Pov, tense: Tense): string {
-  const povText: Record<Pov, string> = {
+  return `${povLabel(pov)}, ${tenseLabel(tense)}`;
+}
+
+export function povLabel(pov: Pov): string {
+  return {
     first: "First person",
     second: "Second person",
     third_limited: "Close third",
     third_omniscient: "Omniscient third",
-    mixed: "Mixed"
-  };
-  const tenseText: Record<Tense, string> = { past: "past", present: "present", mixed: "mixed" };
-  return `${povText[pov]}, ${tenseText[tense]}`;
+    mixed: "Multiple POVs"
+  }[pov];
 }
 
-/** Every combination worth offering, in the order a writer would look for them. */
-export const narrationOptions = [
-  "First person, past",
-  "First person, present",
-  "Close third, past",
-  "Close third, present",
-  "Omniscient third, past",
-  "Omniscient third, present",
-  "Second person, past",
-  "Second person, present",
-  "Multiple POVs, past",
-  "Multiple POVs, present",
-  "Epistolary",
-  "Mixed"
+export function tenseLabel(tense: Tense): string {
+  return { past: "Past", present: "Present", mixed: "Mixed" }[tense];
+}
+
+/** Separate controls keep the POV field from repeating the tense. */
+export const povOptions = [
+  "Close third",
+  "First person",
+  "Multiple POVs",
+  "Omniscient third",
+  "Second person"
 ];
+
+export const tenseOptions = ["Mixed", "Past", "Present"];
+
+/** Kept for clients that still want to display combined narration choices. */
+export const narrationOptions = povOptions.flatMap((pov) => tenseOptions.map((tense) => `${pov}, ${tense}`));

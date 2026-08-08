@@ -124,6 +124,11 @@ describe("the continuation brief", () => {
     expect(brief).toContain("curly");
     expect(brief).toMatch(/Do not restate it/);
   });
+
+  it("carries author clarification into the continuation brief", () => {
+    const brief = renderContinuationBrief(analyseManuscript(chapter("# Chapter One", prose)), "draft.gdoc", "The review request is back matter.");
+    expect(brief).toContain("The review request is back matter.");
+  });
 });
 
 describe("back matter", () => {
@@ -143,6 +148,14 @@ Scan the QR code below or click here to leave a quick review`;
     const a = analyseManuscript(text);
     expect(a.backMatter).not.toBeNull();
     expect(a.backMatter!.heading).toBe("Thank you for reading!");
+    expect(a.lastChapterComplete).toBe(true);
+  });
+
+  it("recognises unheaded review copy in a long paragraph", () => {
+    const closing = "I hope you enjoyed reading this book. As an independent author, I rely on readers like you to help my books find their audience. If you have a quick minute, I would be grateful if you could leave an honest review. Scan the QR code below.";
+    const text = chapter("# Chapter One", body) + closing;
+    const a = analyseManuscript(text);
+    expect(a.backMatter).not.toBeNull();
     expect(a.lastChapterComplete).toBe(true);
   });
 

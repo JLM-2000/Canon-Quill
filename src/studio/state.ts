@@ -139,9 +139,14 @@ export interface ExistingManuscript {
   name: string;
   target: "continue" | "separate";
   totalWords: number;
+  storyWords?: number;
   chapterCount: number;
   lastChapterComplete: boolean;
   completenessReason: string;
+  backMatterHeading?: string;
+  backMatterWords?: number;
+  /** Author clarification for the continuation agent. */
+  notes?: string;
   analysedAt: string;
 }
 
@@ -222,11 +227,13 @@ export async function loadState(slug: string): Promise<StudioState> {
     // Merged onto a fresh default so a file written by an older version gains
     // new fields rather than leaving them undefined at the call site.
     const base = emptyState(slug, parsed.projectName ?? "Untitled Book");
+    const intake = migrateIntake({ ...base.intake, ...(parsed.intake ?? {}) });
     const merged = {
       ...base,
       ...parsed,
       slug,
       version: 4 as const,
+      intake,
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       styleCorpus: { ...base.styleCorpus, ...(parsed.styleCorpus ?? {}) }
     };
@@ -235,6 +242,22 @@ export async function loadState(slug: string): Promise<StudioState> {
     if (isMissing(error)) return emptyState(slug);
     throw error;
   }
+}
+
+function migrateIntake(intake: Record<string, string>): Record<string, string> {
+  const next = { ...intake };
+  const legacy = /^(.+?),\s*(past|present|mixed)$/i.exec(next.pov ?? "");
+  if (legacy) {
+    next.pov = legacy[1].trim();
+    next.tense = labelCase(legacy[2]);
+  } else if (next.tense) {
+    next.tense = labelCase(next.tense);
+  }
+  return next;
+}
+
+function labelCase(value: string): string {
+  return value.slice(0, 1).toUpperCase() + value.slice(1).toLowerCase();
 }
 
 /**

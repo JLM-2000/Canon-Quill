@@ -231,7 +231,7 @@ describe("studio api", () => {
     const result = await call("/api/intake/suggestions");
     expect(result.body.suggestions.shape.value).toBe("standalone");
     expect(result.body.suggestions.pov.value).toMatch(/third|past/i);
-    expect(result.body.suggestions.tense.value).toBe("past");
+    expect(result.body.suggestions.tense.value).toBe("Past");
   });
 
   it("stores a chapter plan and reports it", async () => {

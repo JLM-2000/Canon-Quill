@@ -54,12 +54,12 @@ describe("tense", () => {
 describe("the label", () => {
   it("produces a value that matches an offered option", () => {
     const label = detectNarration(thirdPast).label;
-    expect(label).toBe("Close third, past");
+     expect(label).toBe("Close third, Past");
     expect(narrationOptions).toContain(label);
   });
 
   it("produces first person past for a first person past text", () => {
-    expect(detectNarration(firstPast).label).toBe("First person, past");
+    expect(detectNarration(firstPast).label).toBe("First person, Past");
   });
 
   it("reports low confidence rather than guessing on empty input", () => {

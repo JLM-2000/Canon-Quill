@@ -11,7 +11,7 @@ import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
-import { detectNarration, narrationOptions } from "../style/narration.js";
+import { detectNarration, narrationOptions, povLabel, povOptions, tenseLabel, tenseOptions } from "../style/narration.js";
 import { analyseWriting, type WritingProfile } from "../style/profile.js";
 import { buildCorpus, type CorpusDocument, type StyleCorpus, type BeatType } from "../style/corpus.js";
 import { scoreAgainstFingerprint } from "../style/score.js";
@@ -187,7 +187,7 @@ export function createStudioApp() {
   app.get("/api/state", route(async (_req, res) => {
     const slug = await activeSlug();
     if (!slug) {
-      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts, kindPurpose: sourceKindPurpose, narrationOptions });
+      res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts, kindPurpose: sourceKindPurpose, narrationOptions, povOptions, tenseOptions });
       return;
     }
     res.json({
@@ -197,7 +197,9 @@ export function createStudioApp() {
       kinds: sourceKindLabels,
       kindCounts: sourceKindCounts,
       kindPurpose: sourceKindPurpose,
-      narrationOptions
+      narrationOptions,
+      povOptions,
+      tenseOptions
     });
   }));
 
@@ -802,15 +804,15 @@ export function createStudioApp() {
       const narration = detectNarration(sample);
       if (narration.povConfidence > 0.5) {
         suggestions.pov = {
-          value: narration.label,
-          because: `Measured from your own prose: ${narration.pov.replace("_", " ")} POV.`,
+          value: povLabel(narration.pov),
+          because: `Measured from your own prose: ${povLabel(narration.pov)} POV.`,
           confidence: narration.povConfidence
         };
       }
       if (narration.tenseConfidence > 0.5) {
         suggestions.tense = {
-          value: narration.tense,
-          because: `Measured from your own prose: ${narration.tense} tense.`,
+          value: tenseLabel(narration.tense),
+          because: `Measured from your own prose: ${tenseLabel(narration.tense)} tense.`,
           confidence: narration.tenseConfidence
         };
       }
@@ -847,6 +849,8 @@ export function createStudioApp() {
 
     const text = await drive.readFileText(driveId);
     const analysis = analyseManuscript(text);
+    const prior = await loadState(slug);
+    const notes = prior.manuscript?.driveId === driveId ? prior.manuscript.notes ?? "" : "";
 
     // Cached so the brief can be rebuilt without refetching.
     const paths = workspacePaths(slug);
@@ -858,7 +862,7 @@ export function createStudioApp() {
     );
     await writeFile(
       path.join(paths.artifacts, "continuation-brief.md"),
-      renderContinuationBrief(analysis, meta.name),
+      renderContinuationBrief(analysis, meta.name, notes),
       "utf8"
     );
 
@@ -868,9 +872,13 @@ export function createStudioApp() {
         name: meta.name,
         target: current.manuscript?.driveId === driveId ? current.manuscript.target : "continue",
         totalWords: analysis.totalWords,
+        storyWords: analysis.storyWords,
         chapterCount: analysis.chapters.length,
         lastChapterComplete: analysis.lastChapterComplete,
         completenessReason: analysis.completenessReason,
+        backMatterHeading: analysis.backMatter?.heading,
+        backMatterWords: analysis.backMatter?.wordCount,
+        notes,
         analysedAt: new Date().toISOString()
       };
       current.manuscriptReviewed = true;
@@ -882,12 +890,32 @@ export function createStudioApp() {
   app.patch("/api/manuscript", route(async (req, res) => {
     const slug = await requireSlug();
     const target = req.body?.target;
-    if (target !== "continue" && target !== "separate") {
+    const notes = req.body?.notes;
+    if (target === undefined && typeof notes !== "string") {
+      throw new HttpError(400, "Provide a continuation target or notes.");
+    }
+    if (target !== undefined && target !== "continue" && target !== "separate") {
       throw new HttpError(400, "Target must be continue or separate.");
     }
     const state = await updateState(slug, (current) => {
-      if (current.manuscript) current.manuscript.target = target;
+      if (current.manuscript) {
+        if (target !== undefined) current.manuscript.target = target;
+        if (typeof notes === "string") current.manuscript.notes = notes.trim().slice(0, 8000);
+      }
     });
+    if (state.manuscript && typeof notes === "string") {
+      try {
+        const raw = await readFile(path.join(workspacePaths(slug).artifacts, "existing-manuscript.json"), "utf8");
+        const cached = JSON.parse(raw) as { analysis: Parameters<typeof renderContinuationBrief>[0] };
+        await writeFile(
+          path.join(workspacePaths(slug).artifacts, "continuation-brief.md"),
+          renderContinuationBrief(cached.analysis, state.manuscript.name, state.manuscript.notes ?? ""),
+          "utf8"
+        );
+      } catch {
+        // The state note is still useful if the cached analysis was removed.
+      }
+    }
     res.json(withDerived(state));
   }));
 

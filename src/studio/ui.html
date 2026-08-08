@@ -96,6 +96,9 @@
     border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
   }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .compact-select { width: auto; min-width: 160px; max-width: 250px; }
+  .intake-fields { display: flex; gap: 12px; flex-wrap: wrap; }
+  .intake-field { flex: 0 1 250px; min-width: 180px; }
   .spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   button, .btn {
     background: var(--accent); color: #fff; border: none; padding: 8px 14px;
@@ -305,6 +308,8 @@ let KINDS = {};
 let KIND_COUNTS = {};
 let KIND_PURPOSE = {};
 let NARRATION_OPTIONS = [];
+let POV_OPTIONS = ["Close third", "First person", "Multiple POVs", "Omniscient third", "Second person"];
+let TENSE_OPTIONS = ["Mixed", "Past", "Present"];
 
 const PHASES = [
   { id: "engine",      label: "Writing engine", group: "Set up" },
@@ -548,6 +553,8 @@ async function reload() {
     KINDS = r.kinds || KINDS; KIND_COUNTS = r.kindCounts || KIND_COUNTS;
     KIND_PURPOSE = r.kindPurpose || KIND_PURPOSE;
     NARRATION_OPTIONS = r.narrationOptions || NARRATION_OPTIONS;
+    POV_OPTIONS = r.povOptions || POV_OPTIONS;
+    TENSE_OPTIONS = r.tenseOptions || TENSE_OPTIONS;
     render();
   } catch (e) { toast(e.message, "error"); }
 }
@@ -1314,20 +1321,22 @@ function viewIntake() {
       <input id="pname" value="${esc(S.projectName)}" onchange="setProject({projectName:this.value})" />
       <div class="hint">Taken from the book you created. Change it here if it has moved on.</div></div>
 
-    <div style="margin-bottom:16px"><label>POV</label>
-      <select onchange="setProject({intake:{pov:this.value}})">
-        <option value="">Not set</option>
-        ${(NARRATION_OPTIONS || []).map((o) => `<option ${intake.pov === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
-      </select>
-      ${hint("pov")}
-      <div style="margin-top:8px"><label style="font-weight:500">Tense</label>
-        <select onchange="setProject({intake:{tense:this.value}})">
-          <option value="">Not set</option>
-          <option ${intake.tense === "past" ? "selected" : ""}>past</option>
-          <option ${intake.tense === "present" ? "selected" : ""}>present</option>
-          <option ${intake.tense === "mixed" ? "selected" : ""}>mixed</option>
-        </select>
-        ${hint("tense")}</div></div>
+    <div style="margin-bottom:16px"><label>POV and tense</label>
+      <div class="intake-fields">
+        <div class="intake-field"><label style="font-weight:500">POV</label>
+          <select class="compact-select" onchange="setProject({intake:{pov:this.value}})">
+            <option value="">Not set</option>
+            ${POV_OPTIONS.map((o) => `<option ${intake.pov === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+          </select>
+          ${hint("pov")}</div>
+        <div class="intake-field"><label style="font-weight:500">Tense</label>
+          <select class="compact-select" onchange="setProject({intake:{tense:this.value}})">
+            <option value="">Not set</option>
+            ${TENSE_OPTIONS.map((o) => `<option ${intake.tense === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+          </select>
+          ${hint("tense")}</div>
+      </div>
+    </div>
 
     <div style="margin-bottom:16px"><label>Target audience</label>
       <div class="hint" style="margin-bottom:4px">Pick every one that applies.</div>
@@ -1359,7 +1368,7 @@ async function loadSuggestions() {
     SUGGESTIONS = r.suggestions;
     const current = S.intake || {};
     const automatic = Object.entries(SUGGESTIONS)
-      .filter(([key, suggestion]) => !current[key] && (suggestion.confidence || 0) >= 0.8)
+      .filter(([key, suggestion]) => !current[key] && (suggestion.confidence || 0) >= (key === "pov" || key === "tense" ? 0.5 : 0.8))
       .reduce((values, [key, suggestion]) => ({ ...values, [key]: suggestion.value }), {});
     if (Object.keys(automatic).length > 0) {
       S = await api("/api/project", {
@@ -1410,7 +1419,6 @@ function draftSection() {
   }).join("");
 
   return `
-  <h2>Existing draft</h2>
   <p class="sub">Optional. If the book is already part-written, point Canon Quill at it: it reads how far
   the draft goes, whether the last chapter finished, and the typographic habits of the document, so
   anything it adds is indistinguishable from what is already there.</p>
@@ -1430,7 +1438,14 @@ function draftSection() {
         <p style="margin-top:6px">${m.lastChapterComplete
           ? "Writing will begin a new chapter."
           : "Writing will finish the chapter in progress before starting another. If that is wrong, say so in the instructions box on the chapter board."}</p>
-      </div></div>
+       </div></div>
+
+    ${m.backMatterHeading ? `<div class="info" style="margin:0 0 12px">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+      <div><b>Closing material detected</b>
+        <p>“${esc(m.backMatterHeading)}”${m.backMatterWords ? `, ${plural(m.backMatterWords, "word", null, m.backMatterWords.toLocaleString())}` : ""}. New chapters will be inserted before it.</p>
+      </div></div>` : ""}
 
     <label>Where should new chapters go?</label>
     <div class="choices" style="margin-top:6px">
@@ -1440,6 +1455,12 @@ function draftSection() {
       <div class="choice ${m.target === "separate" ? "on" : ""}" onclick="setDraftTarget('separate')">
         <b>Into a new document</b><p>The original is read but never written to. New chapters go to your
         target folder instead.</p></div>
+     </div>
+
+    <div style="margin-top:14px"><label>Notes for continuation</label>
+      <textarea id="manuscript-notes" rows="3" placeholder="The review request at the end is back matter. Continue from the last story chapter.">${esc(m.notes || "")}</textarea>
+      <div class="hint" style="margin-top:4px">Clarify anything the automatic ending analysis should know. These notes are included in the continuation brief.</div>
+      <button class="ghost sm" style="margin-top:8px" onclick="saveManuscriptNotes(this)">Save notes</button>
     </div>
 
     <div class="row" style="margin-top:14px">
@@ -1498,6 +1519,19 @@ async function skipDraft(btn) {
 async function setDraftTarget(target) {
   try { S = await api("/api/manuscript", { method: "PATCH", body: { target } }); render(); }
   catch (e) { toast(e.message, "error"); }
+}
+
+async function saveManuscriptNotes(btn) {
+  const notes = document.getElementById("manuscript-notes")?.value || "";
+  btn.disabled = true;
+  try {
+    S = await api("/api/manuscript", { method: "PATCH", body: { notes } });
+    render();
+    toast("Continuation notes saved.");
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+  }
 }
 
 async function clearDraft(btn) {

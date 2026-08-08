@@ -168,7 +168,7 @@ describe("corpus", () => {
   });
 
   it("stores an evidence-backed writing profile", () => {
-    expect(corpus.profile.narration.label).toContain("past");
+    expect(corpus.profile.narration.label).toMatch(/past/i);
     expect(corpus.profile.sensory.sight).toBeGreaterThan(0);
     expect(corpus.profile.beats.dialogue).toBeGreaterThan(0);
     expect(corpus.profile.intimacy.value).toBe("None");

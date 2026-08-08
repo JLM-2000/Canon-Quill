@@ -110,6 +110,17 @@ const backMatterPatterns = [
   /^\s*#{0,3}\s*(join|sign up for) (my|the) (newsletter|mailing list)\b/i
 ];
 
+/** Back matter is often a long paragraph without a heading. */
+const backMatterContentPatterns = [
+  /\bthank you for reading\b/i,
+  /\bindependent author\b/i,
+  /\bleave an? honest review\b/i,
+  /\b(?:scan|qr) code\b/i,
+  /\bhelp my books find their audience\b/i,
+  /\b(?:join|sign up for) (?:my|the) newsletter\b/i,
+  /\b(?:also by|about the author)\b/i
+];
+
 /**
  * Where the story stops, if anything follows it.
  *
@@ -133,6 +144,18 @@ function findBackMatter(text: string, lines: string[]): BackMatter | null {
 
     if (backMatterPatterns.some((pattern) => pattern.test(trimmed))) {
       return { offset: at, heading: trimmed, wordCount: words(text.slice(at)).length };
+    }
+  }
+
+  for (const paragraph of splitParagraphs(text)) {
+    if (paragraph.offset < threshold) continue;
+    const matches = backMatterContentPatterns.filter((pattern) => pattern.test(paragraph.text));
+    const strong = matches.some((pattern) =>
+      /thank you|independent author|honest review|qr|find their audience|newsletter|also by|about the author/i.test(pattern.source)
+    );
+    if (matches.length >= 2 || strong) {
+      const heading = paragraph.text.split(/[.!?\n]/)[0].trim().slice(0, 90);
+      return { offset: paragraph.offset, heading: heading || "Closing material", wordCount: words(text.slice(paragraph.offset)).length };
     }
   }
   return null;
@@ -312,7 +335,7 @@ function mostCommon(values: string[]): string {
 }
 
 /** Render the analysis as the brief a drafting agent needs to continue. */
-export function renderContinuationBrief(analysis: ManuscriptAnalysis, documentName: string): string {
+export function renderContinuationBrief(analysis: ManuscriptAnalysis, documentName: string, notes = ""): string {
   const c = analysis.conventions;
   return [
     `# Continuing an existing draft: ${documentName}`,
@@ -358,6 +381,9 @@ export function renderContinuationBrief(analysis: ManuscriptAnalysis, documentNa
     analysis.tail,
     "```",
     "",
+    ...(notes.trim()
+      ? ["## Author's continuation notes", "", notes.trim(), ""]
+      : []),
     "Pick up from that. Do not restate it, summarise it, or open with a recap."
   ].join("\n");
 }
