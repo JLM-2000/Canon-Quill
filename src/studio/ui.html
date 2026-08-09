@@ -1653,7 +1653,7 @@ function viewIntake() {
       complete manuscript once. Continuity is still enforced between chapters.</p></div>
   </div>
 
-  <div class="row">
+  <div class="row" style="margin-top:28px">
     <button ${shape && mode ? "" : "disabled"} onclick="continueProjectShape(this)">Continue</button>
     ${!(shape && mode) ? '<span class="hint" style="color:var(--warn)">Choose the book shape and drafting mode to continue.</span>' : ""}
   </div>`;
