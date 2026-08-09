@@ -41,6 +41,20 @@ Follow `workflows/book-writing.workflow.yaml` and the authoritative state at
 6. Route only through the workflow. Never skip source confirmation, preparation
    preflight, chapter validation, or final user approval.
 
+## Progress reporting
+
+At each meaningful boundary, emit one plain line in this exact form. The Studio
+uses it for the author-facing progress bar, so do not claim a later phase until
+its required artifact exists:
+
+`CANON_QUILL_PROGRESS phase=<phase> percent=<0-100> [chapter=<number>] detail=<short plain-English update>`
+
+Use only these phases: `gathering_info`, `preparing_characters`,
+`planning_chapters`, `writing_chapter`, `editing_chapter`,
+`validating_chapter`, `compiling_book`, and `finishing`. Report the phase before
+doing the work. Keep the detail short and do not put credentials or private
+source text in it.
+
 ## Current architecture
 
 The Studio performs model-free source indexing, project analysis, style

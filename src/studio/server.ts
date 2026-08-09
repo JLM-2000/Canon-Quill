@@ -1,7 +1,7 @@
 import express from "express";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -37,6 +37,7 @@ import {
   startRun,
   stopRun,
   type RunOutcome,
+  type RunProgress,
   type RuntimeId
 } from "./runner.js";
 import {
@@ -83,6 +84,9 @@ export function createStudioApp() {
   app.use(express.json({ limit: "8mb" }));
 
   const drive = new SafeDriveClient();
+  let phaseLogQueue = Promise.resolve();
+  let pendingOutcome: Promise<void> | null = null;
+  const explicitlyHalted = new Set<string>();
 
   /** Resolve the workspace a request applies to, or fail with a clear message. */
   async function requireSlug(): Promise<string> {
@@ -173,7 +177,7 @@ export function createStudioApp() {
     await mkdir(paths.artifacts, { recursive: true });
     await writeFile(path.join(paths.artifacts, "project-analysis.json"), JSON.stringify(analysis, null, 2), "utf8");
     const next = await updateState(slug, (current) => {
-      current.projectAnalysis = { ...analysis, completed: true };
+      current.projectAnalysis = { ...analysis, completed: true, continuedAt: null };
       // A measured value only prefills; a correction is the author's answer.
       const apply = (key: string, value: string | null | undefined, edited: boolean) => {
         if (edited) {
@@ -191,10 +195,16 @@ export function createStudioApp() {
 
   async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string }) {
     if (isRunning()) throw new HttpError(409, "A run is already in progress.");
+    if (pendingOutcome) {
+      await pendingOutcome;
+      pendingOutcome = null;
+    }
+    explicitlyHalted.delete(slug);
     const provider = state.engine.draftingProvider ?? state.engine.provider;
     if (!provider) throw new HttpError(400, "Choose a writing engine first.");
 
     const model = resolveModels(await loadCatalog(), state.engine).drafting ?? null;
+    const chapter = options.chapter ?? nextChapterHint(state);
     let started: { runtime: RuntimeId; command: string };
     try {
       started = startRun({
@@ -202,8 +212,23 @@ export function createStudioApp() {
         projectName: state.projectName,
         provider,
         model,
+        chapter,
         note: options.note,
-        onExit: (outcome) => void recordRunOutcome(slug, outcome)
+        onProgress: (progress) => {
+          phaseLogQueue = phaseLogQueue.then(() => appendLog(slug, "phase", {
+            timestamp: new Date().toISOString(),
+            stage: "chapter_drafting",
+            stageName: progress.label,
+            agent: "book-orchestrator",
+            event: "progress",
+            message: progress.detail,
+            data: { phase: progress.phase, percent: progress.percent, chapter: progress.chapter }
+          })).catch(() => undefined);
+        },
+        onExit: (outcome) => {
+          pendingOutcome = recordRunOutcome(slug, outcome);
+          void pendingOutcome;
+        }
       });
     } catch (error) {
       throw new HttpError(400, message(error));
@@ -212,7 +237,7 @@ export function createStudioApp() {
     const next = await updateState(slug, (current) => {
       current.run = {
         status: "running",
-        chapter: options.chapter,
+        chapter,
         reason: null,
         detail: null,
         haltedAt: null,
@@ -225,10 +250,69 @@ export function createStudioApp() {
       stageName: "Drafting",
       agent: started.runtime,
       event: "run_started",
-      data: { model, chapter: options.chapter }
+      data: { model, chapter, draftingMode: state.draftingMode }
     });
 
     return { ...withDerived(next), runtime: started.runtime, runtimeLabel: runtimeLabel(started.runtime), model };
+  }
+
+  function nextChapterHint(state: StudioState): number | null {
+    const nextPlanned = state.chapters.find((chapter) => chapter.status !== "approved");
+    if (nextPlanned) return nextPlanned.number;
+    if (!state.manuscript) return null;
+    return state.manuscript.lastChapterComplete
+      ? state.manuscript.chapterCount + 1
+      : state.manuscript.chapterCount;
+  }
+
+  type OutputKind = "book" | "chapter";
+  interface OutputFile {
+    kind: OutputKind;
+    format: "md" | "docx";
+    chapter: number | null;
+    label: string;
+    fileName: string;
+    path: string;
+  }
+
+  async function resolveOutput(slug: string, state: StudioState, kind: OutputKind, format: "md" | "docx", requestedChapter?: number): Promise<OutputFile | null> {
+    const paths = workspacePaths(slug);
+    if (kind === "book") {
+      const fileName = format === "docx" ? "manuscript.docx" : "manuscript.md";
+      const filePath = path.join(paths.final, fileName);
+      return existsSync(filePath) ? { kind, format, chapter: null, label: "Final manuscript", fileName, path: filePath } : null;
+    }
+    if (format !== "md") return null;
+
+    const numbers = new Set<number>();
+    if (requestedChapter && Number.isInteger(requestedChapter)) numbers.add(requestedChapter);
+    if (state.run.chapter) numbers.add(state.run.chapter);
+    for (const chapter of state.chapters) numbers.add(chapter.number);
+    try {
+      for (const name of await readdir(paths.chapters)) {
+        const match = /^chapter-(\d+)-(?:draft|edited)\.md$/i.exec(name);
+        if (match) numbers.add(Number(match[1]));
+      }
+    } catch { /* no chapter artifacts yet */ }
+
+    for (const number of [...numbers].sort((a, b) => b - a)) {
+      const padded = String(number).padStart(2, "0");
+      const candidates = [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`, `chapter-${padded}-draft.md`, `chapter-${number}-draft.md`];
+      const fileName = candidates.find((candidate) => existsSync(path.join(paths.chapters, candidate)));
+      if (fileName) return { kind, format, chapter: number, label: `Chapter ${number}`, fileName, path: path.join(paths.chapters, fileName) };
+    }
+    return null;
+  }
+
+  async function availableOutputs(slug: string): Promise<{ primary: OutputFile | null; files: OutputFile[] }> {
+    const state = await loadState(slug);
+    const book = await resolveOutput(slug, state, "book", "md");
+    const docx = await resolveOutput(slug, state, "book", "docx");
+    if (state.draftingMode === "whole_book" || book) {
+      return { primary: book, files: [book, docx].filter((file): file is OutputFile => Boolean(file)) };
+    }
+    const chapter = await resolveOutput(slug, state, "chapter", "md");
+    return { primary: chapter, files: chapter ? [chapter] : [] };
   }
 
   /**
@@ -262,6 +346,7 @@ export function createStudioApp() {
         data: {
           exitCode: outcome.code,
           signal: outcome.signal,
+          progress: outcome.progress,
           trace: outcome.trace.map((event) => `${event.at} [${event.kind}] ${event.text}`)
         }
       });
@@ -280,6 +365,22 @@ export function createStudioApp() {
           };
       });
     } catch { /* the run is over either way; the board reloads from disk */ }
+
+    if (!outcome.ok && outcome.reason !== "cancelled" && !explicitlyHalted.has(slug)) {
+      try {
+        await appendLog(slug, "error", {
+          timestamp: new Date().toISOString(),
+          stage: "chapter_drafting",
+          stageName: "Drafting",
+          agent: "runtime",
+          event: "run_halted",
+          errorName: outcome.reason ?? "runtime_error",
+          errorMessage: `${outcome.reason ?? "other"}: ${outcome.detail ?? "The writing runtime stopped without a detail."}`,
+          data: { chapter: outcome.progress?.chapter ?? null, progress: outcome.progress }
+        });
+      } catch { /* an error log is useful, but never prevents the board from recovering */ }
+    }
+    explicitlyHalted.delete(slug);
   }
 
   /** Clear the computed analysis while keeping what the author supplied. */
@@ -1111,6 +1212,15 @@ export function createStudioApp() {
     res.json(await analyseProject(slug));
   }));
 
+  app.post("/api/intake/analysis/continue", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      if (!current.projectAnalysis.completed) throw new HttpError(400, "Finish project analysis first.");
+      current.projectAnalysis.continuedAt = new Date().toISOString();
+    });
+    res.json(withDerived(state));
+  }));
+
   app.post("/api/intake/reset", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await updateState(slug, (current) => {
@@ -1549,6 +1659,7 @@ export function createStudioApp() {
       };
     });
 
+    explicitlyHalted.add(slug);
     await appendLog(slug, "error", {
       timestamp: new Date().toISOString(),
       stage: "chapter_drafting",
@@ -1575,6 +1686,10 @@ export function createStudioApp() {
 
   app.get("/api/run/events", route(async (_req, res) => {
     await requireSlug();
+    if (!isRunning() && pendingOutcome) {
+      await pendingOutcome;
+      pendingOutcome = null;
+    }
     res.json(runSnapshot(Number(_req.query.since) || 0));
   }));
 
@@ -1600,6 +1715,56 @@ export function createStudioApp() {
       running: isRunning()
     });
   }));
+
+  /** Return the newest finished manuscript or chapter without exposing workspace paths. */
+  app.get("/api/run/output", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const available = await availableOutputs(slug);
+    let preview: string | null = null;
+    let truncated = false;
+    if (available.primary) {
+      const text = await readFile(available.primary.path, "utf8");
+      preview = text.slice(0, 120_000);
+      truncated = text.length > preview.length;
+    }
+    res.json({
+      primary: available.primary ? {
+        kind: available.primary.kind,
+        format: available.primary.format,
+        chapter: available.primary.chapter,
+        label: available.primary.label,
+        fileName: available.primary.fileName,
+        preview,
+        truncated,
+        downloadUrl: outputDownloadUrl(available.primary)
+      } : null,
+      files: available.files.map((file) => ({
+        kind: file.kind,
+        format: file.format,
+        chapter: file.chapter,
+        label: file.label,
+        fileName: file.fileName,
+        downloadUrl: outputDownloadUrl(file)
+      }))
+    });
+  }));
+
+  app.get("/api/run/output/download", route(async (req, res) => {
+    const slug = await requireSlug();
+    const kind = req.query.kind === "book" ? "book" : req.query.kind === "chapter" ? "chapter" : null;
+    const format = req.query.format === "docx" ? "docx" : req.query.format === "md" ? "md" : null;
+    if (!kind || !format) throw new HttpError(400, "Choose a valid output.");
+    const chapter = typeof req.query.chapter === "string" ? Number(req.query.chapter) : undefined;
+    const file = await resolveOutput(slug, await loadState(slug), kind, format, chapter);
+    if (!file) throw new HttpError(404, "That finished output is not available yet.");
+    res.download(file.path, file.fileName);
+  }));
+
+  function outputDownloadUrl(file: OutputFile): string {
+    const params = new URLSearchParams({ kind: file.kind, format: file.format });
+    if (file.chapter) params.set("chapter", String(file.chapter));
+    return `/api/run/output/download?${params.toString()}`;
+  }
 
   /** Resume a halted run after credential checks. */
   app.post("/api/run/resume", route(async (_req, res) => {

@@ -189,8 +189,8 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
   const push = (endOffset: number) => {
     const body = story.slice(currentStart, endOffset);
     const count = words(body).length;
-    if (count === 0) return;                       // nothing there at all
-    if (count < 20 && chapters.length > 0) return; // stray heading, not a chapter
+    if (count === 0) return; // nothing there at all
+    if (count < 20 && chapters.length > 0 && !isExplicitChapterHeading(currentHeading)) return;
     chapters.push({
       index: chapters.length + 1,
       heading: currentHeading ?? `Untitled section ${chapters.length + 1}`,
@@ -230,6 +230,10 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
     conventions: readConventions(story, lines),
     metrics: computeMetrics(story)
   };
+}
+
+function isExplicitChapterHeading(heading: string | null): boolean {
+  return Boolean(heading && /^\s*#{0,3}\s*(chapter|chapitre|capítulo|kapitel|part|book|prologue|epilogue|interlude)\b/i.test(heading));
 }
 
 /**

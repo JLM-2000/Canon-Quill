@@ -151,6 +151,33 @@ describe("studio api", () => {
     expect(html).not.toContain("The Tide House");
     expect(html).not.toContain("Starting point confirmed");
     expect(html).toContain("pointer-events: none");
+    expect(html).toContain("--sidebar-width: 232px");
+    expect(html).toContain("scrollbar-gutter: stable");
+    expect(html).toContain("sourceAnalysisStarted");
+    expect(html).toContain("requestAnimationFrame(() => window.scrollTo");
+    expect(html).toContain("analysis-finding");
+    expect(html).toContain("Continuation point");
+    expect(html).toContain("Show the runtime console");
+    expect(html).toContain("outputCard");
+  });
+
+  it("previews and downloads the final manuscript through an allowlisted output", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.draftingMode = "whole_book";
+    await save(state);
+    await mkdir(workspacePaths("test-book").final, { recursive: true });
+    await writeFile(workspacePaths("test-book").final + "/manuscript.md", "# Chapter 2\n\nThe finished book.", "utf8");
+
+    const output = await call("/api/run/output");
+    expect(output.status).toBe(200);
+    expect(output.body.primary.label).toBe("Final manuscript");
+    expect(output.body.primary.preview).toContain("The finished book.");
+    expect(output.body.primary.downloadUrl).toContain("kind=book");
+
+    const download = await fetch(`${base}/api/run/output/download?kind=book&format=md`);
+    expect(download.status).toBe(200);
+    expect(await download.text()).toContain("The finished book.");
   });
 
   it("returns state with a derived phase", async () => {
@@ -314,6 +341,7 @@ describe("studio api", () => {
     state.styleCorpus.built = true;
     state.styleCorpus.continuedAt = new Date().toISOString();
     state.projectAnalysis.completed = true;
+    state.projectAnalysis.continuedAt = new Date().toISOString();
     state.writingConfirmed = true;
     state.conversationStartedAt = new Date().toISOString();
     state.questions = [{
@@ -334,6 +362,7 @@ describe("studio api", () => {
     state.projectShapeReviewed = true;
     state.manuscriptReviewed = true;
     state.projectAnalysis.completed = true;
+    state.projectAnalysis.continuedAt = new Date().toISOString();
     state.conversationStartedAt = new Date().toISOString();
     state.questions = [];
     await save(state);
@@ -356,6 +385,7 @@ describe("studio api", () => {
       state.projectShapeReviewed = true;
       state.manuscriptReviewed = true;
       state.projectAnalysis.completed = true;
+      state.projectAnalysis.continuedAt = new Date().toISOString();
       state.conversationStartedAt = null;
       state.questions = [];
       return state;
@@ -377,6 +407,27 @@ describe("studio api", () => {
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.phase).toBe("writing");
     expect(confirmed.body.conversationStartedAt).toBeTruthy();
+  });
+
+  it("keeps questions locked until project analysis is continued", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.projectStart = "from_scratch";
+    state.startingBrief = "A detailed premise about a woman returning home to uncover a family secret and choose what kind of life comes next.";
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} } as any;
+    state.engineReviewed = true;
+    state.shape = "standalone";
+    state.projectShapeReviewed = true;
+    state.manuscriptReviewed = true;
+    state.projectAnalysis.completed = true;
+    state.projectAnalysis.continuedAt = null;
+    await save(state);
+
+    expect((await call("/api/state")).body.state.phase).toBe("intake_analysis");
+    const continued = await call("/api/intake/analysis/continue", { method: "POST" });
+    expect(continued.status).toBe(200);
+    expect(continued.body.projectAnalysis.continuedAt).toBeTruthy();
+    expect(continued.body.phase).toBe("preflight");
   });
 
   it("uploads planning files without requiring Drive", async () => {

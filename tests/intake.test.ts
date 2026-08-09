@@ -49,6 +49,23 @@ describe("project intake analysis", () => {
     ]));
   });
 
+  it("does not cut a conflict finding in the middle of a sentence", () => {
+    const conflict = [
+      "A three-book structure works beautifully if Book 3 is allowed to become the full completion of Julian's first-year transformation.",
+      "The romance, the first sexual intimacy, and the boyfriend confirmation have already been earned.",
+      "Book 3 does not need to repeat those milestones.",
+      "It needs to test what the transformation costs when the relationship is no longer new."
+    ].join(" ");
+    const result = analyseProjectMaterial([{
+      name: "Project analysis notes",
+      kinds: ["plot"],
+      text: `Conflict and stakes: ${conflict}`
+    }]);
+
+    expect(result.findings.centralConflict?.value).toMatch(/milestones\.$/);
+    expect(result.findings.centralConflict?.value).not.toMatch(/what t$/);
+  });
+
   it("does not turn document titles or headings into characters", () => {
     const result = analyseProjectMaterial([
       { name: "Location Notes", kinds: ["characters"], text: "Setting: a public hall. Seasonal events occur here." },

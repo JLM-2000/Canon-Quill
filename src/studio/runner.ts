@@ -24,6 +24,25 @@ export interface RunSnapshot {
   startedAt: string | null;
   events: RunEvent[];
   latest: number;
+  progress: RunProgress | null;
+}
+
+export type RunProgressPhase =
+  | "gathering_info"
+  | "preparing_characters"
+  | "planning_chapters"
+  | "writing_chapter"
+  | "editing_chapter"
+  | "validating_chapter"
+  | "compiling_book"
+  | "finishing";
+
+export interface RunProgress {
+  phase: RunProgressPhase;
+  label: string;
+  percent: number;
+  detail: string;
+  chapter: number | null;
 }
 
 export interface StartOptions {
@@ -31,9 +50,11 @@ export interface StartOptions {
   projectName: string;
   provider: ProviderId;
   model?: string | null;
+  chapter?: number | null;
   note?: string;
   cwd?: string;
   onExit: (outcome: RunOutcome) => void;
+  onProgress?: (progress: RunProgress) => void;
 }
 
 export interface RunOutcome {
@@ -44,6 +65,7 @@ export interface RunOutcome {
   detail: string | null;
   /** Everything the run said, for the phase log. */
   trace: RunEvent[];
+  progress: RunProgress | null;
 }
 
 const AGENT = "book-orchestrator";
@@ -56,6 +78,7 @@ interface ActiveRun {
   command: string;
   startedAt: string;
   stopping: boolean;
+  onProgress?: (progress: RunProgress) => void;
 }
 
 let active: ActiveRun | null = null;
@@ -64,6 +87,7 @@ let seq = 0;
 let lastRuntime: RuntimeId | null = null;
 let lastCommand: string | null = null;
 let lastStartedAt: string | null = null;
+let progress: RunProgress | null = null;
 
 /** Tests and dry runs record the command without starting anything. */
 function dryRun(): boolean {
@@ -81,15 +105,79 @@ export function runSnapshot(since = 0): RunSnapshot {
     command: active?.command ?? lastCommand,
     startedAt: active?.startedAt ?? lastStartedAt,
     events: events.filter((event) => event.seq > since),
-    latest: seq
+    latest: seq,
+    progress
   };
 }
 
 function emit(kind: RunEvent["kind"], text: string): void {
-  const clean = redactSensitiveText(stripAnsi(text)).trim();
+  const stripped = stripAnsi(text);
+  const explicit = readProgress(stripped);
+  const update = explicit ?? inferProgress(stripped);
+  if (update) setProgress(update, Boolean(explicit));
+  const clean = redactSensitiveText(removeProgressMarker(stripped)).trim();
   if (!clean) return;
   events.push({ seq: ++seq, at: new Date().toISOString(), kind, text: clean.slice(0, 600) });
   if (events.length > MAX_EVENTS) events = events.slice(-MAX_EVENTS);
+}
+
+function setProgress(update: RunProgress, notify = true): void {
+  const phaseChanged = progress?.phase !== update.phase;
+  const next = {
+    ...update,
+    percent: Math.max(progress?.percent ?? 0, Math.min(100, update.percent)),
+    detail: redactSensitiveText(update.detail).slice(0, 240),
+    chapter: update.chapter ?? progress?.chapter ?? null
+  };
+  if (progress && next.phase === progress.phase && next.percent === progress.percent && next.detail === progress.detail) return;
+  progress = next;
+  if (notify || phaseChanged) active?.onProgress?.(next);
+}
+
+const PROGRESS_PHASES: Record<RunProgressPhase, { label: string; percent: number }> = {
+  gathering_info: { label: "Gathering information", percent: 12 },
+  preparing_characters: { label: "Preparing characters", percent: 28 },
+  planning_chapters: { label: "Planning chapters", percent: 42 },
+  writing_chapter: { label: "Writing the chapter", percent: 62 },
+  editing_chapter: { label: "Editing the chapter", percent: 76 },
+  validating_chapter: { label: "Checking the chapter", percent: 88 },
+  compiling_book: { label: "Compiling the book", percent: 94 },
+  finishing: { label: "Finishing up", percent: 98 }
+};
+
+function readProgress(text: string): RunProgress | null {
+  const match = /CANON_QUILL_PROGRESS\s+phase=([a-z_]+)(?:\s+percent=(\d+))?(?:\s+chapter=(\d+))?(?:\s+detail=(.*))?/i.exec(text);
+  if (!match || !(match[1].toLowerCase() in PROGRESS_PHASES)) return null;
+  const phase = match[1].toLowerCase() as RunProgressPhase;
+  const defaults = PROGRESS_PHASES[phase];
+  return {
+    phase,
+    label: defaults.label,
+    percent: Number(match[2] ?? defaults.percent),
+    detail: (match[4] ?? defaults.label).trim(),
+    chapter: match[3] ? Number(match[3]) : null
+  };
+}
+
+function removeProgressMarker(text: string): string {
+  return text.replace(/CANON_QUILL_PROGRESS\s+phase=[a-z_]+(?:\s+percent=\d+)?(?:\s+chapter=\d+)?(?:\s+detail=.*)?/ig, "");
+}
+
+function inferProgress(text: string): RunProgress | null {
+  const lower = text.toLowerCase();
+  const chapterMatch = /chapter[\s-]*(\d+)/i.exec(text);
+  const chapter = chapterMatch ? Number(chapterMatch[1]) : null;
+  let phase: RunProgressPhase | null = null;
+  if (/finalization|final (?:book|manuscript)|compil/.test(lower)) phase = "compiling_book";
+  else if (/validat|proofread|continuity check|quality gate/.test(lower)) phase = "validating_chapter";
+  else if (/edit|revise/.test(lower)) phase = "editing_chapter";
+  else if (/chapter plan|outline|structure|planning/.test(lower)) phase = "planning_chapters";
+  else if (/draft(?:ing)? chapter|write (?:chapter|prose)|writing (?:chapter|prose)/.test(lower)) phase = "writing_chapter";
+  else if (/character|cast|relationship/.test(lower)) phase = "preparing_characters";
+  else if (/read|search|reference|canon|project/.test(lower)) phase = "gathering_info";
+  if (!phase) return null;
+  const defaults = PROGRESS_PHASES[phase];
+  return { phase, label: defaults.label, percent: defaults.percent, detail: text.trim().slice(0, 240), chapter };
 }
 
 function stripAnsi(value: string): string {
@@ -122,6 +210,12 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     "phase it is actually in, following workflows/book-writing.workflow.yaml.",
     "The author approved the preparation gate in the Studio. Honour every author gate that remains:",
     "do not approve a chapter on their behalf, and stop with a clear report if an input is missing.",
+    "At each meaningful boundary, report one progress line in exactly this form so the Studio can",
+    "show the author what is happening without exposing the whole console:",
+    "CANON_QUILL_PROGRESS phase=<phase> percent=<0-100> [chapter=<number>] detail=<short plain-English update>",
+    "Use phases gathering_info, preparing_characters, planning_chapters, writing_chapter, editing_chapter,",
+    "validating_chapter, compiling_book, and finishing. Report the phase before doing the work, and never",
+    "claim a later phase until its required artifact exists.",
     "",
     "You can write only inside workspaces/, and the only shell commands you have are this project's",
     "own checks. That is deliberate. Inspect files with Read, Glob and Grep, never by shelling out to",
@@ -218,10 +312,18 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   events = [];
   seq = 0;
+  progress = {
+    phase: "gathering_info",
+    label: PROGRESS_PHASES.gathering_info.label,
+    percent: PROGRESS_PHASES.gathering_info.percent,
+    detail: "Reading the approved project material and preparation package.",
+    chapter: options.chapter ?? null
+  };
   lastRuntime = runtime;
   lastCommand = command;
   lastStartedAt = new Date().toISOString();
-  active = { slug: options.slug, child: null, runtime, command, startedAt: lastStartedAt, stopping: false };
+  active = { slug: options.slug, child: null, runtime, command, startedAt: lastStartedAt, stopping: false, onProgress: options.onProgress };
+  active.onProgress?.(progress);
 
   emit("system", `Starting ${runtimeLabel(runtime)}${options.model ? ` on ${options.model}` : ""}.`);
   emit("system", "It reads this book's workspace first, so it picks up wherever the book actually is.");
@@ -244,7 +346,7 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   child.on("error", (error: Error) => {
     emit("error", error.message);
-    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events] }, options.onExit);
+    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events], progress }, options.onExit);
   });
 
   child.on("close", (code, signal) => {
@@ -257,7 +359,8 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
       signal,
       reason: ok ? null : cancelled ? "cancelled" : inferReason(recentText()),
       detail: ok ? null : recentText().slice(-1500) || null,
-      trace: [...events]
+      trace: [...events],
+      progress
     }, options.onExit);
   });
 
@@ -268,7 +371,7 @@ export function stopRun(): boolean {
   if (!active) return false;
   active.stopping = true;
   if (!active.child) {
-    finish({ ok: false, code: null, signal: null, reason: "cancelled", detail: null, trace: [...events] }, () => undefined);
+    finish({ ok: false, code: null, signal: null, reason: "cancelled", detail: null, trace: [...events], progress }, () => undefined);
     return true;
   }
   active.child.kill("SIGTERM");
@@ -286,7 +389,7 @@ function recentText(): string {
 }
 
 export function inferReason(text: string): RunOutcome["reason"] {
-  if (/rate limit|429|too many requests|usage limit/i.test(text)) return "rate_limited";
+  if (/rate limit|429|too many requests|usage limit|session limit|hit your session/i.test(text)) return "rate_limited";
   if (/credit balance|insufficient (?:funds|quota|credit)|billing/i.test(text)) return "no_credit";
   if (/unauthori[sz]ed|invalid api key|authentication_error|401|not logged in|please (?:run )?login/i.test(text)) {
     return "invalid_credentials";

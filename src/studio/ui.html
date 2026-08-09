@@ -19,6 +19,7 @@
     --good: #7bd88f;
     --warn: #e5c07b;
     --bad: #f07178;
+    --sidebar-width: 232px;
     --radius: 10px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
@@ -36,13 +37,14 @@
     font-family: var(--sans); font-size: 14px; line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
-  .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+  .app { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); min-height: 100vh; }
 
   /* --- sidebar --- */
   aside {
     background: var(--surface); border-right: 1px solid var(--border);
     padding: 18px 12px; display: flex; flex-direction: column; gap: 4px;
-    position: sticky; top: 0; width: 232px; min-width: 232px; height: 100vh; overflow-y: auto;
+    position: sticky; top: 0; width: var(--sidebar-width); min-width: var(--sidebar-width); height: 100vh;
+    overflow-y: auto; scrollbar-gutter: stable;
   }
   .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 14px; }
   .brand b { font-size: 15px; letter-spacing: -0.01em; }
@@ -132,6 +134,21 @@
   .runline.step { color: var(--text); }
   .runline.system { color: var(--accent); }
   .runline.error { color: var(--bad); }
+  .run-progress { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .run-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .run-progress-head b { font-size: 13px; }
+  .run-progress-head span { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .run-progress .meter { width: 100%; height: 6px; margin-top: 9px; }
+  .run-progress .meter i { background: var(--accent); transition: width .25s ease; }
+  .run-progress-detail { color: var(--muted); font-size: 12px; margin-top: 7px; }
+  .console-toggle { display: inline-flex; align-items: center; gap: 5px; }
+  .console-toggle svg { width: 14px; height: 14px; }
+  .output-preview { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 12px;
+    max-height: 420px; overflow: auto; white-space: pre-wrap; font-family: var(--serif, Georgia, serif);
+    font-size: 13px; line-height: 1.65; }
+  .output-preview.truncated { max-height: 260px; }
+  a.btn { display: inline-block; text-decoration: none; }
+  .analysis-finding { min-height: 76px; resize: vertical; }
 
   #view.readonly .choice, #view.readonly .chip, #view.readonly .doc-x,
   #view.readonly .fs .item, #view.readonly .crumbs button { pointer-events: none; opacity: 0.7; }
@@ -332,6 +349,10 @@ let chapterSnapshot = null;
 let projectAnalysisLoading = false;
 let collapsedGroups = { "Set up": false, Prepare: false, Write: false };
 let chapterChat = null;
+let showRunConsole = false;
+let runProgress = null;
+let runOutput = null;
+let sourceAnalysisStarted = false;
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
@@ -670,8 +691,12 @@ function isDone(id) {
     case "start":     return !!effectiveProjectStart();
     case "engine":    return engineAssignmentsReady() && !!S.engineReviewed;
     case "connect":   return S.drive.connected;
-    case "sources":   return !indexError && S.drive.referenceRoots.length > 0
-      && (!!S.drive.targetFolderId || route === "analyze" || S.sourcesReviewed);
+    case "sources": {
+      const hasSources = S.drive.referenceRoots.length > 0
+        || S.sources.some((source) => source.driveId.startsWith("local-"));
+      return !indexError && hasSources
+        && (sourceAnalysisStarted || S.sourcesReviewed);
+    }
     case "analyze":   return !indexError && S.sources.length > 0 && S.sourcesReviewed;
     case "intake":    return !!S.shape && !!S.draftingMode && !!S.projectShapeReviewed;
     case "draft":     return !!S.manuscriptReviewed;
@@ -718,6 +743,7 @@ function furthestReached() {
 }
 
 function isLocked(id) {
+  if (id === "analyze" && (route === "analyze" || indexing)) return false;
   const i = phaseOrder().indexOf(id);
   return i > furthestReached();
 }
@@ -730,6 +756,7 @@ function go(r) {
     return;
   }
   route = r; analysisEditing = false; render();
+  if (r === "intake") requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   if (r === "sources" && (S.drive.connected || !(S.sources || []).some((source) => source.driveId.startsWith("local-")))) loadBrowse(browse.folderId);   // always re-fetch when Drive is available
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
@@ -1348,8 +1375,8 @@ function viewSources() {
       if (!target) missing.push("a target folder");
       const ready = missing.length === 0;
       return `<div class="row" style="margin-top:16px">
-        <button ${ready ? "" : "disabled"} onclick="analyseSources(this)">
-          Analyse ${ready ? plural(picked.size, "source") : "sources"}</button>
+        <button ${ready && !indexing ? "" : "disabled"} onclick="analyseSources(this)">
+          ${indexing ? "Starting analysis..." : `Analyse ${ready ? plural(picked.size, "source") : "sources"}`}</button>
       </div>
       ${ready ? "" : `<div class="hint" style="margin-top:8px;color:var(--warn)">Still need ${
         missing.length === 2 ? `${missing[0]} and ${missing[1]}` : missing[0]
@@ -1383,10 +1410,10 @@ function saveSourceSelections() {
   }).catch((e) => toast(`Could not save source selections: ${e.message}`, "error"));
   return selectionSave;
 }
-function toggleRef(id, name) { picked.has(id) ? picked.delete(id) : picked.set(id, name); render(); saveSourceSelections(); }
-function unpick(id) { picked.delete(id); render(); saveSourceSelections(); }
-function pickTarget(id, name) { target = target?.id === id ? null : { id, name }; render(); saveSourceSelections(); }
-function clearTarget() { target = null; render(); saveSourceSelections(); }
+function toggleRef(id, name) { sourceAnalysisStarted = false; picked.has(id) ? picked.delete(id) : picked.set(id, name); render(); saveSourceSelections(); }
+function unpick(id) { sourceAnalysisStarted = false; picked.delete(id); render(); saveSourceSelections(); }
+function pickTarget(id, name) { sourceAnalysisStarted = false; target = target?.id === id ? null : { id, name }; render(); saveSourceSelections(); }
+function clearTarget() { sourceAnalysisStarted = false; target = null; render(); saveSourceSelections(); }
 
 /**
  * Analysing replaces the whole grouping, so an existing one is worth a warning:
@@ -1413,6 +1440,9 @@ async function runAnalysis(btn) {
   if (btn) btn.disabled = true;
   indexError = null;
   indexing = true;
+  sourceAnalysisStarted = true;
+  render();
+  await new Promise((resolve) => requestAnimationFrame(resolve));
   route = "analyze";
   render();
   try {
@@ -1433,6 +1463,7 @@ async function runAnalysis(btn) {
   } catch (e) {
     indexing = false;
     indexError = e.message;
+    sourceAnalysisStarted = false;
     route = "sources";
     toast(e.message, "error");
   }
@@ -1682,12 +1713,12 @@ function viewIntake() {
   <div class="choices">
     <div class="choice ${mode === "chapter_by_chapter" ? "on" : ""}" onclick="setProject({draftingMode:'chapter_by_chapter'})">
       <b>Chapter by chapter</b>
-      <p>Drafts one chapter, edits and validates it, then <b>stops for your approval</b> before
-      continuing. Your notes shape every following chapter. Slower, far more control.</p></div>
+      <p>Drafts, edits, and validates one chapter at a time, then stops for your approval before it
+      continues. Your notes shape every following chapter. Slower, with far more control.</p></div>
     <div class="choice ${mode === "whole_book" ? "on" : ""}" onclick="setProject({draftingMode:'whole_book'})">
       <b>Whole book</b>
-      <p>Drafts, edits and validates <b>every chapter without stopping</b>, then hands you the
-      complete manuscript once. Continuity is still enforced between chapters.</p></div>
+      <p>Drafts, edits, and validates every chapter in one pass, then gives you the complete
+      manuscript. Continuity is still checked between chapters.</p></div>
   </div>
 
   <div class="row" style="margin-top:28px">
@@ -1747,6 +1778,7 @@ async function continueProjectShape(btn) {
 
 function draftSection() {
   const m = S.manuscript;
+  const continuationChapter = m ? (m.lastChapterComplete ? m.chapterCount + 1 : m.chapterCount) : null;
 
   const rows = browse.entries.map((e) => {
     const safe = esc(e.name).replace(/'/g, "\\'");
@@ -1774,6 +1806,16 @@ function draftSection() {
       <b>${esc(m.name)}</b>
       <span class="pill">${plural(m.totalWords, "word", null, m.totalWords.toLocaleString())}</span>
       <span class="pill">${plural(m.chapterCount, "section")}</span>
+    </div>
+    <div class="info ok" style="margin:0 0 12px">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M20 6L9 17l-5-5"/>
+      </svg>
+      <div><b>Continuation point</b>
+        <p>${m.lastChapterComplete
+          ? `The draft analysis finds a complete ending after Chapter ${m.chapterCount}. Canon Quill will continue with Chapter ${continuationChapter}.`
+          : `The draft analysis finds that Chapter ${m.chapterCount} is unfinished. Canon Quill will finish it before opening Chapter ${continuationChapter + 1}.`}</p>
+      </div>
     </div>
     ${!m.lastChapterComplete ? `<div class="info warn" style="margin:0 0 12px">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -2055,8 +2097,8 @@ function viewIntakeAnalysis() {
     const finding = findings[key];
     if (editing) {
       return `<tr><td><b>${esc(label)}</b></td><td>
-        <input data-finding="${key}" data-orig="${esc(finding?.value || "")}" value="${esc(finding?.value || "")}"
-          placeholder="Not established. Type what is true, or leave it empty." /></td></tr>`;
+        <textarea class="analysis-finding" data-finding="${key}" data-orig="${esc(finding?.value || "")}" rows="3"
+          placeholder="Not established. Type what is true, or leave it empty.">${esc(finding?.value || "")}</textarea></td></tr>`;
     }
     if (!finding) return `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`;
     return `<tr><td><b>${esc(label)}</b></td><td>${esc(finding.value)}
@@ -2191,10 +2233,16 @@ async function loadProjectAnalysis() {
 
 async function continueFromAnalysis(btn) {
   btn.disabled = true;
-  route = "questions";
-  render();
-  await loadQuestions();
-  startQuestionPolling();
+  try {
+    S = await api("/api/intake/analysis/continue", { method: "POST" });
+    route = "questions";
+    render();
+    await loadQuestions();
+    startQuestionPolling();
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+  }
 }
 
 let FINGERPRINT = null;
@@ -2363,7 +2411,9 @@ function stopQuestionPolling() {
 function enterChapters() {
   startChapterPolling();
   loadRuntime();
+  loadRunOutput();
   if (S?.run?.status === "running") startRunPolling();
+  else if (["halted", "complete"].includes(S?.run?.status)) pollRun();
 }
 
 function startChapterPolling() {
@@ -2473,6 +2523,9 @@ async function startWriting(btn) {
     closeModal();
     runEvents = [];
     runLatest = 0;
+    runProgress = null;
+    runOutput = null;
+    showRunConsole = false;
     render();
     startRunPolling();
     toast(`${r.runtimeLabel || "The runtime"} is working.`);
@@ -2504,13 +2557,17 @@ function stopRunPolling() {
 async function pollRun() {
   try {
     const snapshot = await api(`/api/run/events?since=${runLatest}`);
+    const progressChanged = JSON.stringify(snapshot.progress || null) !== JSON.stringify(runProgress || null);
+    runProgress = snapshot.progress || runProgress;
     if (snapshot.events.length) {
       runEvents = [...runEvents, ...snapshot.events].slice(-400);
       runLatest = snapshot.latest;
-      if (route === "chapters") renderRunLog();
+      if (route === "chapters" && !progressChanged && showRunConsole) renderRunLog();
     }
+    if (progressChanged && route === "chapters") render();
     if (!snapshot.active) {
       stopRunPolling();
+      await loadRunOutput();
       await reload();
     }
   } catch { /* a missed poll is caught by the next one */ }
@@ -2528,22 +2585,78 @@ function runLine(event) {
   return `<div class="runline ${event.kind}"><span class="t">${time}</span><span>${esc(event.text)}</span></div>`;
 }
 
+async function loadRunOutput() {
+  try {
+    runOutput = await api("/api/run/output");
+    if (route === "chapters") render();
+  } catch { /* output is optional until a chapter or final manuscript exists */ }
+}
+
+function progressForRun(run) {
+  if (runProgress) return runProgress;
+  if (run.status === "complete") return { label: "Writing complete", percent: 100, detail: "The runtime finished. Checking the finished output.", chapter: run.chapter || null };
+  if (run.status === "halted") return { label: "Run stopped", percent: 0, detail: "The run stopped before it finished.", chapter: run.chapter || null };
+  return { label: "Getting started", percent: 5, detail: "Starting the writing runtime.", chapter: run.chapter || null };
+}
+
 function runPanel(run) {
   const running = run.status === "running";
   const elapsed = run.startedAt ? Math.floor((Date.now() - Date.parse(run.startedAt)) / 1000) : 0;
+  const progress = progressForRun(run);
+  const phaseLabel = progress.chapter && progress.phase === "writing_chapter"
+    ? `Writing Chapter ${progress.chapter}`
+    : progress.chapter && progress.phase === "editing_chapter"
+      ? `Editing Chapter ${progress.chapter}`
+      : progress.chapter && progress.phase === "validating_chapter"
+        ? `Checking Chapter ${progress.chapter}`
+        : `${progress.label}${progress.chapter ? ` (Chapter ${progress.chapter})` : ""}`;
+  const workText = S?.draftingMode === "whole_book" ? "the whole book" : "the book";
   return `<div class="card" ${running ? 'style="border-color:var(--accent)"' : ""}>
     <div class="row spread" style="margin-bottom:10px">
       <div class="row">
         ${running ? '<span class="spin"></span>' : ""}
-        <b>${running ? "Writing in progress" : run.status === "complete" ? "The run finished" : "The last run"}</b>
+        <b>${running ? (progress.chapter ? `Writing Chapter ${progress.chapter}` : `Writing ${workText}`) : run.status === "complete" ? "Writing complete" : "The last run"}</b>
         ${RUNTIME?.label ? `<span class="pill">${esc(RUNTIME.label)}</span>` : ""}
         ${RUNTIME?.model ? `<span class="pill">${esc(RUNTIME.model)}</span>` : ""}
         ${running && elapsed > 0 ? `<span class="pill">${elapsed < 90 ? `${elapsed}s` : `${Math.round(elapsed / 60)}m`}</span>` : ""}
       </div>
       ${running ? '<button class="ghost sm" onclick="stopWriting(this)">Stop</button>' : ""}
     </div>
-    <div id="runlog" class="runlog">${runEvents.map(runLine).join("") || '<div class="runline"><span>Waiting for the first step.</span></div>'}</div>
+    <div class="run-progress" aria-live="polite">
+      <div class="run-progress-head"><b>${esc(phaseLabel)}</b><span>${Math.round(progress.percent)}%</span></div>
+      <div class="meter"><i style="width:${Math.max(0, Math.min(100, progress.percent))}%"></i></div>
+      <div class="run-progress-detail">${esc(progress.detail)}</div>
+    </div>
+    <div class="row" style="margin-top:10px;justify-content:flex-end">
+      <button class="ghost sm console-toggle" title="Show the runtime console" aria-label="Show the runtime console"
+        onclick="toggleRunConsole()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5h16v14H4z"/><path d="m7 9 3 3-3 3M12 15h5"/>
+        </svg>${showRunConsole ? "Hide console" : "Show console"}
+      </button>
+    </div>
+    ${showRunConsole ? `<div id="runlog" class="runlog">${runEvents.map(runLine).join("") || '<div class="runline"><span>Waiting for the first step.</span></div>'}</div>` : ""}
     ${running ? '<div class="hint" style="margin-top:8px">Leave this open or close it: the runtime keeps going either way, and the board updates as chapters land.</div>' : ""}
+  </div>`;
+}
+
+function toggleRunConsole() {
+  showRunConsole = !showRunConsole;
+  render();
+}
+
+function outputCard() {
+  const primary = runOutput?.primary;
+  if (!primary) return "";
+  const otherFiles = (runOutput.files || []).filter((file) => file.fileName !== primary.fileName);
+  return `<div class="card" style="border-color:var(--good)">
+    <div class="spread" style="margin-bottom:10px">
+      <div><b>${esc(primary.label)} is ready</b><div class="hint">Your finished ${primary.kind === "book" ? "book" : "chapter"} is available below.</div></div>
+      <a class="btn" href="${esc(primary.downloadUrl)}" download>Download ${primary.format === "docx" ? "DOCX" : "Markdown"}</a>
+    </div>
+    ${primary.preview ? `<div class="output-preview ${primary.truncated ? "truncated" : ""}">${esc(primary.preview)}</div>
+      ${primary.truncated ? '<div class="hint" style="margin-top:7px">Preview shortened here. The download contains the complete output.</div>' : ""}` : '<div class="hint">The output is ready to download.</div>'}
+    ${otherFiles.length ? `<div class="row" style="margin-top:10px">${otherFiles.map((file) => `<a class="btn ghost" href="${esc(file.downloadUrl)}" download>Download ${file.format === "docx" ? "DOCX" : "Markdown"}</a>`).join("")}</div>` : ""}
   </div>`;
 }
 
@@ -2580,7 +2693,7 @@ function viewChapters() {
 
   const HALTS = {
     no_credit: ["Out of credit", "The provider accepted the credentials but there is nothing left to spend. Add credit or raise the billing limit, then resume."],
-    rate_limited: ["Rate limited or capped", "Either too many requests too quickly, or a plan usage cap was reached. Waiting usually clears the first; a cap may need until the period resets."],
+    rate_limited: ["Session or usage limit reached", "The writing session reached a provider limit. Wait for the session or plan limit to reset, then resume. Your saved work is safe."],
     invalid_credentials: ["Credentials rejected", "The key or sign-in was refused. It may have been revoked, deleted or replaced. Fix it under Writing engine, then resume."],
     provider_error: ["The provider failed", "Something went wrong on their side. Usually worth resuming after a moment."],
     cancelled: ["Stopped by you", "Resume whenever you are ready."],
@@ -2588,7 +2701,10 @@ function viewChapters() {
   };
 
   const haltCard = run.status === "halted" ? (() => {
-    const [title, help] = HALTS[run.reason] || HALTS.other;
+    const sessionLimit = run.reason === "rate_limited" && /session limit|hit your session/i.test(run.detail || "");
+    const [title, help] = sessionLimit
+      ? ["Session limit reached", "The writing session reached its usage limit. Wait for it to reset, then resume. Your saved work is safe."]
+      : HALTS[run.reason] || HALTS.other;
     return `<div class="card" style="border-color:var(--bad)">
       <div class="row" style="margin-bottom:6px">
         <b style="color:var(--bad)">${title}</b>
@@ -2610,11 +2726,13 @@ function viewChapters() {
   const live = run.status === "running" || runEvents.length > 0;
   // A halted run offers Resume, which is the same act as starting.
   const writingCard = live ? runPanel(run) : haltCard ? "" : startCard(cs.length > 0);
+  const finishedOutput = outputCard();
 
   if (!cs.length) return `<h1>Chapters</h1>
     ${haltCard}
     ${haltCard || live ? "" : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
     ${writingCard}
+    ${finishedOutput}
     ${directionsCard(pending, dirs)}`;
 
   const approved = cs.filter((c) => c.status === "approved").length;
@@ -2626,6 +2744,15 @@ function viewChapters() {
         ? "<b>Whole-book mode.</b> All chapters are drafted and validated in one pass; you review the finished manuscript."
         : "Pick a drafting mode under Project shape."}</p>
 
+  ${S.manuscript ? `<div class="info ok">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <path d="M20 6L9 17l-5-5"/>
+    </svg>
+    <div><b>Continuing an existing draft</b><p>${S.manuscript.lastChapterComplete
+      ? `The draft analysis finds a complete ending after Chapter ${S.manuscript.chapterCount}. The next chapter is Chapter ${S.manuscript.chapterCount + 1}.`
+      : `The draft analysis finds that Chapter ${S.manuscript.chapterCount} is unfinished. Canon Quill will finish it before starting Chapter ${S.manuscript.chapterCount + 1}.`}</p></div>
+  </div>` : ""}
+
   ${haltCard}
 
   ${S.writingConfirmed ? "" : `<div class="card" style="border-color:var(--accent)">
@@ -2636,6 +2763,7 @@ function viewChapters() {
   </div>`}
 
   ${writingCard}
+  ${finishedOutput}
 
   <div class="card spread">
     <div><b>${approved} of ${plural(cs.length, "chapter")} approved</b>
@@ -2767,6 +2895,9 @@ async function resumeRun(btn) {
     S = r.state;
     runEvents = [];
     runLatest = 0;
+    runProgress = null;
+    runOutput = null;
+    showRunConsole = false;
     render();
     startRunPolling();
     toast(r.resumeAt ? `Resuming at chapter ${r.resumeAt}.` : "Resumed.");

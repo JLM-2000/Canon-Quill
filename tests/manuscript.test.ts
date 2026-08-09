@@ -60,6 +60,13 @@ describe("whether the draft is finished", () => {
     expect(a.lastChapterComplete).toBe(false);
   });
 
+  it("keeps an explicitly numbered unfinished chapter in the chapter list", () => {
+    const a = analyseManuscript(chapter("# Chapter One", prose) + chapter("# Chapter Two", "A"));
+    expect(a.chapters).toHaveLength(2);
+    expect(a.lastChapterComplete).toBe(false);
+    expect(a.completenessReason).toMatch(/no closing punctuation/i);
+  });
+
   it("flags a final section far shorter than the others", () => {
     const long = Array.from({ length: 30 }, () => prose).join(" ");
     const text = chapter("# One", long) + chapter("# Two", long) + chapter("# Three", long) + chapter("# Four", prose);

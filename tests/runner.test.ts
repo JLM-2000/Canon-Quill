@@ -64,6 +64,7 @@ describe("runtime command", () => {
     expect(prompt).toContain("The Tide House");
     expect(prompt).toContain("workspaces/the-tide-house/project.json");
     expect(prompt).toContain("Start at chapter one.");
+    expect(prompt).toContain("CANON_QUILL_PROGRESS");
   });
 });
 
@@ -113,6 +114,7 @@ describe("reading the runtime stream", () => {
 describe("why a run stopped", () => {
   it("maps provider trouble onto the halt reasons the board knows", () => {
     expect(inferReason("Error: 429 rate limit exceeded")).toBe("rate_limited");
+    expect(inferReason("You've hit your session limit. Reset and try again.")).toBe("rate_limited");
     expect(inferReason("Your credit balance is too low")).toBe("no_credit");
     expect(inferReason("invalid api key")).toBe("invalid_credentials");
     expect(inferReason("Overloaded")).toBe("provider_error");

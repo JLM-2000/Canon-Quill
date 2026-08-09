@@ -1,6 +1,6 @@
 import { analyseWriting, type WritingProfile } from "../style/profile.js";
 import { analyseManuscript } from "./manuscript.js";
-import { splitParagraphs, words } from "../style/text.js";
+import { splitParagraphs, splitSentences, words } from "../style/text.js";
 
 export interface IntakeDocument {
   name: string;
@@ -378,7 +378,7 @@ function findUnknowns(input: {
 }
 
 function findPremise(documents: IntakeDocument[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:story promise|logline|premise|central premise|hook|one[- ]sentence(?: story)?|synopsis|blurb)\s*[:\-]\s*(.{24,320})/i);
+  const labeled = findLabeledSnippet(documents, /(?:story promise|logline|premise|central premise|hook|one[- ]sentence(?: story)?|synopsis|blurb)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const plotDocument = documents.find((document) => document.kinds?.includes("plot"));
   const candidate = plotDocument && firstUsefulLine(plotDocument.text);
@@ -390,7 +390,7 @@ function findPremise(documents: IntakeDocument[]): IntakeFinding | null {
 }
 
 function findProtagonist(documents: IntakeDocument[], names: string[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:protagonist|main character|primary character|lead)\s*[:\-]\s*(.{2,180})/i);
+  const labeled = findLabeledSnippet(documents, /(?:protagonist|main character|primary character|lead)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const characterDocuments = documents.filter((document) => document.kinds?.includes("characters"));
   if (!names.length) return null;
@@ -403,7 +403,7 @@ function findProtagonist(documents: IntakeDocument[], names: string[]): IntakeFi
 }
 
 function findRelationships(documents: IntakeDocument[], names: string[], genre: string | null): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:relationship|romance|couple|dynamic|relationship arc|love story)\s*[:\-]\s*(.{16,280})/i);
+  const labeled = findLabeledSnippet(documents, /(?:relationship|romance|couple|dynamic|relationship arc|love story)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const pair = rankRelationshipPair(documents, names);
   if (genre === "Romance" && pair) {
@@ -428,7 +428,7 @@ function findRelationships(documents: IntakeDocument[], names: string[], genre: 
 }
 
 function findConflict(documents: IntakeDocument[], genre: string | null, names: string[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:central conflict|conflict|stakes|antagonist|goal|external problem|internal problem)\s*[:\-]\s*(.{20,280})/i);
+  const labeled = findLabeledSnippet(documents, /(?:(?:central\s+)?conflict(?:\s+(?:and|&)\s+stakes)?|stakes|antagonist|goal|external problem|internal problem)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const plotDocument = documents.find((document) => document.kinds?.includes("plot"));
   const line = plotDocument && findLine(plotDocument.text, /\b(?:must|tries to|determined to|before|unless|against|threat|secret|goal|wants to|needs to)\b/i);
@@ -441,7 +441,7 @@ function findConflict(documents: IntakeDocument[], genre: string | null, names: 
 }
 
 function findSetting(documents: IntakeDocument[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:setting|location|world|takes place|time period|era)\s*[:\-]\s*(.{12,220})/i);
+  const labeled = findLabeledSnippet(documents, /(?:setting|location|world|takes place|time period|era)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const worldDocument = documents.find((document) => document.kinds?.includes("world"));
   const worldLine = worldDocument && firstUsefulLine(worldDocument.text);
@@ -451,7 +451,7 @@ function findSetting(documents: IntakeDocument[]): IntakeFinding | null {
 }
 
 function findTimeline(documents: IntakeDocument[], allDocuments: IntakeDocument[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:timeline|chronology|series position|book number|time line|dates?)\s*[:\-]\s*(.{12,220})/i);
+  const labeled = findLabeledSnippet(documents, /(?:timeline|chronology|series position|book number|time line|dates?)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const timelineDocument = allDocuments.find((document) => document.kinds?.includes("timeline"));
   const timelineLine = timelineDocument && firstUsefulLine(timelineDocument.text);
@@ -461,7 +461,7 @@ function findTimeline(documents: IntakeDocument[], allDocuments: IntakeDocument[
 }
 
 function findStructure(documents: IntakeDocument[], allDocuments: IntakeDocument[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:ending|resolution|climax|epilogue|final chapter|book ending|structure|chapter plan|beat sheet)\s*[:\-]\s*(.{16,280})/i);
+  const labeled = findLabeledSnippet(documents, /(?:ending|resolution|climax|epilogue|final chapter|book ending|structure|chapter plan|beat sheet)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const chapterCount = allDocuments.reduce((total, document) => total + countChapterHeadings(document.text), 0);
   const plotDocument = documents.find((document) => document.kinds?.includes("plot"));
@@ -630,7 +630,20 @@ function findLine(text: string, pattern: RegExp): string | null {
 }
 
 function cleanSnippet(value: string): string {
-  return value.replace(/\s+/g, " ").replace(/^[-*\d.)\s]+/, "").trim().slice(0, 300);
+  const normalized = value.replace(/\s+/g, " ").replace(/^[-*\d.)\s]+/, "").trim();
+  if (normalized.length <= 300) return normalized;
+
+  const complete = splitSentences(normalized)
+    .map((sentence) => sentence.text)
+    .filter((sentence) => /[.!?]["'”’)]?$/.test(sentence));
+  const kept: string[] = [];
+  for (const sentence of complete) {
+    const candidate = [...kept, sentence].join(" ");
+    if (candidate.length > 300 && kept.length > 0) break;
+    kept.push(sentence);
+    if (candidate.length >= 300) break;
+  }
+  return kept.join(" ") || normalized;
 }
 
 function countChapterHeadings(text: string): number {

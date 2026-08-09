@@ -84,6 +84,8 @@ export interface ChapterChatMessage {
 export interface ProjectAnalysisState extends Omit<ProjectAnalysis, "analysedAt"> {
   completed: boolean;
   analysedAt: string | null;
+  /** True only after the author has reviewed the analysis and continued. */
+  continuedAt: string | null;
 }
 
 export interface ChapterRecord {
@@ -295,7 +297,8 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
       questionPlan: [],
       authorNotes: "",
       edits: {},
-      analysedAt: null
+      analysedAt: null,
+      continuedAt: null
     },
     chapters: [],
     manuscript: null,
@@ -430,6 +433,7 @@ export function derivePhase(state: StudioState): PhaseId {
   if (hasOwnStyle && !state.styleCorpus.built) return "preparation";
   if (hasOwnStyle && !state.styleCorpus.continuedAt) return "preparation";
   if (!state.projectAnalysis.completed) return "intake_analysis";
+  if (!state.projectAnalysis.continuedAt) return "intake_analysis";
   if (!state.conversationStartedAt && state.questions.length === 0) return "preflight";
   if (!state.writingConfirmed) return "preflight";
   return "writing";
