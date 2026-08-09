@@ -136,7 +136,7 @@
     padding: 14px; cursor: pointer; transition: border-color .12s, background .12s;
   }
   .choice:hover { border-color: var(--accent); }
-  .choice.locked { cursor: default; }
+  .choice.locked { cursor: default; pointer-events: none; }
   .choice.locked:hover { border-color: var(--accent); }
   .choice.on { border-color: var(--accent); background: var(--accent-dim); }
   .choice b { display: block; margin-bottom: 3px; }
@@ -788,11 +788,11 @@ function viewStart() {
   <h1>How are you starting this book?</h1>
   <p class="sub">This decides whether Canon Quill waits for planning material or helps you build the project from a detailed brief.</p>
   <div class="choices">
-    <div class="choice ${locked ? "locked " : ""}${selected === "from_scratch" ? "on" : ""}" onclick="${locked ? "showLockedStart()" : "chooseProjectStart('from_scratch')"}" aria-disabled="${locked}">
+    <div class="choice ${locked ? "locked " : ""}${selected === "from_scratch" ? "on" : ""}" onclick="${locked ? "" : "chooseProjectStart('from_scratch')"}" aria-disabled="${locked}">
       <b>From scratch</b>
       <p>No plan, timeline, character file or outline yet. You will first describe in detail what the book is about, then we set up the project.</p>
     </div>
-    <div class="choice ${locked ? "locked " : ""}${selected === "with_material" ? "on" : ""}" onclick="${locked ? "showLockedStart()" : "chooseProjectStart('with_material')"}" aria-disabled="${locked}">
+    <div class="choice ${locked ? "locked " : ""}${selected === "with_material" ? "on" : ""}" onclick="${locked ? "" : "chooseProjectStart('with_material')"}" aria-disabled="${locked}">
       <b>I already have material</b>
       <p>I have a plan, timeline, characters, outline or related documents. Upload files directly or connect Google Drive and choose what Canon Quill may read.</p>
     </div>
@@ -803,12 +803,10 @@ function viewStart() {
     <textarea id="starting-brief" rows="9" placeholder="This book is about..." ${locked ? "readonly" : ""} oninput="saveStartDraft('from_scratch',this.value);document.getElementById('start-continue').disabled=this.value.trim().length<40">${esc(brief)}</textarea>
   </div>` : ""}
   <div class="row" style="margin-top:16px">
-    ${locked ? '<span class="pill good">Starting point confirmed</span>' : `<button id="start-continue" ${selected && (selected !== "from_scratch" || brief.trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
+    ${locked ? "" : `<button id="start-continue" ${selected && (selected !== "from_scratch" || brief.trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
     ${selected === "from_scratch" && brief.trim().length < 40 ? '<span class="hint" style="color:var(--warn)">Write a few detailed sentences before continuing.</span>' : ""}`}
   </div>`;
 }
-
-function showLockedStart() { toast("Starting point is locked after Continue.", "info"); }
 
 function chooseProjectStart(projectStart) {
   startSelection = projectStart;
