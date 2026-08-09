@@ -12,6 +12,8 @@ import { afterAll } from "vitest";
 
 const root = mkdtempSync(path.join(tmpdir(), "canon-quill-test-"));
 process.env.CANON_QUILL_WORKSPACES_ROOT = path.join(root, "workspaces");
+// No test may start a real writing runtime.
+process.env.CANON_QUILL_RUNTIME_DRYRUN = "1";
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });

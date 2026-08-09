@@ -28,6 +28,17 @@ import { scoreAgainstFingerprint } from "../style/score.js";
 import { computeMetrics, type StyleMetrics } from "../style/metrics.js";
 import { renderExemplarPrompt, retrieveExemplars } from "../style/retrieve.js";
 import { buildOpeningBrief, validateFlow } from "../continuity/flow.js";
+import { redactSensitiveText } from "./redact.js";
+import {
+  isRunning,
+  runSnapshot,
+  runtimeLabel,
+  selectRuntime,
+  startRun,
+  stopRun,
+  type RunOutcome,
+  type RuntimeId
+} from "./runner.js";
 import {
   blockingQuestions,
   derivePhase,
@@ -176,6 +187,64 @@ export function createStudioApp() {
       apply("spice", intimacy, edits.findings?.intimacy !== undefined);
     });
     return { analysis, state: withDerived(next) };
+  }
+
+  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string }) {
+    if (isRunning()) throw new HttpError(409, "A run is already in progress.");
+    const provider = state.engine.draftingProvider ?? state.engine.provider;
+    if (!provider) throw new HttpError(400, "Choose a writing engine first.");
+
+    const model = resolveModels(await loadCatalog(), state.engine).drafting ?? null;
+    let started: { runtime: RuntimeId; command: string };
+    try {
+      started = startRun({
+        slug,
+        projectName: state.projectName,
+        provider,
+        model,
+        note: options.note,
+        onExit: (outcome) => void recordRunOutcome(slug, outcome)
+      });
+    } catch (error) {
+      throw new HttpError(400, message(error));
+    }
+
+    const next = await updateState(slug, (current) => {
+      current.run = {
+        status: "running",
+        chapter: options.chapter,
+        reason: null,
+        detail: null,
+        haltedAt: null,
+        startedAt: new Date().toISOString()
+      };
+    });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "chapter_drafting",
+      stageName: "Drafting",
+      agent: started.runtime,
+      event: "run_started",
+      data: { model, chapter: options.chapter }
+    });
+
+    return { ...withDerived(next), runtime: started.runtime, runtimeLabel: runtimeLabel(started.runtime), model };
+  }
+
+  async function recordRunOutcome(slug: string, outcome: RunOutcome): Promise<void> {
+    try {
+      await updateState(slug, (current) => {
+        current.run = outcome.ok
+          ? { ...current.run, status: "complete", reason: null, detail: null, haltedAt: null }
+          : {
+            ...current.run,
+            status: "halted",
+            reason: outcome.reason ?? "other",
+            detail: outcome.detail ? redactSensitiveText(outcome.detail).slice(0, 2000) : null,
+            haltedAt: new Date().toISOString()
+          };
+      });
+    } catch { /* the run is over either way; the board reloads from disk */ }
   }
 
   /** Clear the computed analysis while keeping what the author supplied. */
@@ -1136,6 +1205,12 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
+  app.post("/api/writing/reopen", route(async (_req, res) => {
+    const slug = await requireSlug();
+    if (isRunning()) throw new HttpError(409, "Stop the run before reopening preparation.");
+    res.json(withDerived(await updateState(slug, (current) => void (current.writingConfirmed = false))));
+  }));
+
   // --- Chapters -------------------------------------------------------------
   app.put("/api/chapters", route(async (req, res) => {
     const slug = await requireSlug();
@@ -1456,17 +1531,39 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const current = await loadState(slug);
     requireWritingPhase(current);
+    const started = await launchRuntime(slug, current, {
+      chapter: Number(req.body?.chapter) || null,
+      note: typeof req.body?.note === "string" ? req.body.note : undefined
+    });
+    res.json(started);
+  }));
+
+  app.get("/api/run/events", route(async (_req, res) => {
+    await requireSlug();
+    res.json(runSnapshot(Number(_req.query.since) || 0));
+  }));
+
+  app.post("/api/run/stop", route(async (_req, res) => {
+    const slug = await requireSlug();
+    if (!stopRun()) throw new HttpError(409, "Nothing is running.");
     const state = await updateState(slug, (current) => {
-      current.run = {
-        status: "running",
-        chapter: Number(req.body?.chapter) || null,
-        reason: null,
-        detail: null,
-        haltedAt: null,
-        startedAt: new Date().toISOString()
-      };
+      current.run = { ...current.run, status: "halted", reason: "cancelled", detail: null, haltedAt: new Date().toISOString() };
     });
     res.json(withDerived(state));
+  }));
+
+  app.get("/api/run/runtime", route(async (_req, res) => {
+    const state = await loadState(await requireSlug());
+    const provider = state.engine.draftingProvider ?? state.engine.provider;
+    const runtime = provider ? selectRuntime(provider) : null;
+    const catalog = await loadCatalog();
+    res.json({
+      provider,
+      runtime,
+      label: runtime ? runtimeLabel(runtime) : null,
+      model: provider ? resolveModels(catalog, state.engine).drafting ?? null : null,
+      running: isRunning()
+    });
   }));
 
   /** Resume a halted run after credential checks. */
@@ -1491,18 +1588,9 @@ export function createStudioApp() {
 
     // The first chapter that is not finished is where the work continues.
     const next = state.chapters.find((chapter) => chapter.status !== "approved");
-    const updated = await updateState(slug, (current) => {
-      current.run = {
-        status: "running",
-        chapter: next?.number ?? null,
-        reason: null,
-        detail: null,
-        haltedAt: null,
-        startedAt: new Date().toISOString()
-      };
-    });
+    const updated = await launchRuntime(slug, state, { chapter: next?.number ?? null });
 
-    res.json({ resumed: true, resumeAt: next?.number ?? null, state: withDerived(updated) });
+    res.json({ resumed: true, resumeAt: next?.number ?? null, state: updated });
   }));
 
   app.post("/api/chapters/:number/status", route(async (req, res) => {
@@ -1834,16 +1922,6 @@ function requireWritingPhase(state: StudioState): void {
   if (!state.writingConfirmed || derivePhase(state) !== "writing") {
     throw new HttpError(409, "The writing phase has not been explicitly confirmed.");
   }
-}
-
-function redactSensitiveText(value: string): string {
-  return value
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
-    .replace(/\b(?:sk|sk-ant)-[A-Za-z0-9_-]{12,}\b/g, "[redacted key]")
-    .replace(/\b(?:ya29\.[A-Za-z0-9._-]+|AIza[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})\b/g, "[redacted token]")
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted private key]")
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted token]")
-    .replace(/\b(api[_ -]?key|token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]");
 }
 
 function message(error: unknown): string {

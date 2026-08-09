@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import type { Classification, SourceKind } from "../analysis/classify.js";
 import type { ProjectAnalysis } from "../analysis/intake.js";
@@ -380,8 +381,9 @@ export async function saveState(state: StudioState): Promise<StudioState> {
   const paths = workspacePaths(state.slug);
   await mkdir(paths.root, { recursive: true });
   const next = { ...state, updatedAt: new Date().toISOString() };
-  // Atomic replacement protects concurrent Studio and agent writes.
-  const temp = `${paths.stateFile}.${process.pid}.tmp`;
+  // Atomic replacement, and a unique name per write: two writes in one
+  // process would otherwise race to rename the same temp file.
+  const temp = `${paths.stateFile}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temp, JSON.stringify(next, null, 2), "utf8");
   await rename(temp, paths.stateFile);
   return next;

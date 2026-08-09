@@ -1068,6 +1068,7 @@ describe("run halt and resume", () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");
     state.writingConfirmed = true;
+    state.engine = { ...state.engine, provider: "anthropic", authMethod: "subscription", draftingProvider: "anthropic", draftingAuthMethod: "subscription" };
     await save(state);
     await call("/api/chapters/1/status", { method: "POST", body: { status: "validated" } });
     await call("/api/chapters/1/status", { method: "POST", body: { status: "approved" } });
@@ -1078,6 +1079,60 @@ describe("run halt and resume", () => {
     expect(body.resumeAt).toBe(2);
     expect(body.state.run.status).toBe("running");
     expect(body.state.run.reason).toBeNull();
+  });
+});
+
+describe("starting the writing run", () => {
+  async function ready() {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "One" }] } });
+    const state = await load("test-book");
+    state.writingConfirmed = true;
+    state.engine = { ...state.engine, provider: "anthropic", authMethod: "subscription", draftingProvider: "anthropic", draftingAuthMethod: "subscription" };
+    await save(state);
+  }
+
+  it("reports the runtime and model the author's choice resolves to", async () => {
+    await ready();
+    const { body } = await call("/api/run/runtime");
+    expect(body.provider).toBe("anthropic");
+    expect(body.model).toBe("claude-opus-5");
+    expect(body.running).toBe(false);
+  });
+
+  it("marks the book as running and records what it started", async () => {
+    await ready();
+    const { status, body } = await call("/api/run/start", { method: "POST", body: { note: "Start at chapter one." } });
+    expect(status).toBe(200);
+    expect(body.run.status).toBe("running");
+    expect(body.runtime).toBeTruthy();
+
+    const events = await call("/api/run/events");
+    expect(events.body.command).toContain("book-orchestrator");
+    expect(events.body.events.map((event: { text: string }) => event.text).join(" ")).toMatch(/Starting/);
+  });
+
+  it("refuses to start without a writing engine", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "One" }] } });
+    const state = await load("test-book");
+    state.writingConfirmed = true;
+    await save(state);
+    const { status, body } = await call("/api/run/start", { method: "POST" });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/writing engine/i);
+  });
+
+  it("refuses to stop what is not running", async () => {
+    const { status } = await call("/api/run/stop", { method: "POST" });
+    expect(status).toBe(409);
+  });
+
+  it("reopens preparation so the record can be corrected", async () => {
+    await ready();
+    const { body } = await call("/api/writing/reopen", { method: "POST" });
+    expect(body.writingConfirmed).toBe(false);
+    expect(body.phase).toBe("preflight");
   });
 });
 
