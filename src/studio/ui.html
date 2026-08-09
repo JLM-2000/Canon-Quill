@@ -431,7 +431,7 @@ function newBookModal() {
     body: `<p class="hint" style="margin:0 0 12px">Each book gets its own workspace: its own sources,
       style corpus, chapters and continuity. Nothing is shared between books.</p>
       <label>Title</label>
-      <input id="booktitle" placeholder="The Tide House"
+      <input id="booktitle" placeholder="A working title"
         onkeydown="if(event.key==='Enter')createBook(document.getElementById('createbtn'))" />
       <div id="bookerr" class="hint" style="margin-top:6px"></div>`,
     actions: `<button id="createbtn" onclick="createBook(this)">Create book</button>
@@ -451,7 +451,7 @@ async function createBook(btn) {
     const r = await api("/api/projects", { method: "POST", body: { title } });
     closeModal();
     await reload();
-    route = "engine"; render();
+    route = "start"; render();
     toast(`Created "${r.project.title}".`);
   } catch (e) {
     if (err) err.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;

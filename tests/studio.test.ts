@@ -136,6 +136,8 @@ describe("studio api", () => {
     expect(html).toContain("credentialsByRole");
     expect(html).toContain("Analysis and outlines");
     expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
+    expect(html).toContain('route = "start"; render();');
+    expect(html).not.toContain("The Tide House");
   });
 
   it("returns state with a derived phase", async () => {
