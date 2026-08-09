@@ -50,6 +50,7 @@ Everything generated (Drive documents, corpora, bibles, drafts, chapters, export
 
 ## Conventions
 
-- Comments explain why, not what. The style modules were over-commented once; keep them at normal density.
+- Comments explain why, not what. The style modules were over-commented once; keep them at normal density. Sparse beats thorough.
 - No em dashes in code, comments, prompts or docs.
+- Commits are the author's alone. No `Co-Authored-By` trailer, no generated-with line, no assistant named anywhere in a commit message. Naming Claude Code or OpenCode as a runtime the project supports is fine; naming one as an author is not.
 - Tests are plain vitest over pure functions plus a real HTTP server for the Studio. No network, no model calls. Keep it that way.
