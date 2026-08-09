@@ -133,6 +133,9 @@ describe("studio api", () => {
     expect(html).toContain("showDriveRecovery");
     expect(html).toContain("about:blank");
     expect(html).toContain("Source analysis failed");
+    expect(html).toContain("credentialsByRole");
+    expect(html).toContain("Analysis and outlines");
+    expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
   });
 
   it("returns state with a derived phase", async () => {

@@ -790,6 +790,7 @@ function viewEngine() {
   const choice = S.engine || {};
   const cat = ENGINE?.catalog;
   const cred = ENGINE?.credentials;
+  const credentialsByRole = ENGINE?.credentialsByRole || {};
   const resolved = ENGINE?.resolvedModels || {};
   const split = choice.routing === "split";
   const analysisProvider = choice.analysisProvider || choice.provider;
@@ -844,8 +845,8 @@ function viewEngine() {
     <h2 style="margin-top:0">Analysis and outlines</h2>
     <p class="sub">Use this for source extraction, project analysis, questions and chapter planning.</p>
     <div class="choices">
-      ${roleProviderCard("analysis", "openai", "OpenAI / ChatGPT")}
       ${roleProviderCard("analysis", "anthropic", "Anthropic / Claude")}
+      ${roleProviderCard("analysis", "openai", "OpenAI / ChatGPT")}
     </div>
     ${analysisProvider ? `<div class="choices" style="margin-top:10px">
       ${roleAuthCard("analysis", "subscription", "Subscription", analysisProvider === "openai" ? "ChatGPT through OpenCode." : "Claude through Claude Code.")}
@@ -863,17 +864,34 @@ function viewEngine() {
     </div>` : ""}
   </div>`}
 
-  ${cred || choice.provider ? '<div class="sectionlabel">Status</div>' : ""}
+  ${cred || choice.provider || split ? '<div class="sectionlabel">Status</div>' : ""}
 
-  ${cred ? `<div class="info ${cred.ready ? "ok" : "warn"}">
-    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      ${cred.ready ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
-    </svg>
-    <div><b>${cred.ready ? "Credential found" : "Credential needed"}${
-      cred.runtime ? ` <span class="pill" style="margin-left:4px">${esc({ "claude-code": "Claude Code", opencode: "OpenCode", environment: "environment" }[cred.runtime] || cred.runtime)}</span>` : ""}</b>
-      <p>${esc(cred.detail)}</p>
-      ${cred.env && !cred.ready ? `<p style="margin-top:6px"><code>export ${esc(cred.env)}=...</code>, then restart the Studio.</p>` : ""}
-    </div></div>` : ""}
+  ${(() => {
+    const statusFor = (role) => split ? credentialsByRole[role] : cred;
+    const entries = split
+      ? [
+          ["Analysis and outlines", analysisProvider, statusFor("analysis")],
+          ["Chapter prose and editing", draftingProvider, statusFor("drafting")]
+        ]
+      : [["Writing engine", draftingProvider, statusFor("drafting")]];
+    const same = split && entries[0][1] === entries[1][1]
+      && analysisAuth === draftingAuth
+      && entries[0][2]?.ready === entries[1][2]?.ready
+      && entries[0][2]?.detail === entries[1][2]?.detail;
+    const shown = same
+      ? [["Analysis and chapter writing", entries[0][1], entries[0][2]]]
+      : entries;
+    return shown.filter(([, provider]) => provider).map(([label, provider, status]) => status ? `<div class="info ${status.ready ? "ok" : "warn"}">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        ${status.ready ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+      </svg>
+      <div><b>${esc(label)}: ${status.ready ? "Credential found" : "Credential needed"}
+        <span class="pill" style="margin-left:4px">${esc(cat?.providers?.[provider]?.label || provider)}</span>${
+        status.runtime ? ` <span class="pill" style="margin-left:4px">${esc({ "claude-code": "Claude Code", opencode: "OpenCode", environment: "environment" }[status.runtime] || status.runtime)}</span>` : ""}</b>
+        <p>${esc(status.detail)}</p>
+        ${status.env && !status.ready ? `<p style="margin-top:6px"><code>export ${esc(status.env)}=...</code>, then restart the Studio.</p>` : ""}
+      </div></div>` : "").join("");
+  })()}
 
   ${((!split && choice.provider && choice.authMethod === "api_key") || (split && (analysisAuth === "api_key" || draftingAuth === "api_key")))
     ? keyProviders.map((provider) => `<div class="card">
