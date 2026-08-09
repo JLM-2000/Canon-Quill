@@ -42,12 +42,14 @@ next to the author's actual prose. Load all four, in this order:
    open. It is binding.
 2. **Style exemplars**, retrieve passages from `workspaces/<book>/artifacts/style-corpus.json`
    for each beat in this chapter (`retrieveExemplars` in `src/style/retrieve.ts`).
-   These are real paragraphs from the author's past books, chosen for the same
-   kind of beat you are about to write.
+   These are real paragraphs from the selected Voice references, chosen for the
+   same kind of beat you are about to write.
 3. **The measured fingerprint**, `workspaces/<book>/artifacts/style-fingerprint.md`.
    Concrete targets: mean sentence length, fragment rate, dialogue share, tag
    habits, adverb and filter-verb rates.
 4. **Canon**, character, world and plot bibles, and the chapter plan entry.
+   For a series, prior books are in the author-confirmed `seriesOrder` in
+   `project.json`; a Voice reference that is not a Series book is not canon.
 5. **The approved preparation package**, including `project-brief.md`,
    `book-bible.md`, `character-bible.md`, `plot-bible.md`, `chapter-plan.md`,
    and `validation-rubric.md` under `workspaces/<book>/artifacts/`. These are the

@@ -1,201 +1,156 @@
 # Canon Quill
 
-Write a book with an LLM that actually sounds like you wrote it, and where chapter 12 still agrees with chapter 3.
+Agentic book-writing workflows grounded in an author's own past prose, with the
+quality gates needed to keep a long manuscript in the same voice and continuity.
 
-Point it at your past books in Google Drive. It measures how you write, keeps your own paragraphs on hand as reference while it drafts, and refuses to let a chapter through if it drifts from your voice or breaks continuity with the chapter before it.
+The hard part is not asking a model to write. It is giving it the right canon,
+showing it how this author actually writes, and proving that the next chapter
+still agrees with the chapters before it.
 
 ```bash
 npm run setup
+npm run check
 npm run studio
 ```
 
-It prints the URL and opens your browser. In VS Code, press **F5** and pick **Studio**. For a terminal-only launch, pick **Studio (run in terminal)**. The debugger requires Node 20.19+ in the VS Code host; when using WSL, open the folder with the Remote-WSL extension so breakpoints use the WSL Node installation.
-
-Works with **Claude Code** (`.claude/agents/`) or **OpenCode** (`.opencode/agents/`) as the writing runtime, on an Anthropic or OpenAI model, authenticated by subscription or API key. You choose in the Studio.
-
----
-
-## What makes this different
-
-Most tools describe your style to the model. They write a prompt that says "short sentences, dry humour, close third person" and hope for the best. A description of prose is not prose, and a model given one falls back on its own default voice. That is why the output reads fluent, competent and anonymous.
-
-Canon Quill keeps your actual paragraphs.
-
-**It reads your past books and cuts them into passages**, each tagged by the kind of scene it is: dialogue, action, interiority, description, transition.
-
-**Before drafting a scene, it finds your closest precedent.** Writing an argument between two characters? It pulls the arguments you have already written, preferring ones with those same characters in them, and puts them in front of the model. The model writes next to real examples of how you handle that beat.
-
-**After drafting, it measures the result against you.** Not against a general standard of good writing, against your numbers:
-
-| Measure | You | This draft | Verdict |
-|---|---:|---:|---|
-| mean sentence length | 13.6 | 24.1 | too long |
-| dialogue share | 34% | 11% | too little |
-| plain dialogue tags | 81% | 34% | too ornate |
-| abstract nouns per 1k | 4.2 | 11.7 | too vague |
-
-The editing pass works from that table. If a fix would make the prose less like yours, it does not make it.
-
-## Chapters that connect
-
-Each chapter ends by recording where it left things: where every character physically is, what they now know, what condition they are in, where the clock stands, which threads moved, and the question the chapter closes on.
-
-The next chapter is checked against that record before it can pass:
-
-- A character who was in one location opens the next chapter in another, with no journey shown, fails.
-- Someone acting on a secret the book never showed them learning fails.
-- Time running backwards without a declared flashback fails.
-- A thread you said would resolve by chapter 9 still open at chapter 10 fails.
-- A gun on the mantelpiece in chapter 2 still unfired with two chapters left gets flagged.
-
-## What it will not do
-
-It will not treat a word as bad because a list somewhere says so. Plenty of novelists write "whispered" and "ache", and flagging those would just punish you for your own voice while pushing the editing pass toward thesaurus prose.
-
-What it looks for instead is sameness, which is what actually gives a machine away: every sentence the same length, every paragraph the same shape, every character talking in the same register, every feeling named instead of shown. Those are measured directly. Anything your own writing does at a normal rate is left alone.
+The Studio is a local web application. Writing runs through Claude Code or
+OpenCode on an Anthropic or OpenAI model. Canon Quill's analysis, style scoring,
+continuity checks, and workflow validation are ordinary TypeScript functions,
+not model calls.
 
 ---
+
+## What the gates measure
+
+| Gate | Evidence | Failure it prevents |
+|---|---|---|
+| Source analysis | Selected documents with explicit roles and provenance | Another author's prose entering the style corpus |
+| Style corpus | Measured passages from series books or chosen voice references | A generic description of style replacing the author's actual prose |
+| Project analysis | Claims, conflicts, unknowns, and author decisions | Guessing at canon, audience, reveals, or boundaries |
+| Preparation | Project brief, bibles, plot, style guide, chapter plan, rubric, and manifest | Drafting before the book's contracts exist |
+| Chapter handoff | Location, knowledge, condition, timeline, relationships, open threads | Chapter 12 contradicting chapter 3 |
+| Validation | Flow, continuity, style, dialogue, boundary, and proofreading reports | A fluent but unsupported or off-voice chapter being accepted |
+
+The system measures prose against the author's own corpus, not against a generic
+standard of good writing. If the corpus uses a habit at a normal rate, Canon
+Quill does not ban it because an AI-ism list dislikes the word.
+
+## How it works
+
+1. Select the source material and assign roles. Series books provide canon and
+   are also voice references. Planning documents inform preparation but do not
+   become prose exemplars.
+2. Build the style corpus from beat-tagged passages such as dialogue, action,
+   interiority, description, and transition.
+3. Analyse the project with deterministic source measurements, then ask only
+   the author decisions that remain unresolved.
+4. Prepare the book package and require the author to review it before prose is
+   written.
+5. Start the selected writing runtime. It reads the workspace, approved
+   artifacts, author decisions, prior directions, and recorded run history.
+6. Draft, edit, validate, and record a typed handoff for every chapter.
+7. Approve the chapters, compile the manuscript, and download DOCX or print a
+   formatted document view as PDF.
 
 ## The Studio
 
-`npm run studio` opens a local web app. Nothing leaves your machine.
+The Studio keeps each book in its own workspace and exposes the decisions that
+matter instead of hiding them inside a prompt.
 
-**Writing engine.** Pick your provider (Anthropic or OpenAI) and how it authenticates (subscription or API key). Canon Quill's own engine needs no model at all, so this only decides who writes the prose. There is no field to paste a key and the API refuses one: keys stay in your environment, subscriptions stay inside your runtime's login.
+**Sources.** Browse Google Drive or upload local planning material. Only the
+files selected by the author are indexed. Source roles can be corrected, and a
+document can satisfy more than one role.
 
-**Books.** Each book is its own workspace with its own sources, style corpus, chapters and continuity. Start a second book without touching the first. Finishing a book never deletes it.
+**Writing engine.** Choose Anthropic or OpenAI, subscription or API key, and a
+single or split provider route. In split mode, preparation and drafting can use
+different providers. Credentials never enter project state or the agent prompt.
 
-**Connect Drive.** Narrow permissions, only the files you pick.
+**Preparation.** The required package is nine artifacts: project brief, book
+bible, character bible, world bible, plot bible, style guide, chapter plan,
+validation rubric, and preparation manifest. The Studio shows completed and
+pending documents while preparation runs. Completed documents can be read and
+annotated before the package is reviewed.
 
-**Select sources.** Browse your Drive, mark the folders and files to read, and choose where finished chapters get written back. Both are required before analysis will run.
+**Resuming.** A provider switch starts a new runtime session, not a new book.
+The next session inherits the workspace, decisions, artifacts, chapter states,
+directions, and recorded runtime conversation. It does not rely on the old
+provider's hidden context.
 
-**Analyse and group.** Every document is read and sorted into series books, references, characters, timeline, worldbuilding, plot, and notes. You correct anything in the wrong place by clicking the labels, and a document can belong to several groups at once, which is common: one file often holds a timeline, an outline and loose notes.
+**Outputs.** Chapters and final manuscripts are available as Markdown and DOCX.
+The formatted browser view is suitable for printing or saving as PDF.
 
-This step matters more than it looks. Only *series books* feed the style corpus, so mark the ones you wrote. They are marked as references automatically too, since your own books are your canon as well as your voice. Another author's work in that pile would pull your prose toward their voice, which is the one thing this is built to prevent.
+## Provider defaults
 
-Writing your first book and have nothing of your own? Mark what you want to write *like* as a reference and the corpus is built from that instead. The Studio tells you when it does: the result reads like whoever wrote those pages rather than like you.
+Models and catalog rates live in `config/models.yaml` and can be changed in the
+Studio. The default split route uses a cheaper analysis model and a stronger
+drafting model. The pre-start estimate reports approximate input tokens, output
+tokens, total tokens, and API cost. Subscription runs show token usage without a
+per-token dollar figure.
 
-**Project shape.** Standalone or part of a series. Series books inherit canon from the earlier volumes and are held to it.
+The estimate is intentionally directional. It does not yet claim cache savings,
+because the external runtimes own the provider requests and Canon Quill does not
+currently receive a structured cache-read or cache-write breakdown.
 
-**Style corpus.** Build it, then see your own measurements.
+## Stack
 
-**Questions.** When something genuinely needs your decision, it gets asked here instead of guessed at and buried in a document. Blocking questions hold the pipeline until you answer.
+| Area | Implementation |
+|---|---|
+| Runtime | Node 20.19+, TypeScript, Express |
+| Writing runtimes | Claude Code and OpenCode |
+| Sources | Google Drive API and local workspace uploads |
+| Style | Corpus extraction, beat retrieval, 18-metric fingerprint, deviation scoring |
+| Continuity | Typed ledger, chapter opening contracts, flow validation |
+| Documents | Markdown preview and DOCX generation |
+| Workflow | OpenSpec-validated YAML workflow and authored agents |
+| Tests | Vitest over pure functions plus a real local HTTP Studio |
 
-**Chapters.** The board, with each chapter's style score and continuity verdict.
+## Workspace
 
----
+Generated book data is kept outside the repository:
 
-## Two ways to write
-
-Pick one before drafting starts. The only difference is where you approve. Every quality check runs in both.
-
-|  | Chapter by chapter | Whole book |
-|---|---|---|
-| **What happens** | writes a chapter, edits it, checks it, then stops for you | writes every chapter start to finish |
-| **You are asked** | after each chapter | once, on the finished manuscript |
-| **Style and continuity checks** | every chapter | every chapter |
-| **Good for** | catching a problem at chapter 2 instead of chapter 20 | getting a full draft to react to |
-| **Cost** | you need to be around | a systemic problem shows up only at the end |
-
----
-
-## What it costs
-
-The engine is free. Measuring prose, building the corpus, retrieving exemplars and validating continuity never call a model.
-
-Only the writing does. For a 90,000-word book at three passes per chapter: roughly **$15 to $40** using Opus 5 for drafting and Sonnet 5 elsewhere, **$5 to $12** on Sonnet throughout, and **nothing extra** on a Claude Pro or Max subscription. Model defaults per phase live in `config/models.yaml` and are editable in the Studio.
-
-## Setup
-
-Node 20.19 or newer.
-
-```bash
-npm run setup
-```
-
-That checks your Node version, installs OpenCode and OpenSpec if missing, builds, and validates the workflow.
-
-You also need a runtime to do the writing, and either one works:
-
-```bash
-npm install -g @anthropic-ai/claude-code   # Anthropic, plan or key
-npm install -g opencode-ai                 # Anthropic or OpenAI, plan or key
-```
-
-Connect a plan with `claude` (sign in once) or `opencode auth login`. Or paste an API key straight into the Studio, which stores it in `.auth/credentials.json` (gitignored, mode 0600) and verifies it against the provider. [The guide](docs/GUIDE.md) covers all of it.
-
-### Google Drive
-
-You need a Google OAuth client of type **Desktop app**, then one line in `.env`:
-
-```
-GOOGLE_OAUTH_CLIENT_JSON=/path/to/your/credentials.json
-```
-
-Windows, WSL, macOS and Linux path styles all work; Canon Quill translates between them, so a `C:\Users\...` path pasted into WSL resolves fine.
-
-Then open **Connect Drive** in the Studio and press **Connect Google Drive**.
-
-The console flow has a few steps that are easy to get wrong, and two that will bite you later: while the consent screen is in Testing you must add yourself as a **test user**, and test-mode refresh tokens expire after **seven days** unless you publish it.
-
-**[docs/GUIDE.md](docs/GUIDE.md) walks the whole thing**, along with everything else: the phases, both writing modes, choosing a provider and connecting a subscription, how to read a style report, and a table of the errors each mistake produces.
-
-Access is read-only across your Drive (so the folder browser works) plus write access limited to files Canon Quill creates (so chapters reach your target folder). It cannot modify or delete anything that already exists. If you would rather it could not read your whole Drive, `CANON_QUILL_DRIVE_SCOPES` narrows it to `drive.file` and you paste folder links instead of browsing.
-
----
-
-## Commands
-
-```bash
-npm run studio                  open the Studio
-npm run sync:agents             regenerate the Claude Code agents
-npm run book:new -- "Title"     start a book
-npm run book:list               list your books
-npm run book:use -- <slug>      switch books
-npm run book:finish -- <slug>   mark a book done, keeping everything
-npm run docx                    build the DOCX
-npm run check                   build, validate, test
-```
-
-## Where your book lives
-
-```
+```text
 workspaces/
   the-tide-house/
-    project.json          settings, sources, chapter board
-    drive-cache/          documents pulled from Drive
+    project.json
+    drive-cache/
     artifacts/
-      style-corpus.json   your passages, tagged by beat
+      project-analysis.json
+      decision-log.md
+      style-corpus.json
       style-fingerprint.md
-      chapters/           drafts and reports
-      continuity/         the ledger and per-chapter handoffs
-      final/              manuscript.md, manuscript.docx
+      chapters/
+      continuity/
+      final/
     logs/
+      phase-log.json
+      audit-log.json
+      errors-log.json
 ```
 
-`workspaces/` is gitignored. The repository holds the engine; your writing stays out of it.
+The repository holds the engine. The book remains in its workspace, which is
+gitignored.
 
-## How it is built
+## Development
 
-```
-src/style/       measuring prose, building the corpus, retrieving exemplars, scoring drafts
-src/continuity/  the ledger, opening contracts, flow validation
-src/analysis/    sorting Drive documents into groups
-src/studio/      the local app and its API
-src/drive/       OAuth and the Drive client
-src/workspace/   projects on disk
+```bash
+npm run build
+npm run validate:workflow
+npm test
 ```
 
-Agent prompts are authored in `.opencode/agents/` and `.claude/agents/` is generated from them by `npm run sync:agents` (which `npm run build` also runs). One source, both runtimes.
+`npm run check` runs all three. The current suite contains 298 tests and does
+not call a network or a model.
 
-Scoring and validation are ordinary functions over text and typed state, so they are tested without a network or a model. 104 tests.
+## Limitations
 
-## Honest limitations
-
-- Finding matching passages works on wording and structure, not meaning. It will not connect two scenes that are thematically alike but share no vocabulary.
-- Your fingerprint needs roughly 2,000 words of your prose before the numbers settle. Below that the Studio tells you the targets are noisy.
-- Continuity checking is deliberately cautious. It reports what it can prove and stays quiet otherwise, because a checker that fires constantly gets ignored.
-- Character detection keys on capitalisation and will over-match on prose dense with proper nouns.
-- The classifier guesses. That is why it shows its confidence and asks.
+- Passage retrieval matches wording and measured structure, not abstract
+  thematic similarity.
+- A style fingerprint needs enough prose before its targets become stable.
+- Continuity validation proves typed facts and stays cautious when evidence is
+  missing.
+- Model quality still varies by provider, model, prompt context, and runtime.
+- Cache-aware cost accounting depends on structured usage from Claude Code and
+  OpenCode and is not part of the current estimate.
 
 ## Licence
 

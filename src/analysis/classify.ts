@@ -1,5 +1,5 @@
-// Sorts a pile of Drive documents into the author's own writing, references
-// by other people, character sheets, timelines, outlines and notes.
+// Sorts a pile of Drive documents into series canon, voice references,
+// character sheets, timelines, outlines and notes.
 //
 // Getting this wrong is expensive: another author's novel filed as a past
 // series book feeds their prose into the style fingerprint and their facts into
@@ -9,8 +9,8 @@
 import { dialogueSpans, splitParagraphs, words } from "../style/text.js";
 
 export type SourceKind =
-  | "past_book"        // prose by this author: the style corpus and canon
-  | "reference_book"   // prose by someone else, held as reference
+  | "past_book"        // an earlier book in this series: canon and continuity
+  | "reference_book"   // prose or material explicitly chosen as a voice reference
   | "characters"       // character sheets, cast lists, bibles
   | "timeline"         // chronology, event ordering
   | "world"            // setting, magic system, geography, factions
@@ -48,7 +48,7 @@ export const reviewThreshold = 0.6;
  */
 export const sourceKindLabels: Record<SourceKind, string> = {
   past_book: "Series book",
-  reference_book: "Reference",
+  reference_book: "Voice reference",
   characters: "Character sheet",
   timeline: "Timeline",
   world: "Worldbuilding",
@@ -64,8 +64,8 @@ export const sourceKindLabels: Record<SourceKind, string> = {
 /** One line on what each group does, shown as help under the chips. */
 export const sourceKindPurpose: Record<SourceKind, string> = {
   past_book:
-    "A book you wrote in this series. Gives both the voice to write in and the canon to stay consistent with.",
-  reference_book: "Material the book should draw on: lore, research, comparison titles, anything not a series book of yours.",
+    "An earlier book in this series. Its ordered events, character knowledge and unresolved threads become canon.",
+  reference_book: "Prose you explicitly want Canon Quill to study for voice. The voice gate requires at least 2,000 words; do not use comparison titles by another author.",
   characters: "Who exists, what they want, what they look like.",
   timeline: "What happened when.",
   world: "Setting, factions, rules of the world.",
@@ -75,13 +75,23 @@ export const sourceKindPurpose: Record<SourceKind, string> = {
 
 export const sourceKindCounts: Record<SourceKind, { one: string; many: string }> = {
   past_book: { one: "Series book", many: "Series books" },
-  reference_book: { one: "Reference", many: "References" },
+  reference_book: { one: "Voice reference", many: "Voice references" },
   characters: { one: "Character sheet", many: "Character sheets" },
   timeline: { one: "Timeline", many: "Timelines" },
   world: { one: "Worldbuilding", many: "Worldbuilding" },
   plot: { one: "Plot & outline", many: "Plot & outlines" },
   notes: { one: "Note", many: "Notes" }
 };
+
+/** Planning files can inform canon, but should not distort prose measurement. */
+export const planningSourceKinds: SourceKind[] = ["characters", "timeline", "world", "plot", "notes"];
+
+/** A voice reference must be explicitly selected and contain prose rather than only planning material. */
+export function isVoiceReference(kinds: SourceKind[] | undefined, explicitlyConfirmed = false): boolean {
+  if (!kinds?.includes("reference_book")) return false;
+  if (kinds.includes("past_book")) return true;
+  return explicitlyConfirmed && !kinds.some((kind) => planningSourceKinds.includes(kind));
+}
 
 /** Filename and folder-path keywords, weighted per kind. */
 const nameSignals: Array<[SourceKind, RegExp, number]> = [

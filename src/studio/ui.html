@@ -141,8 +141,16 @@
   .run-progress .meter { width: 100%; height: 6px; margin-top: 9px; }
   .run-progress .meter i { background: var(--accent); transition: width .25s ease; }
   .run-progress-detail { color: var(--muted); font-size: 12px; margin-top: 7px; }
+  .estimate { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .estimate h4 { margin: 0 0 8px; font-size: 12.5px; }
+  .estimate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .estimate-grid div { background: var(--bg); border-radius: 6px; padding: 8px 9px; }
+  .estimate-grid b { display: block; font-size: 15px; }
+  .estimate-grid span { color: var(--muted); font-size: 11px; }
+  .estimate .hint { margin-top: 9px; }
   .console-toggle { display: inline-flex; align-items: center; gap: 5px; }
   .console-toggle svg { width: 14px; height: 14px; }
+  .run-console-tools { display: flex; justify-content: flex-end; min-height: 28px; margin-top: 6px; }
   .output-preview { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 12px;
     max-height: 420px; overflow: auto; white-space: pre-wrap; font-family: var(--serif, Georgia, serif);
     font-size: 13px; line-height: 1.65; }
@@ -173,6 +181,47 @@
   .choice.on { border-color: var(--accent); background: var(--accent-dim); }
   .choice b { display: block; margin-bottom: 3px; }
   .choice p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .series-order { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .series-order .item { display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+    border-bottom: 1px solid var(--border); background: var(--surface); }
+  .series-order .item:last-child { border-bottom: none; }
+  .series-order .item:hover { background: var(--surface-2); }
+  .series-order .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drag-handle { color: var(--faint); cursor: grab; letter-spacing: -2px; user-select: none; }
+  .prep-doc { border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; overflow: hidden; }
+  .prep-doc summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; padding: 11px 12px; background: var(--surface-2); }
+  .prep-doc summary::marker { color: var(--accent); }
+  .prep-doc pre { max-height: 420px; overflow: auto; margin: 0; padding: 14px; white-space: pre-wrap; font: 12px/1.6 var(--mono); color: var(--muted); background: var(--bg); }
+  .prep-doc label, .prep-doc textarea { margin: 10px 12px 0; width: calc(100% - 24px); box-sizing: border-box; }
+  .prep-doc textarea { margin-bottom: 0; }
+  .prep-doc .row { padding: 0 12px 12px; }
+  .prep-status { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 11px 12px; margin: 10px 0; }
+  .prep-status-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .prep-status-head code { color: var(--faint); font: 11px var(--mono); }
+  .prep-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 9px; }
+  .prep-status-grid > div { background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+  .prep-status-grid b { font-size: 12px; }
+  .prep-status-grid ul { margin: 5px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+  .prep-status-grid li + li { margin-top: 2px; }
+  .prep-status-grid .done { color: var(--good); }
+  .prep-status-grid .pending { color: var(--warn); }
+  .prep-status-details { margin-top: 9px; color: var(--muted); font-size: 12px; }
+  .prep-status-details summary { cursor: pointer; color: var(--accent); }
+  .prep-live-docs { margin-top: 12px; }
+  .prep-live-docs h3 { margin: 0 0 7px; font-size: 12.5px; }
+  .prep-live-docs .items { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+  .prep-live-docs button { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); font-size: 12px; }
+  .prep-live-docs button:hover { border-color: var(--accent); }
+  .prep-live-docs button span { color: var(--accent); font-size: 11px; }
+  .prep-reader { max-height: 52vh; overflow: auto; margin: 12px 0; padding: 14px; white-space: pre-wrap; font: 12px/1.6 var(--mono); color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
+  .prep-reader.prep-rendered { white-space: normal; font: 14px/1.7 var(--sans); }
+  .prep-rendered h1, .prep-rendered h2, .prep-rendered h3 { color: var(--text); line-height: 1.25; }
+  .prep-rendered h1 { font-size: 20px; }
+  .prep-rendered h2 { font-size: 16px; margin-top: 20px; }
+  .prep-rendered h3 { font-size: 14px; margin-top: 16px; }
+  .prep-rendered p { margin: 0 0 12px; }
+  .prep-rendered ul { margin: 0 0 12px; padding-left: 22px; }
+  .prep-rendered blockquote { margin: 12px 0; padding-left: 14px; border-left: 2px solid var(--accent); color: var(--muted); }
 
   /* drive browser */
   .crumbs { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 10px; }
@@ -339,6 +388,7 @@ let picked = new Map();    // driveId -> name, chosen reference roots
 let target = null;         // {id, name} of the folder finished chapters go to
 let indexing = false;
 let draftPicker = false;
+let draftAnalysisLoading = false;
 let indexError = null;
 let selectionSave = Promise.resolve();
 let questionPoll = null;
@@ -346,6 +396,7 @@ let chapterPoll = null;
 let questionSnapshot = null;
 let chapterSnapshot = null;
 let projectAnalysisLoading = false;
+let seriesDragId = null;
 let collapsedGroups = { "Set up": false, Prepare: false, Write: false };
 let chapterChat = null;
 let showRunConsole = false;
@@ -643,6 +694,14 @@ function fidelityClass(v) { return v >= 80 ? "good" : v >= 60 ? "warn" : "bad"; 
 /** "1 book" / "2 books". Pass an explicit plural for irregular words, and
  *  `display` when the number needs formatting (thousands separators). */
 function plural(n, one, many, display) { return `${display ?? n} ${n === 1 ? one : (many || one + "s")}`; }
+function chapterStats(counts) {
+  if (!counts.length) return null;
+  return {
+    min: Math.min(...counts),
+    max: Math.max(...counts),
+    average: Math.round(counts.reduce((sum, count) => sum + count, 0) / counts.length)
+  };
+}
 /** The verb to agree with a count. */
 function verb(n, one, many) { return n === 1 ? one : many; }
 
@@ -763,7 +822,6 @@ function go(r) {
   if (r === "analyze") loadCheck();
   if (r === "intake") loadSuggestions();
   if (r === "style" && S.styleCorpus.built) loadFingerprint();
-  if (r === "intake_analysis") loadProjectAnalysis();
   if (r === "questions") { loadQuestions(); startQuestionPolling(); }
   else stopQuestionPolling();
   if (r === "chapters") enterChapters(); else stopChapterPolling();
@@ -791,11 +849,13 @@ function render() {
       </div>`;
     return;
   }
+  rememberRunConsolePosition(document.getElementById("runlog"));
   v.innerHTML = ({
     start: viewStart, engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
     intake: viewIntake, draft: viewDraft, style: viewStyle, intake_analysis: viewIntakeAnalysis, questions: viewQuestions, chapters: viewChapters
   }[route] || viewConnect)();
   applyPreparationLock(v);
+  requestAnimationFrame(restoreRunConsolePosition);
 }
 
 function applyPreparationLock(view) {
@@ -1122,7 +1182,14 @@ async function removeKey(btn, provider) {
 }
 
 async function setEngine(patch) {
-  try { ENGINE = await api("/api/engine", { method: "PATCH", body: patch }); await reload(); loadEngine(); }
+  try {
+    ENGINE = await api("/api/engine", { method: "PATCH", body: patch });
+    RUNTIME = null;
+    PREP_RUNTIME = null;
+    await reload();
+    loadEngine();
+    if (route === "chapters") { loadRuntime(); loadPreparationRuntime(); }
+  }
   catch (e) { toast(e.message, "error"); }
 }
 
@@ -1503,7 +1570,6 @@ function viewAnalyze() {
 
   const counts = Object.fromEntries(Object.keys(KINDS).map((k) =>
     [k, S.sources.filter((x) => (x.kinds || []).includes(k)).length]));
-  const ownBooks = S.sources.filter((x) => (x.kinds || []).includes("past_book"));
 
   // Alphabetical: Drive's own order is arbitrary and a long board is unusable
   // without somewhere predictable to look.
@@ -1543,13 +1609,8 @@ function viewAnalyze() {
   timeline, an outline and loose notes.</p>
 
   ${check ? `<div class="reqs">
-    ${[["Series books (optional)", {
-         ok: true,
-         documents: ownBooks.length,
-         words: ownBooks.reduce((sum, source) => sum + (source.wordCount || 0), 0),
-         reason: "No series book is needed. Reference material is the required input; series books add your own voice and canon."
-       }, "your prose, when available"],
-       ["References (required)", check.references, "material the book draws on"]].map(([title, r, purpose]) => `
+    ${[["Voice reference (required)", check.style, "at least 2,000 words of prose"],
+        ["Plot & outline (required)", check.plot, "at least one plot or outline"]].map(([title, r, purpose]) => `
       <div class="req ${r.ok ? "ok" : "todo"}">
         <div class="req-h">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
@@ -1559,26 +1620,9 @@ function viewAnalyze() {
           <b>${title}</b>
           <span class="req-n">${r.documents ? `${plural(r.documents, "document")} · ${r.words.toLocaleString()} words` : "none yet"}</span>
         </div>
-        <p>${r.ok ? `Enough: ${purpose}.` : esc(r.reason)}</p>
+         <p>${r.ok ? `Enough: ${purpose}.` : esc(r.reason)}</p>
       </div>`).join("")}
-  </div>
-
-  <div class="info">
-    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
-    <div><b>What the two do</b>
-      <p>A <b>series book</b> is one you wrote in this series. It does both jobs at once: the prose teaches
-      the voice, and the story is canon the new book has to stay consistent with. Anything classified that
-      way is marked as a reference automatically, since it is both.</p>
-      <p style="margin-top:6px">A <b>reference</b> is anything else the book should draw on: lore documents,
-      research, a comparison title. References carry material, not voice, unless you have no series book at
-      all, in which case the voice is learned from them instead.</p></div></div>
-
-  ${check.fromReference && check.style.ok ? `<div class="info">
-     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-       <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
-     <div><b>Style source</b>
-       <p>No series book is marked. The reference material will supply the initial writing examples.</p></div></div>` : ""}` : ""}
+  </div>` : ""}
 
   <div class="counts">${Object.entries(KINDS).map(([k, label]) => {
     const n = counts[k];
@@ -1607,6 +1651,16 @@ async function loadCheck() {
 async function toggleKind(driveId, kind) {
   const src = S.sources.find((x) => x.driveId === driveId);
   if (!src) return;
+  if (kind === "reference_book" && (src.kinds || []).includes("past_book")) {
+    showModal({
+      title: "Series books are voice references too",
+      body: `<p><b>${esc(src.name)}</b> is marked as a Series book, so it is automatically used as a voice reference.</p>
+        <p class="hint">Choose whether to remove both labels or keep both. To remove only Series book, close this message and click the Series book label directly.</p>`,
+      actions: `<button onclick="removeBothSourceRoles('${driveId}')">Remove both</button>
+        <button class="ghost" onclick="closeModal()">Keep both</button>`
+    });
+    return;
+  }
   const kinds = new Set(src.kinds || []);
   kinds.has(kind) ? kinds.delete(kind) : kinds.add(kind);
   src.kinds = [...kinds];          // optimistic: the board stays responsive
@@ -1615,6 +1669,20 @@ async function toggleKind(driveId, kind) {
     S = await api(`/api/sources/${driveId}`, { method: "PATCH", body: { kinds: src.kinds } });
     await loadCheck();
   } catch (e) { toast(e.message, "error"); await reload(); }
+}
+
+async function removeBothSourceRoles(driveId) {
+  const src = S.sources.find((x) => x.driveId === driveId);
+  if (!src) return;
+  closeModal();
+  try {
+    S = await api(`/api/sources/${driveId}`, {
+      method: "PATCH",
+      body: { kinds: (src.kinds || []).filter((kind) => kind !== "past_book" && kind !== "reference_book") }
+    });
+    await loadCheck();
+    render();
+  } catch (e) { toast(e.message, "error"); }
 }
 
 async function removeSource(driveId) {
@@ -1648,8 +1716,72 @@ async function finishReview(btn) {
 const AUDIENCES = ["Adult", "New adult", "Young adult", "Middle grade", "Children"];
 const INTIMACY = ["None", "Romantic tension only", "Fade to black", "Open door", "Explicit", "Very explicit"];
 
+function orderedSeriesBooks() {
+  const books = (S.sources || []).filter((source) => (source.kinds || []).includes("past_book"));
+  const byId = new Map(books.map((book) => [book.driveId, book]));
+  const order = [...(S.seriesOrder || []), ...books.map((book) => book.driveId)];
+  return [...new Set(order)].map((id) => byId.get(id)).filter(Boolean);
+}
+
+function seriesOrderSection() {
+  if (S.shape !== "series") return "";
+  const books = orderedSeriesBooks();
+  if (!books.length) return `<div class="info" style="margin-top:18px">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
+    <div><b>No earlier series books selected</b><p>Go back to Analyse &amp; group and mark the books whose canon this book inherits as <b>Series book</b>. A current draft or voice sample should remain a Voice reference instead.</p></div></div>`;
+
+  return `<div class="card" style="margin-top:18px">
+    <h2 style="margin-top:0">Order the series books</h2>
+    <p class="sub">Put the books in continuity order, earliest to latest. Canon Quill uses this order for prior events, character knowledge and unresolved threads. It uses the titles you give the documents, not assumed Book 1, Book 2 or Book 3 numbers.</p>
+    <div class="series-order">
+      ${books.map((book, index) => `<div class="item" draggable="true"
+        ondragstart="seriesDragId='${book.driveId}'"
+        ondragover="event.preventDefault()"
+        ondrop="dropSeriesBook('${book.driveId}')"
+        ondragend="seriesDragId=null">
+        <span class="drag-handle" title="Drag to reorder">::</span>
+        <span class="pill">${index + 1}</span>
+        <span class="name">${esc(book.name)}</span>
+        <button class="ghost sm" onclick="event.stopPropagation();moveSeriesBook('${book.driveId}',-1)" ${index === 0 ? "disabled" : ""}>↑</button>
+        <button class="ghost sm" onclick="event.stopPropagation();moveSeriesBook('${book.driveId}',1)" ${index === books.length - 1 ? "disabled" : ""}>↓</button>
+      </div>`).join("")}
+    </div>
+    <div class="hint" style="margin-top:10px">If the current book is already started, leave it as a Voice reference and remove its Series book label on the Analyse screen. It should not become prior canon.</div>
+  </div>`;
+}
+
+async function saveSeriesOrder(order, confirmed = false) {
+  try {
+    S = await api("/api/project/series-order", { method: "PATCH", body: { order, confirmed } });
+    render();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+function dropSeriesBook(targetId) {
+  if (!seriesDragId || seriesDragId === targetId) return;
+  const order = orderedSeriesBooks().map((book) => book.driveId);
+  const from = order.indexOf(seriesDragId);
+  const to = order.indexOf(targetId);
+  if (from < 0 || to < 0) return;
+  order.splice(from, 1);
+  order.splice(to, 0, seriesDragId);
+  seriesDragId = null;
+  void saveSeriesOrder(order);
+}
+
+function moveSeriesBook(id, direction) {
+  const order = orderedSeriesBooks().map((book) => book.driveId);
+  const from = order.indexOf(id);
+  const to = from + direction;
+  if (from < 0 || to < 0 || to >= order.length) return;
+  [order[from], order[to]] = [order[to], order[from]];
+  void saveSeriesOrder(order);
+}
+
 function viewIntake() {
   const shape = S.shape, mode = S.draftingMode;
+  const seriesBooks = orderedSeriesBooks();
   const intake = S.intake || {};
   const chosen = (field) => (intake[field] || "").split("|").filter(Boolean);
 
@@ -1659,7 +1791,7 @@ function viewIntake() {
 
   return `
   <h1>Project shape</h1>
-  <p class="sub">Two decisions drive everything downstream. Both can be changed later.</p>
+  <p class="sub">These decisions drive everything downstream. They can be changed later.</p>
 
   <h2>Details</h2>
   <div class="card">
@@ -1708,6 +1840,8 @@ function viewIntake() {
       unresolved threads carry forward and are enforced.</p></div>
   </div>
 
+  ${seriesOrderSection()}
+
   <h2>How should Canon Quill write it?</h2>
   <div class="choices">
     <div class="choice ${mode === "chapter_by_chapter" ? "on" : ""}" onclick="setProject({draftingMode:'chapter_by_chapter'})">
@@ -1721,7 +1855,7 @@ function viewIntake() {
   </div>
 
   <div class="row" style="margin-top:28px">
-    <button ${shape && mode ? "" : "disabled"} onclick="continueProjectShape(this)">Continue</button>
+    <button ${shape && mode ? "" : "disabled"} onclick="continueProjectShape(this)">${shape === "series" && seriesBooks.length && !S.seriesOrderReviewed ? "Confirm order and continue" : "Continue"}</button>
     ${!(shape && mode) ? '<span class="hint" style="color:var(--warn)">Choose the book shape and drafting mode to continue.</span>' : ""}
   </div>`;
 }
@@ -1772,6 +1906,12 @@ async function setProject(patch) {
 async function continueProjectShape(btn) {
   btn.disabled = true;
   try {
+    if (S.shape === "series" && orderedSeriesBooks().length && !S.seriesOrderReviewed) {
+      S = await api("/api/project/series-order", {
+        method: "PATCH",
+        body: { order: orderedSeriesBooks().map((book) => book.driveId), confirmed: true }
+      });
+    }
     S = await api("/api/project/continue", { method: "POST" });
     route = "draft";
     analysisEditing = false;
@@ -1781,6 +1921,11 @@ async function continueProjectShape(btn) {
 }
 
 function draftSection() {
+  if (draftAnalysisLoading) return `<div class="card" style="text-align:center;padding:42px 20px">
+    <span class="spin spin-lg"></span>
+    <h3 style="margin:14px 0 6px">Reading existing draft…</h3>
+    <p class="sub" style="margin:0 auto;max-width:46ch">Checking the continuation point, closing material and document conventions before anything is written.</p>
+  </div>`;
   const m = S.manuscript;
   const continuationChapter = m ? (m.lastChapterComplete ? m.chapterCount + 1 : m.chapterCount) : null;
 
@@ -1901,14 +2046,18 @@ async function useAsDraft(driveId, name, btn) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Reading…';
   try {
     closeModal();
+    draftPicker = false;
+    draftAnalysisLoading = true;
+    render();
     const r = await api("/api/manuscript/analyse", { method: "POST", body: { driveId } });
     S = r.state;
-    draftPicker = false;
-    render();
     toast(`Read ${plural(r.analysis.totalWords, "word", null, r.analysis.totalWords.toLocaleString())} from "${name}".`);
   } catch (e) {
     toast(e.message, "error");
-    btn.disabled = false; btn.textContent = "Select";
+    draftPicker = true;
+  } finally {
+    draftAnalysisLoading = false;
+    render();
   }
 }
 
@@ -1971,10 +2120,16 @@ function viewDraft() {
   return `<h1>Existing draft</h1>${draftSection()}`;
 }
 
-/** Documents the corpus can learn from: the author's own, or reference prose if they have none. */
+/** Voice references that contain prose, excluding planning-only documents. */
+function isVoiceReferenceSource(source) {
+  const kinds = source.kinds || [];
+  if (!kinds.includes("reference_book")) return false;
+  return kinds.includes("past_book") || (source.voiceReferenceConfirmed === true
+    && !kinds.some((kind) => ["characters", "timeline", "world", "plot", "notes"].includes(kind)));
+}
+
 function stylePool() {
-  const books = S.sources.filter((s) => (s.kinds || []).includes("past_book"));
-  return books.length ? books : S.sources.filter((s) => (s.kinds || []).includes("reference_book"));
+  return S.sources.filter(isVoiceReferenceSource);
 }
 
 function viewStyle() {
@@ -1982,31 +2137,35 @@ function viewStyle() {
   const excluded = sc.excluded || [];
   const books = S.sources.filter((s) => (s.kinds || []).includes("past_book"));
   const refs = S.sources.filter((s) => (s.kinds || []).includes("reference_book"));
-  const usingReference = books.length === 0 && refs.length > 0;
+  const usingReference = books.length === 0 && stylePool().length > 0;
   const pool = stylePool();
   const included = pool.filter((d) => !excluded.includes(d.driveId));
   const left = pool.filter((d) => excluded.includes(d.driveId));
+  const notMeasured = refs.filter((source) => !isVoiceReferenceSource(source));
   const canBuild = S.sourcesReviewed && included.length > 0;
   return `
   <h1>Style corpus</h1>
-  <p class="sub">This is what stops the writing sounding generic. Canon Quill cuts your past books
-  into passages, tags each by the kind of beat it carries, and measures your prose. When a chapter
-  is drafted, real passages of yours for that same beat go into the prompt, and the result is
+  <p class="sub">This is what stops the writing sounding generic. ${usingReference
+    ? "No series books are marked, so Canon Quill is using the selected reference prose as a fallback voice source."
+    : "Canon Quill cuts the selected Voice references into passages and measures your prose."} When a chapter
+  is drafted, ${usingReference ? "passages from that source" : "real passages of yours"} for that same beat go into the prompt, and the result is
   scored against your measured fingerprint, not against a generic idea of good writing.</p>
 
   <div class="card spread">
-    <div><b>${included.length
-        ? plural(included.length, "document") + " used as reference"
-        : "Nothing to learn from"}</b>
-      <div class="hint">${included.map((b) => esc(b.name)).join(", ")
-        || "Mark something as Your writing on the Analyse screen."}</div>
+    <div><b>${refs.length
+        ? plural(refs.length, "voice reference")
+        : "No voice references selected"}</b>
+      <div class="hint">${included.length
+        ? `${plural(included.length, "prose source")} measured for voice: ${included.map((b) => esc(b.name)).join(", ")}`
+        : "Mark prose as Voice reference on the Analyse screen."}</div>
+      ${notMeasured.length ? `<div class="hint" style="margin-top:4px">Not measured as prose: ${notMeasured.map((source) => esc(source.name)).join(", " )}. These remain available for canon and preparation.</div>` : ""}
       ${left.length ? `<div class="hint" style="margin-top:4px">Left out: ${left.map((b) => esc(b.name)).join(", ")}.</div>` : ""}
-      ${usingReference ? '<div class="hint" style="color:var(--warn);margin-top:4px">No writing of your own is marked, so this will learn from reference writing. The book will read like its author rather than like you.</div>' : ""}</div>
+      ${usingReference ? '<div class="hint" style="color:var(--warn);margin-top:4px">No Series book is marked, so this uses the selected Voice references for the initial voice model.</div>' : ""}</div>
     <button ${pool.length ? "" : "disabled"} onclick="styleBuildModal()">${sc.built ? "Rebuild style corpus" : "Build style corpus"}</button>
   </div>
 
   ${sc.built ? `<div class="card">
-    <div class="row" style="margin-bottom:10px"><b>Corpus built</b>
+    <div class="row" style="justify-content:flex-end;margin-bottom:10px">
       <span class="pill good">${plural(sc.passageCount, "passage")}</span>
       <span class="pill">${plural(sc.wordCount, "word", null, sc.wordCount.toLocaleString())}</span></div>
     ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
@@ -2016,8 +2175,8 @@ function viewStyle() {
       <div><b>Your notes on this voice</b><p style="white-space:pre-wrap">${esc(sc.notes)}</p>
          <p style="margin-top:6px">The drafting and editing agents read these with the fingerprint, and follow them where a measured target disagrees.</p></div></div>` : ""}
     ${sc.documentStats?.length ? `<div style="margin:14px 0 0"><h3 style="margin:0 0 8px">Corpus sources</h3>
-      <table><tr><th>Source</th><th class="num">Words</th><th class="num">Chapters</th><th class="num">Words / chapter</th></tr>
-      ${sc.documentStats.map((doc) => `<tr><td>${esc(doc.source)}</td><td class="num">${doc.wordCount.toLocaleString()}</td><td class="num">${doc.chapterCount}</td><td class="num">${doc.wordsPerChapter.map((count) => count.toLocaleString()).join(", ") || "N/A"}</td></tr>`).join("")}</table>
+      <table><tr><th>Source</th><th class="num">Words</th><th class="num">Chapters</th><th class="num">Min / chapter</th><th class="num">Max / chapter</th><th class="num">Avg / chapter</th></tr>
+      ${sc.documentStats.map((doc) => { const stats = chapterStats(doc.wordsPerChapter); return `<tr><td>${esc(doc.source)}</td><td class="num">${doc.wordCount.toLocaleString()}</td><td class="num">${doc.chapterCount}</td><td class="num">${stats ? stats.min.toLocaleString() : "N/A"}</td><td class="num">${stats ? stats.max.toLocaleString() : "N/A"}</td><td class="num">${stats ? stats.average.toLocaleString() : "N/A"}</td></tr>`; }).join("")}</table>
     </div>` : ""}
     ${sc.fromReference && !sc.documentStats?.length ? '<div class="hint" style="margin-top:14px">This corpus is learned from reference material rather than series books, so chapter-by-chapter book metrics are not shown.</div>' : ""}
     <div id="fp" style="margin-top:24px"><span class="spin"></span></div>
@@ -2026,7 +2185,7 @@ function viewStyle() {
     </div>
     </div>` : ""}
   ${!canBuild && pool.length ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping, and keep at least one document in the corpus.</div>' : ""}
-  ${!pool.length ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping and mark reference material before building the corpus.</div>' : ""}`;
+  ${!pool.length ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping and mark prose as Voice reference before building the corpus.</div>' : ""}`;
 }
 
 let styleKeep = null;
@@ -2034,18 +2193,21 @@ let styleKeep = null;
 function styleBuildModal() {
   const sc = S.styleCorpus;
   const pool = stylePool();
+  const voiceReferences = S.sources.filter((source) => (source.kinds || []).includes("reference_book"));
+  const notMeasured = voiceReferences.filter((source) => !isVoiceReferenceSource(source));
   const excluded = sc.excluded || [];
   styleKeep = new Set(pool.filter((d) => !excluded.includes(d.driveId)).map((d) => d.driveId));
   showModal({
     title: sc.built ? "Rebuild the style corpus" : "Build the style corpus",
     body: `<p class="hint" style="margin:0 0 12px">Everything here stays on this machine. Measuring the
       prose is deterministic, so a rebuild over the same documents gives the same fingerprint.</p>
-      <label>Learn my voice from</label>
-      <div class="chips" id="stylepick" style="margin-top:0">
-        ${pool.map((d) => `<button class="chip ${styleKeep.has(d.driveId) ? "on" : ""}"
-          onclick="toggleStyleDoc(this,'${d.driveId}')">${esc(d.name)}</button>`).join("")}</div>
-      <div class="hint">Drop anything that is not your own voice: a ghostwritten book, a co-authored
-      one, or a draft you would not want copied.</div>
+       <label>Learn my voice from ${plural(pool.length, "prose source")}</label>
+       <div class="chips" id="stylepick" style="margin-top:0">
+         ${pool.map((d) => `<button class="chip ${styleKeep.has(d.driveId) ? "on" : ""}"
+           onclick="toggleStyleDoc(this,'${d.driveId}')">${esc(d.name)}</button>`).join("")}</div>
+       ${notMeasured.length ? `<div class="hint" style="margin-top:8px">${plural(notMeasured.length, "Voice reference")} not included because ${notMeasured.length === 1 ? "it is" : "they are"} not prose: ${notMeasured.map((source) => esc(source.name)).join(", ")}. ${notMeasured.length === 1 ? "It remains available" : "They remain available"} for canon and preparation.</div>` : ""}
+       <div class="hint">Drop anything that is not the voice you want to carry forward: a comparison title,
+       a co-authored book, or a draft you would not want copied.</div>
       <label style="margin-top:16px">Notes for the writing agents</label>
       <textarea id="stylenotes" rows="4" placeholder="Book two was heavily edited, so trust book three. My dialogue runs shorter than the average suggests.">${esc(sc.notes || "")}</textarea>
       <div class="hint">Optional. These go into the fingerprint document the drafting and editing
@@ -2063,8 +2225,7 @@ function toggleStyleDoc(btn, id) {
 
 async function buildStyle(btn) {
   const pool = stylePool();
-  const books = S.sources.filter((x) => (x.kinds || []).includes("past_book"));
-  const body = { useReference: books.length === 0 };
+  const body = {};
   const notes = document.getElementById("stylenotes");
   if (notes) {
     body.notes = notes.value;
@@ -2086,7 +2247,6 @@ async function continueFromStyle(btn) {
     S = await api("/api/style/continue", { method: "POST" });
     route = "intake_analysis";
     render();
-    await loadProjectAnalysis();
   } catch (e) {
     toast(e.message, "error");
     btn.disabled = false;
@@ -2144,8 +2304,10 @@ function viewIntakeAnalysis() {
   return `<h1>Project analysis</h1>
     <p class="sub">The analyzer reads every selected document before the agent asks anything. It separates source-supported facts from author decisions, so the intake conversation is about this book rather than a generic form. It measures text, so it can read something wrong: correct anything below and your version is what the agents work from.</p>
     <div class="card">
-      ${projectAnalysisLoading || !complete
+      ${projectAnalysisLoading
         ? `<div style="text-align:center;padding:28px 12px"><span class="spin spin-lg"></span><h3 style="margin:14px 0 6px">Analyzing your project material</h3><p class="sub" style="margin:0 auto;max-width:48ch">Reading the cached references, plot material, character notes, and existing style signals. This is deterministic and stays on your machine.</p></div>`
+        : !complete
+          ? `<div style="text-align:center;padding:28px 12px"><h3 style="margin:0 0 8px">Ready to analyse</h3><p class="sub" style="margin:0 auto 16px;max-width:48ch">Nothing has been read for Project analysis yet. Start it when you are ready to review the evidence and correct the findings.</p><button onclick="startProjectAnalysis(this)">Analyse project</button></div>`
         : `<div class="row spread" style="margin-bottom:10px">
              <div class="row"><b>Analysis complete</b><span class="pill good">${plural(analysis.documentsRead || 0, "document")} read</span><span class="pill">${plural(analysis.wordsRead || 0, "word", null, (analysis.wordsRead || 0).toLocaleString())}</span>
                ${corrections ? `<span class="pill good">${plural(corrections, "correction")}</span>` : ""}</div>
@@ -2264,6 +2426,16 @@ async function loadProjectAnalysis() {
   }
   projectAnalysisLoading = false;
   if (route === "intake_analysis") render();
+}
+
+async function startProjectAnalysis(btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Analyzing…';
+  await loadProjectAnalysis();
+  if (btn.isConnected) {
+    btn.disabled = false;
+    btn.textContent = "Analyse project";
+  }
 }
 
 async function continueFromAnalysis(btn) {
@@ -2455,6 +2627,7 @@ function stopQuestionPolling() {
 function enterChapters() {
   startChapterPolling();
   loadRuntime();
+  loadPreparationStatus();
   loadRunOutput();
   if (S?.run?.status === "running") startRunPolling();
   else if (["halted", "complete"].includes(S?.run?.status)) pollRun();
@@ -2514,6 +2687,7 @@ async function continueToChapters(btn) {
     render();
     startChapterPolling();
     loadRuntime();
+    loadPreparationStatus();
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
@@ -2527,31 +2701,117 @@ async function reopenPreparation(btn) {
 }
 
 let RUNTIME = null;
+let PREP_RUNTIME = null;
+let PREPARATION = null;
+let PREP_DOCS = null;
+let WRITING_ESTIMATE = null;
+let PREPARATION_CHECKLIST_OPEN = false;
 
 async function loadRuntime() {
   try { RUNTIME = await api("/api/run/runtime"); if (route === "chapters") render(); }
   catch { /* the start button explains itself when this is unknown */ }
 }
 
+async function loadPreparationStatus() {
+  try {
+    const previousStatus = JSON.stringify(PREPARATION);
+    const previousDocuments = PREP_DOCS?.filter((doc) => doc.available).length ?? -1;
+    PREPARATION = await api("/api/preparation/status");
+    if (!PREPARATION.ready && !PREP_RUNTIME) loadPreparationRuntime();
+    const loaded = PREP_DOCS?.filter((doc) => doc.available).length ?? -1;
+    if ((PREPARATION.ready || PREPARATION.present?.length) && loaded !== PREPARATION.present.length) await loadPreparationDocuments();
+    const documentsChanged = (PREP_DOCS?.filter((doc) => doc.available).length ?? -1) !== previousDocuments;
+    if (route === "chapters" && (JSON.stringify(PREPARATION) !== previousStatus || documentsChanged)) render();
+  }
+  catch { /* the preparation card will explain itself when the status is unavailable */ }
+}
+
+async function loadPreparationRuntime() {
+  try { PREP_RUNTIME = await api("/api/run/runtime?role=analysis"); if (route === "chapters") render(); }
+  catch { /* the preparation card will explain the engine requirement */ }
+}
+
+async function loadPreparationDocuments() {
+  try { PREP_DOCS = (await api("/api/preparation/documents")).documents || []; }
+  catch { PREP_DOCS = null; }
+}
+
 function showPreparationRequired(status) {
   showModal({
-    title: "Preparation is not ready",
-    body: `<p>The existing draft is optional. The approved preparation package is not optional: it is what the writer uses to draft safely.</p>
-      <p class="hint">The run has not started and no provider time was used. Missing artifacts:</p>
-      <ul>${status.missing.map((name) => `<li>${esc(name)}</li>`).join("")}</ul>
-      <p class="hint">Reopen preparation, complete the reference-extraction and preparation phases, then return here to start writing.</p>`,
-    actions: `<button onclick="startPreparationRun(this)">Generate preparation package</button>
+    title: "Preparation still needed",
+    body: `<p>Canon Quill will prepare the project before writing prose.</p>
+      <p class="hint">The run has not started and no provider time was used.</p>
+      ${preparationChecklist(status)}
+      <p class="hint">Preparation may take several minutes. It reads the selected material, builds the package, and stops before prose drafting.</p>`,
+    actions: `<button onclick="startPreparationRun(this)">Prepare everything</button>
       <button class="ghost" onclick="closeModal(); reopenPreparationFromMissing(this)">Reopen preparation</button>
       <button class="ghost" onclick="closeModal()">Close</button>`
   });
+}
+
+function preparationChecklist(status, collapsed = false) {
+  const present = status?.present || [];
+  const missing = status?.missing || [];
+  const total = present.length + missing.length;
+  const list = (items, className, empty) => items.length
+    ? `<ul>${items.map((name) => `<li class="${className}">${esc(name)}</li>`).join("")}</ul>`
+    : `<div class="hint" style="margin-top:5px">${empty}</div>`;
+  const content = `<div class="prep-status">
+    <div class="prep-status-head"><b>Preparation package: ${present.length}/${total} documents ready</b><code>${esc(status?.artifactDirectory || "workspaces/<book>/artifacts/")}</code></div>
+    <div class="prep-status-grid">
+      <div><b>Ready</b>${list(present, "done", "None yet")}</div>
+      <div><b>Pending</b>${list(missing, "pending", "All required documents are present")}</div>
+    </div>
+  </div>`;
+  return collapsed ? `<details class="prep-status-details" ${PREPARATION_CHECKLIST_OPEN ? "open" : ""} ontoggle="PREPARATION_CHECKLIST_OPEN = this.open"><summary>Show completed and pending documents</summary>${content}</details>` : content;
+}
+
+function preparationDocumentsCard() {
+  const documents = (PREP_DOCS || []).map((doc, index) => ({ doc, index })).filter(({ doc }) => doc.available);
+  if (!documents.length) return "";
+  return `<div class="prep-live-docs">
+    <h3>Documents ready to read</h3>
+    <div class="items">${documents.map(({ doc, index }) => `<button class="ghost" onclick="openPreparationDocument(${index})"><b>${esc(doc.name)}</b><span>Open</span></button>`).join("")}</div>
+  </div>`;
+}
+
+function openPreparationDocument(index) {
+  const doc = PREP_DOCS?.[index];
+  if (!doc?.available) return;
+  const running = S.run?.status === "running";
+  showModal({
+    title: doc.name,
+    body: `${running ? '<div class="info"><div><b>Preparation is still running</b><p>Reading is live. A note saved here will be available to the next preparation session or the final review.</p></div></div>' : ""}
+      <div class="prep-reader prep-rendered">${doc.rendered || esc(doc.content || "")}</div>
+      <label>Edit note for this document</label>
+      <textarea id="prep-live-note" rows="4" placeholder="What should be corrected or preserved?">${esc(doc.note || "")}</textarea>`,
+    actions: `<button onclick="savePreparationDocumentNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Save note</button>
+      <a class="btn ghost sm" href="/api/preparation/documents/${encodeURIComponent(doc.name)}/view" target="_blank" rel="noopener">View / print PDF</a>
+      <button class="ghost" onclick="closeModal()">Close</button>`
+  });
+}
+
+async function savePreparationDocumentNote(index, name, btn) {
+  const note = document.getElementById("prep-live-note")?.value || "";
+  btn.disabled = true;
+  try {
+    S = await api(`/api/preparation/documents/${encodeURIComponent(name)}`, { method: "PATCH", body: { note } });
+    if (PREP_DOCS[index]) PREP_DOCS[index].note = note;
+    closeModal();
+    render();
+    toast(note.trim() ? "Note saved for this preparation document." : "Note cleared.");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 async function startPreparationRun(btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Starting…';
   try {
+    PREPARATION = { ...(PREPARATION || {}), ready: false, missing: PREPARATION?.missing || [], present: PREPARATION?.present || [] };
+    PREP_DOCS = null;
     const r = await api("/api/preparation/run", { method: "POST" });
     S = r;
+    PREP_RUNTIME = { runtime: r.runtime, label: r.runtimeLabel, model: r.model };
     closeModal();
     route = "chapters";
     runEvents = [];
@@ -2564,7 +2824,7 @@ async function startPreparationRun(btn) {
   } catch (e) {
     toast(e.message, "error");
     btn.disabled = false;
-    btn.textContent = "Generate preparation package";
+    btn.textContent = "Prepare everything";
   }
 }
 
@@ -2586,6 +2846,8 @@ async function startWritingModal() {
     return;
   }
   const r = RUNTIME || {};
+  try { WRITING_ESTIMATE = await api("/api/run/estimate"); }
+  catch { WRITING_ESTIMATE = null; }
   const dirs = (S.directions || []).filter((d) => !d.appliedAt);
   showModal({
     title: "Start writing?",
@@ -2599,14 +2861,33 @@ async function startWritingModal() {
           <path d="M4 5h16M4 10h16M4 15h10"/></svg>
         <div><b>${plural(dirs.length, "instruction")} waiting</b><p>${esc(dirs.map((d) => d.text).join(" "))}</p></div></div>` : ""}
       <label>Anything to say before it starts?</label>
-      <textarea id="run-note" rows="3" placeholder="Start with chapter one. Take the ending in the plan as fixed."></textarea>
-      <div class="hint">Optional. It goes to the orchestrator with this run only.</div>
-      <div class="hint" style="margin-top:10px">Writing costs money on an API key, and time on a subscription.
-      You can stop it at any point. While it runs, the preparation screens stay readable but locked, so the
-      contract cannot move under the writing.</div>`,
+       <textarea id="run-note" rows="3" placeholder="Start with chapter one. Take the ending in the plan as fixed."></textarea>
+       <div class="hint">Optional. It goes to the orchestrator with this run only.</div>
+       ${writingEstimateCard(WRITING_ESTIMATE)}
+       <div class="hint" style="margin-top:10px">Writing costs money on an API key, and time on a subscription.
+       You can stop it at any point. While it runs, the preparation screens stay readable but locked, so the
+       contract cannot move under the writing.</div>`,
     actions: `<button onclick="startWriting(this)">Start writing</button>
       <button class="ghost" onclick="closeModal()">Not yet</button>`
   });
+}
+
+function writingEstimateCard(estimate) {
+  if (!estimate) return `<div class="estimate"><h4>Usage estimate unavailable</h4><div class="hint">The run can still start, but the Studio could not resolve the current model estimate.</div></div>`;
+  const cost = estimate.totalCostUsd == null
+    ? estimate.authMethod === "subscription" ? "No marginal API charge" : "Price unavailable for this model"
+    : `$${estimate.totalCostUsd.toFixed(2)} estimated API usage`;
+  return `<div class="estimate">
+    <h4>Estimated usage for this writing run</h4>
+    <div class="hint" style="margin:0 0 9px">${esc(estimate.modelLabel || estimate.model || "Selected drafting model")} · ${plural(estimate.chapters, "unfinished chapter")} · ${estimate.passesPerChapter} passes per chapter</div>
+    <div class="estimate-grid">
+      <div><b>${estimate.inputTokens.toLocaleString()}</b><span>input tokens</span></div>
+      <div><b>${estimate.outputTokens.toLocaleString()}</b><span>output tokens</span></div>
+      <div><b>${estimate.totalTokens.toLocaleString()}</b><span>total tokens</span></div>
+      <div><b>${esc(cost)}</b><span>${estimate.authMethod === "subscription" ? "subject to plan limits" : "based on catalog rates"}</span></div>
+    </div>
+    <div class="hint">Approximate only. ${esc(estimate.assumptions[2])}</div>
+  </div>`;
 }
 
 async function startWriting(btn) {
@@ -2645,34 +2926,48 @@ async function stopWriting(btn) {
 let runEvents = [];
 let runLatest = 0;
 let runPoll = null;
+let elapsedTicker = null;
+let runConsoleScrollTop = 0;
+let runConsoleAtBottom = true;
 
 function startRunPolling() {
   if (runPoll) return;
   runPoll = setInterval(pollRun, 1500);
+  elapsedTicker = setInterval(updateElapsed, 1000);
   pollRun();
 }
 
 function stopRunPolling() {
-  if (!runPoll) return;
-  clearInterval(runPoll);
-  runPoll = null;
+  if (runPoll) {
+    clearInterval(runPoll);
+    runPoll = null;
+  }
+  if (elapsedTicker) {
+    clearInterval(elapsedTicker);
+    elapsedTicker = null;
+  }
 }
 
 async function pollRun() {
   try {
+    if (PREPARATION && !PREPARATION.ready) await loadPreparationStatus();
     const snapshot = await api(`/api/run/events?since=${runLatest}`);
     const progressChanged = JSON.stringify(snapshot.progress || null) !== JSON.stringify(runProgress || null);
     runProgress = snapshot.progress || runProgress;
     if (snapshot.events.length) {
       runEvents = [...runEvents, ...snapshot.events].slice(-400);
       runLatest = snapshot.latest;
-      if (route === "chapters" && !progressChanged && showRunConsole) renderRunLog();
     }
     if (progressChanged && route === "chapters") render();
+    else if (snapshot.active && route === "chapters") {
+      if (snapshot.events.length && showRunConsole) renderRunLog();
+      updateElapsed();
+    }
     if (!snapshot.active) {
-      stopRunPolling();
-      await loadRunOutput();
-      await reload();
+       stopRunPolling();
+       await loadRunOutput();
+       await reload();
+       await loadPreparationStatus();
     }
   } catch { /* a missed poll is caught by the next one */ }
 }
@@ -2680,13 +2975,56 @@ async function pollRun() {
 function renderRunLog() {
   const log = document.getElementById("runlog");
   if (!log) { render(); return; }
+  rememberRunConsolePosition(log);
   log.innerHTML = runEvents.map(runLine).join("");
-  log.scrollTop = log.scrollHeight;
+  restoreRunConsolePosition(log);
+}
+
+function rememberRunConsolePosition(log) {
+  if (!log) return;
+  runConsoleScrollTop = log.scrollTop;
+  runConsoleAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+}
+
+function restoreRunConsolePosition(log = document.getElementById("runlog")) {
+  if (!log) return;
+  log.scrollTop = runConsoleAtBottom ? log.scrollHeight : runConsoleScrollTop;
+  updateConsoleFollowButton();
+}
+
+function updateElapsed() {
+  const elapsed = document.getElementById("run-elapsed");
+  if (!elapsed || !S?.run?.startedAt) return;
+  elapsed.textContent = formatElapsed(Math.floor((Date.now() - Date.parse(S.run.startedAt)) / 1000));
+}
+
+function updateConsoleFollowButton() {
+}
+
+function jumpRunConsoleToBottom() {
+  runConsoleAtBottom = true;
+  const log = document.getElementById("runlog");
+  if (log) log.scrollTop = log.scrollHeight;
+  updateConsoleFollowButton();
 }
 
 function runLine(event) {
   const time = new Date(event.at).toLocaleTimeString();
   return `<div class="runline ${event.kind}"><span class="t">${time}</span><span>${esc(event.text)}</span></div>`;
+}
+
+function formatElapsed(totalSeconds) {
+  const seconds = Math.max(0, totalSeconds);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (days || hours) parts.push(`${hours}h`);
+  if (days || hours || minutes) parts.push(`${minutes}m`);
+  parts.push(`${remainder}s`);
+  return parts.join(" ");
 }
 
 async function loadRunOutput() {
@@ -2705,9 +3043,12 @@ function progressForRun(run) {
 
 function runPanel(run) {
   const running = run.status === "running";
+  const preparing = running && ((PREPARATION && !PREPARATION.ready) || S.phase === "preparation");
   const elapsed = run.startedAt ? Math.floor((Date.now() - Date.parse(run.startedAt)) / 1000) : 0;
   const progress = progressForRun(run);
-  const phaseLabel = progress.chapter && progress.phase === "writing_chapter"
+  const phaseLabel = preparing
+    ? "Preparing everything"
+    : progress.chapter && progress.phase === "writing_chapter"
     ? `Writing Chapter ${progress.chapter}`
     : progress.chapter && progress.phase === "editing_chapter"
       ? `Editing Chapter ${progress.chapter}`
@@ -2715,31 +3056,36 @@ function runPanel(run) {
         ? `Checking Chapter ${progress.chapter}`
         : `${progress.label}${progress.chapter ? ` (Chapter ${progress.chapter})` : ""}`;
   const workText = S?.draftingMode === "whole_book" ? "the whole book" : "the book";
+  const progressDetail = preparing
+    ? preparationProgressDetail(progress)
+    : progress.detail;
+  const runtimeInfo = preparing ? (PREP_RUNTIME || RUNTIME) : RUNTIME;
   return `<div class="card" ${running ? 'style="border-color:var(--accent)"' : ""}>
     <div class="row spread" style="margin-bottom:10px">
       <div class="row">
         ${running ? '<span class="spin"></span>' : ""}
-        <b>${running ? (progress.chapter ? `Writing Chapter ${progress.chapter}` : `Writing ${workText}`) : run.status === "complete" ? "Writing complete" : "The last run"}</b>
-        ${RUNTIME?.label ? `<span class="pill">${esc(RUNTIME.label)}</span>` : ""}
-        ${RUNTIME?.model ? `<span class="pill">${esc(RUNTIME.model)}</span>` : ""}
-        ${running && elapsed > 0 ? `<span class="pill">${elapsed < 90 ? `${elapsed}s` : `${Math.round(elapsed / 60)}m`}</span>` : ""}
-      </div>
-      ${running ? '<button class="ghost sm" onclick="stopWriting(this)">Stop</button>' : ""}
+        <b>${preparing ? "Preparing book" : running ? (progress.chapter ? `Writing Chapter ${progress.chapter}` : `Writing ${workText}`) : run.status === "complete" ? "Writing complete" : "The last run"}</b>
+        ${runtimeInfo?.label ? `<span class="pill">${esc(runtimeInfo.label)}</span>` : ""}
+         ${runtimeInfo?.model ? `<span class="pill">${esc(runtimeInfo.model)}</span>` : ""}
+       </div>
+       ${running ? `<div class="row" style="gap:6px"><span id="run-elapsed" class="pill" aria-label="Elapsed time">${formatElapsed(elapsed)}</span><button class="ghost sm" onclick="stopWriting(this)">Stop</button></div>` : ""}
     </div>
     <div class="run-progress" aria-live="polite">
       <div class="run-progress-head"><b>${esc(phaseLabel)}</b><span>${Math.round(progress.percent)}%</span></div>
-      <div class="meter"><i style="width:${Math.max(0, Math.min(100, progress.percent))}%"></i></div>
-      <div class="run-progress-detail">${esc(progress.detail)}</div>
-    </div>
+       <div class="meter"><i style="width:${Math.max(0, Math.min(100, progress.percent))}%"></i></div>
+       <div class="run-progress-detail">${esc(progressDetail)}</div>
+       ${preparing && PREPARATION ? preparationChecklist(PREPARATION, true) : ""}
+       ${preparing ? preparationDocumentsCard() : ""}
+     </div>
     <div class="row" style="margin-top:10px;justify-content:flex-end">
       <button class="ghost sm console-toggle" title="Show the runtime console" aria-label="Show the runtime console"
-        onclick="toggleRunConsole()">
+         onclick="toggleRunConsole()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 5h16v14H4z"/><path d="m7 9 3 3-3 3M12 15h5"/>
-        </svg>${showRunConsole ? "Hide console" : "Show console"}
+         </svg>${showRunConsole ? "Hide technical details" : "Show technical details"}
       </button>
     </div>
-    ${showRunConsole ? `<div id="runlog" class="runlog">${runEvents.map(runLine).join("") || '<div class="runline"><span>Waiting for the first step.</span></div>'}</div>` : ""}
+     ${showRunConsole ? `<div id="runlog" class="runlog" onscroll="rememberRunConsolePosition(this)">${runEvents.map(runLine).join("") || '<div class="runline"><span>Waiting for the first step.</span></div>'}</div>` : ""}
     ${running ? '<div class="hint" style="margin-top:8px">Leave this open or close it: the runtime keeps going either way, and the board updates as chapters land.</div>' : ""}
   </div>`;
 }
@@ -2749,22 +3095,74 @@ function toggleRunConsole() {
   render();
 }
 
+function preparationProgressDetail(progress) {
+  switch (progress.phase) {
+    case "gathering_info": return "Reading the selected sources and author decisions.";
+    case "preparing_characters": return "Building the character, relationship, and inherited-knowledge record.";
+    case "planning_chapters": return "Turning the approved material into the plot and chapter plan.";
+    case "finishing": return "Writing the remaining preparation documents and checking the manifest.";
+    default: return "Completing the preparation package.";
+  }
+}
+
 function outputCard() {
   const primary = runOutput?.primary;
   if (!primary) return "";
-  const otherFiles = (runOutput.files || []).filter((file) => file.fileName !== primary.fileName);
+  const files = runOutput.files || [];
+  const grouped = [...new Map(files.map((file) => [`${file.kind}-${file.chapter ?? "book"}`, []])).keys()]
+    .map((key) => files.filter((file) => `${file.kind}-${file.chapter ?? "book"}` === key));
+  const fileLink = (file) => {
+    const view = file.format === "md"
+      ? `<a class="btn ghost sm" href="/api/run/output/view?kind=${file.kind}${file.chapter ? `&chapter=${file.chapter}` : ""}" target="_blank" rel="noopener">View / print PDF</a>`
+      : `<a class="btn ghost sm" href="${esc(file.downloadUrl)}" download>Download DOCX</a>`;
+    return view;
+  };
+  const fileGroup = (group) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
+    <span>${esc(group[0].label)}</span><span class="row">${group.map(fileLink).join("")}</span></div>`;
+  const finalFiles = files.filter((file) => file.kind === "book");
+  const chapterGroups = grouped.filter((group) => group[0].kind === "chapter");
   return `<div class="card" style="border-color:var(--good)">
     <div class="spread" style="margin-bottom:10px">
       <div><b>${esc(primary.label)} is ready</b><div class="hint">Your finished ${primary.kind === "book" ? "book" : "chapter"} is available below.</div></div>
-      <a class="btn" href="${esc(primary.downloadUrl)}" download>Download ${primary.format === "docx" ? "DOCX" : "Markdown"}</a>
+      ${fileLink(primary)}
     </div>
     ${primary.preview ? `<div class="output-preview ${primary.truncated ? "truncated" : ""}">${esc(primary.preview)}</div>
       ${primary.truncated ? '<div class="hint" style="margin-top:7px">Preview shortened here. The download contains the complete output.</div>' : ""}` : '<div class="hint">The output is ready to download.</div>'}
-    ${otherFiles.length ? `<div class="row" style="margin-top:10px">${otherFiles.map((file) => `<a class="btn ghost" href="${esc(file.downloadUrl)}" download>Download ${file.format === "docx" ? "DOCX" : "Markdown"}</a>`).join("")}</div>` : ""}
+    ${finalFiles.length ? `<div style="margin-top:18px"><div class="spread"><h3 style="margin:0 0 4px">Final book</h3><button class="ghost sm" onclick="retouchBookModal()">Retouch final book</button></div>${fileGroup(finalFiles)}</div>` : ""}
+    ${chapterGroups.length ? `<div style="margin-top:18px"><h3 style="margin:0 0 4px">Chapters</h3>${chapterGroups.map(fileGroup).join("")}</div>` : ""}
   </div>`;
 }
 
-function startCard(hasPlan) {
+function retouchBookModal() {
+  showModal({
+    title: "Retouch final book",
+    body: `<p>The existing final manuscript will be read again and revised through the normal editing and validation gates. Nothing is changed until the retouching run writes a new result.</p>
+      <textarea id="retouch-note" rows="5" placeholder="Make the dialogue less explanatory. Tighten the final three chapters. Keep the ending but deepen the emotional turn."></textarea>`,
+    actions: `<button onclick="startRetouch(this)">Start retouching</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function startRetouch(btn) {
+  const note = document.getElementById("retouch-note")?.value?.trim();
+  if (!note) { toast("Describe what should be retouched first.", "warn"); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Starting…';
+  try {
+    const r = await api("/api/run/retouch", { method: "POST", body: { note } });
+    S = r;
+    closeModal();
+    runEvents = [];
+    runLatest = 0;
+    runProgress = null;
+    runOutput = null;
+    render();
+    startRunPolling();
+    toast("Retouching has started.");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+}
+
+function startCard(hasPlan, mode, nextChapter) {
   const r = RUNTIME || {};
   if (!r.runtime) return `<div class="card" style="border-color:var(--warn)">
     <b>No writing runtime found</b>
@@ -2784,8 +3182,67 @@ function startCard(hasPlan) {
       orchestrator in this folder. ${hasPlan
         ? "It picks up at the first chapter that is not approved."
         : "Its first job is the chapter plan."}</p></div>
-    <button onclick="startWritingModal()">Start writing</button>
+    <button onclick="startWritingModal()">${mode === "chapter_by_chapter" && nextChapter ? `Start Chapter ${nextChapter}` : "Start writing"}</button>
   </div>`;
+}
+
+function preparationCard() {
+  if (!PREPARATION) return `<div class="card"><span class="spin"></span> Checking preparation…</div>`;
+  if (!PREP_RUNTIME?.runtime) return `<div class="card" style="border-color:var(--warn)">
+    <b>Preparation needs a writing runtime</b>
+    <p class="sub" style="margin:6px 0 10px">Choose and connect the writing engine before generating the preparation package.</p>
+    <button onclick="go('engine')">Open writing engine</button>
+  </div>`;
+  if (PREPARATION.ready && !S.preparationReviewed) return preparationReviewCard();
+  return `<div class="card" style="border-color:var(--accent)">
+    <b>Prepare everything</b>
+    <p class="sub" style="margin:6px 0 10px">Canon Quill will read the selected material, build the project brief, bibles, chapter plan and validation rubric, then stop before prose drafting.</p>
+    ${preparationChecklist(PREPARATION)}
+    ${preparationDocumentsCard()}
+    <p class="hint" style="margin:0 0 10px">This may take several minutes.</p>
+    <button onclick="startPreparationRun(this)">Prepare everything</button>
+  </div>`;
+}
+
+function preparationReviewCard() {
+  if (!PREP_DOCS) return `<div class="card" style="text-align:center;padding:30px 20px"><span class="spin spin-lg"></span><h3 style="margin:14px 0 6px">Loading preparation documents…</h3><p class="sub">The package is ready to read.</p></div>`;
+  return `<div class="card" style="border-color:var(--accent)">
+    <h2 style="margin-top:0">Review the preparation</h2>
+    <p class="sub">These are the documents the writer will use. Open each one, read it, and add a note if anything needs to be redone. When everything is right, continue to your writing instructions.</p>
+    <div class="prep-docs">
+      ${PREP_DOCS.map((doc, index) => `<details class="prep-doc">
+        <summary><b>${esc(doc.name)}</b><span class="hint">Read document</span></summary>
+         <div class="prep-reader prep-rendered">${doc.rendered || esc(doc.content || "")}</div>
+         <label>Notes for this document</label>
+        <textarea id="prep-note-${index}" rows="3" placeholder="This character relationship is wrong. Recheck the ending evidence. Keep the chapter plan's order.">${esc(doc.note || "")}</textarea>
+        <div class="row" style="margin-top:8px;justify-content:flex-end"><button class="ghost sm" onclick="savePreparationNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Save note</button></div>
+      </details>`).join("")}
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button onclick="continuePreparationReview(this)">Continue to instructions</button>
+      <button class="ghost" onclick="startPreparationRun(this)">Prepare everything again</button>
+    </div>
+  </div>`;
+}
+
+async function savePreparationNote(index, name, btn) {
+  const note = document.getElementById(`prep-note-${index}`)?.value || "";
+  btn.disabled = true;
+  try {
+    S = await api(`/api/preparation/documents/${encodeURIComponent(name)}`, { method: "PATCH", body: { note } });
+    if (PREP_DOCS[index]) PREP_DOCS[index].note = note;
+    PREPARATION.reviewed = false;
+    render();
+    toast(note.trim() ? "Note saved for the preparation run." : "Note cleared.");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+}
+
+async function continuePreparationReview(btn) {
+  btn.disabled = true;
+  try {
+    S = await api("/api/preparation/review", { method: "POST" });
+    render();
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 function viewChapters() {
@@ -2805,22 +3262,34 @@ function viewChapters() {
   };
 
   const haltCard = run.status === "halted" ? (() => {
+    const preparationHalt = run.role === "analysis";
     const sessionLimit = run.reason === "rate_limited" && /session limit|hit your session/i.test(run.detail || "");
+    const preparationHalts = {
+      no_credit: ["Preparation stopped: out of credit", "The preparation provider accepted the credentials but has no credit left. Add credit or raise the billing limit, then resume preparation."],
+      rate_limited: ["Preparation session limit reached", "The preparation session reached a provider limit. Wait for it to reset, then resume preparation."],
+      invalid_credentials: ["Preparation credentials rejected", "Fix the selected preparation provider under Writing engine, then resume preparation."],
+      provider_error: ["Preparation provider failed", "The preparation provider stopped unexpectedly. Resume preparation when it is available again."],
+      cancelled: ["Preparation stopped", "Resume preparation whenever you are ready."],
+      other: ["Preparation stopped", "Preparation did not finish. The documents already written are still available to read."]
+    };
     const [title, help] = sessionLimit
-      ? ["Session limit reached", "The writing session reached its usage limit. Wait for it to reset, then resume. Your saved work is safe."]
-      : HALTS[run.reason] || HALTS.other;
+      ? preparationHalt
+        ? ["Preparation session limit reached", "The preparation session reached its usage limit. Wait for it to reset, then resume preparation."]
+        : ["Session limit reached", "The writing session reached its usage limit. Wait for it to reset, then resume. Your saved work is safe."]
+      : preparationHalt ? preparationHalts[run.reason] || preparationHalts.other : HALTS[run.reason] || HALTS.other;
     return `<div class="card" style="border-color:var(--bad)">
       <div class="row" style="margin-bottom:6px">
         <b style="color:var(--bad)">${title}</b>
-        ${run.chapter ? `<span class="pill">stopped on chapter ${run.chapter}</span>` : ""}
+        ${!preparationHalt && run.chapter ? `<span class="pill">stopped on chapter ${run.chapter}</span>` : ""}
         ${run.haltedAt ? `<span class="pill">${new Date(run.haltedAt).toLocaleString()}</span>` : ""}
       </div>
       <p class="sub" style="margin:0 0 8px">${help}</p>
       ${run.detail ? `<div class="steplog">${esc(run.detail)}</div>` : ""}
-      <p class="hint" style="margin:10px 0 0">Everything written so far is kept. Resuming starts a fresh
-      session at the first chapter that is not finished, reading the workspace to find where it got to.</p>
+      <p class="hint" style="margin:10px 0 0">${preparationHalt
+        ? "Everything prepared so far is kept. Resuming starts a fresh session and continues from the saved package."
+        : "Everything written so far is kept. Resuming starts a fresh session at the first chapter that is not finished, reading the workspace to find where it got to."}</p>
       <div class="row" style="margin-top:12px">
-        <button onclick="resumeRun(this)">Resume</button>
+         <button onclick="resumeRunModal()">${preparationHalt ? "Resume preparation" : "Resume"}</button>
         ${["invalid_credentials", "no_credit", "rate_limited"].includes(run.reason)
           ? '<button class="ghost" onclick="go(\'engine\')">Check writing engine</button>' : ""}
       </div>
@@ -2829,15 +3298,19 @@ function viewChapters() {
 
   const live = run.status === "running" || runEvents.length > 0;
   // A halted run offers Resume, which is the same act as starting.
-  const writingCard = live ? runPanel(run) : haltCard ? "" : startCard(cs.length > 0);
+  const packageReviewed = Boolean(PREPARATION?.ready && S.preparationReviewed);
+  const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
+  const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
+  const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   const finishedOutput = outputCard();
 
   if (!cs.length) return `<h1>Chapters</h1>
     ${haltCard}
     ${haltCard || live ? "" : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
+    ${packageReviewed ? directionsCard(pending, dirs) : ""}
     ${writingCard}
     ${finishedOutput}
-    ${directionsCard(pending, dirs)}`;
+    `;
 
   const approved = cs.filter((c) => c.status === "approved").length;
   return `
@@ -2866,6 +3339,7 @@ function viewChapters() {
     <button onclick="continueToChapters(this)">Confirm the plan</button>
   </div>`}
 
+  ${packageReviewed ? directionsCard(pending, dirs) : ""}
   ${writingCard}
   ${finishedOutput}
 
@@ -2892,13 +3366,13 @@ function viewChapters() {
          <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
          ${mode === "chapter_by_chapter" ? `<button class="ghost sm" onclick="openChapterChat(${c.number})">Chapter chat</button>` : ""}
          ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
-         ${c.status === "approved" ? `<button class="ghost sm" onclick="setStatus(${c.number},'needs_work')">Edit again</button>` : ""}
+          ${c.status === "approved" ? `<button class="ghost sm" onclick="redoChapterModal(${c.number})">Redo chapter</button>` : ""}
        </div>
     </div>`).join("")}
   </div>
 
   ${chapterChat ? chapterChatCard(chapterChat) : ""}
-  ${directionsCard(pending, dirs)}`;
+  `;
 }
 
 function chapterChatCard(chat) {
@@ -2911,6 +3385,29 @@ function chapterChatCard(chat) {
     <div class="row" style="margin-top:10px"><textarea id="chapter-chat-input" rows="3" placeholder="The chapter must... Include this dialogue beat... Do not reveal..."></textarea>
       <button onclick="sendChapterChat(this,${chat.number})">Send</button></div>
   </div>`;
+}
+
+function redoChapterModal(number) {
+  showModal({
+    title: `Redo Chapter ${number}`,
+    body: `<p>Write what should change. Canon Quill will keep the chapter's place in the plan and send this instruction with the next drafting run.</p>
+      <textarea id="redo-note" rows="5" placeholder="Make the emotional turn quieter. Remove the explanation in the final dialogue. Keep the ending beat."></textarea>`,
+    actions: `<button onclick="redoChapter(${number}, this)">Save and redo</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function redoChapter(number, btn) {
+  const note = document.getElementById("redo-note")?.value?.trim();
+  if (!note) { toast("Write what should change first.", "warn"); return; }
+  btn.disabled = true;
+  try {
+    const direction = await api("/api/directions", { method: "POST", body: { text: note, scope: "chapter", chapter: number } });
+    S = await api(`/api/chapters/${number}/status`, { method: "POST", body: { status: "needs_work" } });
+    closeModal();
+    render();
+    toast("Chapter marked for redo with your instructions.");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 async function openChapterChat(number) {
@@ -2992,11 +3489,39 @@ async function removeDirection(id) {
   catch (e) { toast(e.message, "error"); }
 }
 
+async function resumeRunModal() {
+  try {
+    const status = await api("/api/preparation/status");
+    const preparationRun = S.run?.role === "analysis" && !S.preparationReviewed;
+    if (!preparationRun && (!status.ready || !S.preparationReviewed)) {
+      showPreparationRequired(status);
+      return;
+    }
+    if (!preparationRun) {
+      try { WRITING_ESTIMATE = await api("/api/run/estimate"); }
+      catch { WRITING_ESTIMATE = null; }
+    }
+    showModal({
+      title: preparationRun ? "Resume preparation?" : "Resume writing?",
+      body: `<p class="hint">This starts a fresh provider session. It will read the saved workspace, decisions, artifacts, and recorded runtime conversation before continuing.</p>
+        ${preparationChecklist(status)}
+        ${preparationRun ? '<p class="hint">Preparation will continue building the missing documents and stop again before prose drafting.</p>' : writingEstimateCard(WRITING_ESTIMATE)}`,
+      actions: `<button onclick="resumeRun(this)">${preparationRun ? "Resume preparation" : "Resume writing"}</button>
+        <button class="ghost" onclick="closeModal()">Not yet</button>`
+    });
+  } catch (e) { toast(e.message, "error"); }
+}
+
 async function resumeRun(btn) {
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking credentials…';
+  const preparationRun = S.run?.role === "analysis" && !S.preparationReviewed;
+  const draftingAuth = S.engine?.draftingAuthMethod ?? S.engine?.authMethod;
+  const label = preparationRun ? "Resuming preparation…" : draftingAuth === "api_key" ? "Checking credentials and starting…" : "Starting writing…";
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span> ${label}`;
   try {
     const r = await api("/api/run/resume", { method: "POST" });
     S = r.state;
+    closeModal();
     runEvents = [];
     runLatest = 0;
     runProgress = null;
@@ -3038,7 +3563,6 @@ async function setStatus(number, status) {
     if (route === "engine") loadEngine();
     if (route === "connect") loadDrive();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
-    if (route === "intake_analysis") loadProjectAnalysis();
     if (route === "questions") { loadQuestions(); startQuestionPolling(); }
     if (route === "chapters") enterChapters();
   }

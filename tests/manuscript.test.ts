@@ -40,6 +40,13 @@ describe("chapter detection", () => {
     expect(analyseManuscript(text).chapters).toHaveLength(2);
   });
 
+  it("does not treat all-caps signage inside prose as a chapter", () => {
+    const text = chapter("CHAPTER ONE", `${prose} Above the gate were the words:\nCITY HALL\nThe driver continued on.`);
+    const analysis = analyseManuscript(text);
+    expect(analysis.chapters).toHaveLength(1);
+    expect(analysis.chapters[0].wordCount).toBeGreaterThan(30);
+  });
+
   it("treats a document with no headings as one body of work", () => {
     const a = analyseManuscript(prose);
     expect(a.chapters).toHaveLength(1);

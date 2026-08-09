@@ -80,10 +80,18 @@ const headingPatterns = [
   /^\s*[A-Z][A-Z\s\d.:'-]{4,60}$/ // an all-caps line on its own
 ];
 
-function isHeading(line: string): boolean {
+function isHeading(line: string, isolated = false): boolean {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length > 90) return false;
-  return headingPatterns.some((pattern) => pattern.test(trimmed));
+  return headingPatterns.slice(0, 3).some((pattern) => pattern.test(trimmed))
+    || (isolated && headingPatterns[3].test(trimmed));
+}
+
+function isHeadingAt(lines: string[], index: number): boolean {
+  const previous = lines[index - 1]?.trim() ?? "";
+  const next = lines[index + 1]?.trim() ?? "";
+  const previousIsDivider = /^[_=-]{3,}$/.test(previous);
+  return isHeading(lines[index], (!previous || previousIsDivider) && !next);
 }
 
 /**
@@ -224,8 +232,9 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
     });
   };
 
-  for (const line of lines) {
-    if (isHeading(line) && !isSceneBreak(line)) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (isHeadingAt(lines, lineIndex) && !isSceneBreak(line)) {
       if (currentHeading !== null || words(mainStory.slice(currentStart, offset)).length > 20) {
         push(offset);
       }
@@ -330,7 +339,7 @@ function stripTrailingLayout(text: string): string {
 }
 
 function readConventions(text: string, lines: string[]): Conventions {
-  const headings = lines.filter((line) => isHeading(line) && !isSceneBreak(line)).map((l) => l.trim());
+  const headings = lines.filter((_line, index) => isHeadingAt(lines, index) && !isSceneBreak(lines[index])).map((l) => l.trim());
   const headingExample = headings[0] ?? null;
 
   let headingCase: Conventions["headingCase"] = null;

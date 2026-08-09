@@ -55,6 +55,7 @@ export interface StartOptions {
   cwd?: string;
   onExit: (outcome: RunOutcome) => void;
   onProgress?: (progress: RunProgress) => void;
+  onEvent?: (event: RunEvent) => void;
 }
 
 export interface RunOutcome {
@@ -79,6 +80,7 @@ interface ActiveRun {
   startedAt: string;
   stopping: boolean;
   onProgress?: (progress: RunProgress) => void;
+  onEvent?: (event: RunEvent) => void;
 }
 
 let active: ActiveRun | null = null;
@@ -115,9 +117,11 @@ function emit(kind: RunEvent["kind"], text: string): void {
   const explicit = readProgress(stripped);
   const update = explicit ?? inferProgress(stripped);
   if (update) setProgress(update, Boolean(explicit));
-  const clean = redactSensitiveText(removeProgressMarker(stripped)).trim();
+  const clean = humanizeRuntimeText(redactSensitiveText(removeProgressMarker(stripped))).trim();
   if (!clean) return;
-  events.push({ seq: ++seq, at: new Date().toISOString(), kind, text: clean.slice(0, 600) });
+  const event = { seq: ++seq, at: new Date().toISOString(), kind, text: clean.slice(0, 600) };
+  events.push(event);
+  active?.onEvent?.(event);
   if (events.length > MAX_EVENTS) events = events.slice(-MAX_EVENTS);
 }
 
@@ -184,6 +188,19 @@ function stripAnsi(value: string): string {
   return value.replace(/\[[0-9;]*[A-Za-z]/g, "").replace(/\r/g, "");
 }
 
+export function humanizeRuntimeText(text: string): string {
+  const trimmed = text.trim();
+  if (/^(Reading|Writing|Editing)\s+(?:.*[\\/])?[A-Za-z0-9_-]{20,}\.json\.?$/i.test(trimmed)) {
+    const action = /^(Reading|Writing|Editing)/i.exec(trimmed)?.[1] ?? "Reading";
+    return `${action} a selected source document.`;
+  }
+  if (/^(Reading|Writing|Editing)\s+.*(?:drive-cache|preparation-manifest|project-brief|book-bible|character-bible|world-bible|plot-bible|style-guide|chapter-plan|validation-rubric)/i.test(trimmed)) {
+    const action = /^(Reading|Writing|Editing)/i.exec(trimmed)?.[1] ?? "Reading";
+    return `${action} the preparation material.`;
+  }
+  return text;
+}
+
 export function selectRuntime(provider: ProviderId): RuntimeId | null {
   const claude = onPath("claude");
   const opencode = onPath("opencode");
@@ -210,9 +227,11 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     "phase it is actually in, following workflows/book-writing.workflow.yaml.",
     `Read workspaces/${options.slug}/artifacts/project-analysis.json and`,
     `workspaces/${options.slug}/artifacts/decision-log.md, project-brief.md, chapter-plan.md, and preparation-manifest.json when they exist.`,
-    "question and author answer; use those answers as authoritative preparation input.",
+    "Read any preparation notes in project.json alongside those documents; treat them as author instructions for what must be corrected or preserved.",
+    "Use every question and author answer as authoritative preparation input.",
     `Read workspaces/${options.slug}/logs/phase-log.json, audit-log.json, and errors-log.json when they exist;`,
-    "use them as the execution history and stop if they expose an unresolved failure.",
+    "use them as the execution history, including recorded messages from earlier runtime sessions, and stop if they expose an unresolved failure.",
+    "A provider switch starts a new session: do not assume the old model's hidden context is available; continue from the recorded workspace, decisions, artifacts, and runtime conversation.",
     "The author approved the preparation gate in the Studio. Honour every author gate that remains:",
     "do not approve a chapter on their behalf, and stop with a clear report if an input is missing.",
     "At each meaningful boundary, report one progress line in exactly this form so the Studio can",
@@ -327,7 +346,7 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
   lastRuntime = runtime;
   lastCommand = command;
   lastStartedAt = new Date().toISOString();
-  active = { slug: options.slug, child: null, runtime, command, startedAt: lastStartedAt, stopping: false, onProgress: options.onProgress };
+  active = { slug: options.slug, child: null, runtime, command, startedAt: lastStartedAt, stopping: false, onProgress: options.onProgress, onEvent: options.onEvent };
   active.onProgress?.(progress);
 
   emit("system", `Starting ${runtimeLabel(runtime)}${options.model ? ` on ${options.model}` : ""}.`);

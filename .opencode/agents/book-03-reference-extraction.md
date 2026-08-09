@@ -31,12 +31,14 @@ Use this precedence when sources disagree:
 1. explicit current author answers;
 2. current target-manuscript text and approved chapters;
 3. target-book plot, character, world, and timeline documents;
-4. the author's prior series canon;
-5. reference books by other authors;
+4. the ordered prior series canon, using `seriesOrder` in `project.json`;
+5. explicitly selected Voice references for style evidence only;
 6. inference.
 
-Report conflicts instead of blending them. Do not let a reference book by
-another author enter the author's style corpus or masquerade as canon.
+Report conflicts instead of blending them. A Series book is canon and is also a
+Voice reference automatically. A document marked only as a Voice reference is
+not canon. Never use a comparison title or another author's prose as a Voice
+reference unless the author explicitly selected it for that purpose.
 
 ## Claim ledger
 
@@ -70,8 +72,9 @@ not an invitation to invent.
   ending evidence, and unsupported links.
 - `world-findings.md`: setting, rules, social structures, recurring locations,
   sensory facts, and violations/conflicts.
-- `style-samples.md`: source-labeled passage IDs and why each passage is useful;
-  never copy another author's prose into the author's style corpus.
+- `style-samples.md`: source-labeled passage IDs from the selected Voice
+  references and why each passage is useful; never copy another author's prose
+  into the author's style corpus.
 - `unknowns-and-assumptions.md`: unresolved decisions grouped by impact, with
   the smallest useful author question for each.
 - `extraction-manifest.json`: source IDs read, source IDs skipped and why,

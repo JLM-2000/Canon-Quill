@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import type { Classification, SourceKind } from "../analysis/classify.js";
+import { isVoiceReference, type Classification, type SourceKind } from "../analysis/classify.js";
 import type { ProjectAnalysis } from "../analysis/intake.js";
 import type { ContinuityLedger } from "../continuity/ledger.js";
 import { emptyLedger } from "../continuity/ledger.js";
@@ -38,11 +38,13 @@ export interface SelectedSource {
   isFolder: boolean;
   /**
    * Which groups this document belongs to. A single file can genuinely be
-   * several things at once: one document holding a timeline, an outline and
-   * loose notes is common, and an author's past book is both their style
-   * corpus and their canon reference.
+    * several things at once: one document holding a timeline, an outline and
+    * loose notes is common, and a series book is both canon and a voice
+    * reference.
    */
   kinds: SourceKind[];
+  /** True when a reference-only source was explicitly chosen for voice. */
+  voiceReferenceConfirmed?: boolean;
   wordCount?: number;
   /** Evidence behind the initial classification, kept for author review. */
   classification?: Classification;
@@ -129,6 +131,8 @@ export type HaltReason =
 
 export interface RunState {
   status: "idle" | "running" | "halted" | "complete";
+  /** Which provider assignment owns the run. */
+  role: "analysis" | "drafting" | null;
   /** Which chapter was in flight when it stopped. */
   chapter: number | null;
   reason: HaltReason | null;
@@ -187,6 +191,10 @@ export interface StudioState {
   draftingMode: DraftingMode | null;
   /** True after the author continues past the project-shape screen. */
   projectShapeReviewed: boolean;
+  /** Earlier series-book source ids, ordered from earliest to latest. */
+  seriesOrder: string[];
+  /** True after the author has confirmed the displayed series order. */
+  seriesOrderReviewed: boolean;
   intake: Record<string, string>;
   drive: {
     connected: boolean;
@@ -212,6 +220,10 @@ export interface StudioState {
   manuscriptReviewed: boolean;
   /** Explicit author confirmation that preparation is complete. */
   writingConfirmed: boolean;
+  /** True after the author has read and accepted the preparation package. */
+  preparationReviewed: boolean;
+  /** Author notes attached to individual preparation documents. */
+  preparationNotes: Record<string, string>;
   directions: Direction[];
   run: RunState;
   ledger: ContinuityLedger;
@@ -223,7 +235,7 @@ export interface StudioState {
     builtAt: string | null;
     /** True after the author has left the corpus screen for the questions conversation. */
     continuedAt: string | null;
-    /** Built from reference prose because the author had none of their own. */
+    /** True when no Series book is among the selected Voice references. */
     fromReference?: boolean;
     /** Documents the author kept out of the corpus, by driveId. */
     excluded: string[];
@@ -259,6 +271,8 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     shape: null,
     draftingMode: "chapter_by_chapter",
     projectShapeReviewed: false,
+    seriesOrder: [],
+    seriesOrderReviewed: false,
     intake: {},
     drive: {
       connected: false,
@@ -310,8 +324,10 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     manuscript: null,
     manuscriptReviewed: false,
     writingConfirmed: false,
+    preparationReviewed: false,
+    preparationNotes: {},
     directions: [],
-    run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
+    run: { status: "idle", role: null, chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),
     styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null, excluded: [], notes: "", documentStats: [] },
     createdAt: now,
@@ -335,6 +351,8 @@ export async function loadState(slug: string): Promise<StudioState> {
         ?? (parsed.sources?.some((source) => source.driveId.startsWith("local-")) ? "upload" : parsed.drive?.referenceRoots?.length ? "drive" : null),
       draftingMode: parsed.draftingMode ?? base.draftingMode,
       projectShapeReviewed: parsed.projectShapeReviewed ?? false,
+      seriesOrder: normalizeSeriesOrder(parsed.seriesOrder, parsed.sources ?? []),
+      seriesOrderReviewed: parsed.seriesOrderReviewed ?? false,
       engine: {
         ...base.engine,
         ...(parsed.engine ?? {}),
@@ -354,8 +372,11 @@ export async function loadState(slug: string): Promise<StudioState> {
         findings: { ...base.projectAnalysis.findings, ...(parsed.projectAnalysis?.findings ?? {}) }
       },
       chapterChats: parsed.chapterChats ?? {},
+      run: { ...base.run, ...(parsed.run ?? {}), role: parsed.run?.role === "analysis" ? "analysis" as const : parsed.run?.role === "drafting" ? "drafting" as const : null },
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       writingConfirmed: parsed.writingConfirmed ?? Boolean(parsed.chapters?.length),
+      preparationReviewed: parsed.preparationReviewed ?? false,
+      preparationNotes: { ...(parsed.preparationNotes ?? {}) },
       styleCorpus: { ...base.styleCorpus, ...(parsed.styleCorpus ?? {}) }
     };
     return { ...merged, sources: migrateSources(merged.sources) };
@@ -388,6 +409,13 @@ function migrateSources(sources: SelectedSource[]): SelectedSource[] {
     const storedKind = (source as unknown as { kind?: SourceKind }).kind;
     return { ...source, kinds: storedKind ? [storedKind] : [] };
   });
+}
+
+function normalizeSeriesOrder(order: string[] | undefined, sources: SelectedSource[]): string[] {
+  const seriesIds = new Set((sources ?? []).filter((source) => source.kinds?.includes("past_book")).map((source) => source.driveId));
+  const existing = Array.isArray(order) ? order.filter((id) => seriesIds.has(id)) : [];
+  const missing = [...seriesIds].filter((id) => !existing.includes(id));
+  return [...existing, ...missing];
 }
 
 export async function saveState(state: StudioState): Promise<StudioState> {
@@ -438,10 +466,12 @@ export function derivePhase(state: StudioState): PhaseId {
   }
   if (blockingQuestions(state).length > 0) return "preflight";
   if (state.shape === null || state.draftingMode === null || !state.projectShapeReviewed) return "intake";
+  const seriesBooks = state.sources.filter((source) => source.kinds.includes("past_book"));
+  if (state.shape === "series" && seriesBooks.length > 0 && !state.seriesOrderReviewed) return "intake";
   if (!state.manuscriptReviewed) return "draft";
-  const hasOwnStyle = state.sources.some((source) => source.kinds.includes("past_book"));
-  if (hasOwnStyle && !state.styleCorpus.built) return "preparation";
-  if (hasOwnStyle && !state.styleCorpus.continuedAt) return "preparation";
+  const hasVoiceReference = state.sources.some((source) => isVoiceReference(source.kinds, source.voiceReferenceConfirmed));
+  if (hasVoiceReference && !state.styleCorpus.built) return "preparation";
+  if (hasVoiceReference && !state.styleCorpus.continuedAt) return "preparation";
   if (!state.projectAnalysis.completed) return "intake_analysis";
   if (!state.projectAnalysis.continuedAt) return "intake_analysis";
   if (!state.conversationStartedAt && state.questions.length === 0) return "preflight";

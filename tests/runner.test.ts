@@ -3,6 +3,7 @@ import {
   buildCommand,
   buildPrompt,
   describeClaudeEvent,
+  humanizeRuntimeText,
   inferReason,
   orchestratorRules
 } from "../src/studio/runner.js";
@@ -69,6 +70,10 @@ describe("runtime command", () => {
 });
 
 describe("reading the runtime stream", () => {
+  it("hides cache filenames from the runtime activity log", () => {
+    expect(humanizeRuntimeText("Reading 1a7c6Etd4EvPmW-Qdi3Aaqrr0vCbJZ-wj1ukfLfbKWQI.json.")).toBe("Reading a selected source document.");
+  });
+
   it("turns tool calls into something a person can follow", () => {
     const described = describeClaudeEvent({
       type: "assistant",

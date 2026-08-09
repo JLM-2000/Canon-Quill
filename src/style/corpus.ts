@@ -58,7 +58,7 @@ const interiorityMarkers = /\b(?:thought|thinking|wondered|remembered|realized|r
 const transitionMarkers = /\b(?:later|afterwards?|the next (?:day|morning|week|month|year)|hours? (?:later|passed)|by (?:then|morning|evening|nightfall)|meanwhile|that (?:night|evening|afternoon)|days? (?:later|passed)|eventually|in the end)\b/gi;
 
 /**
- * Build a style corpus from the author's past books. Front matter and
+ * Build a style corpus from selected Voice references. Front matter and
  * copyright pages skew the fingerprint, so `extractProse` strips them.
  */
 export function buildCorpus(label: string, documents: CorpusDocument[], options: BuildCorpusOptions = {}): StyleCorpus {

@@ -33,6 +33,10 @@ async function seedPreparationPackage() {
   const artifacts = workspacePaths("test-book").artifacts;
   await mkdir(artifacts, { recursive: true });
   await Promise.all(files.map((name) => writeFile(path.join(artifacts, name), name.endsWith(".json") ? "{}" : `# ${name}\n`, "utf8")));
+  const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+  const state = await load("test-book");
+  state.preparationReviewed = true;
+  await save(state);
 }
 
 beforeEach(async () => {
@@ -98,7 +102,7 @@ describe("phase derivation", () => {
     state.engineReviewed = true;
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
-    state.sources = [{ driveId: "a", name: "book.md", path: "/book.md", mimeType: "text/plain", isFolder: false, kinds: ["past_book"] }];
+    state.sources = [{ driveId: "a", name: "book.md", path: "/book.md", mimeType: "text/plain", isFolder: false, kinds: ["past_book", "reference_book"] }];
     state.sourcesReviewed = true;
     state.shape = "standalone";
     state.draftingMode = "chapter_by_chapter";
@@ -157,6 +161,15 @@ describe("studio api", () => {
     expect(html).toContain("Change existing draft");
     expect(html).toContain("Use this existing draft?");
     expect(html).toContain("Start without an existing draft");
+    expect(html).toContain("Reading existing draft");
+    expect(html).toContain("Order the series books");
+    expect(html).toContain("Series books are voice references too");
+    expect(html).toContain("Remove both");
+    expect(html).toContain("Voice reference");
+    expect(html).toContain("Plot & outline (required)");
+    expect(html).not.toContain("Series books (optional)");
+    expect(html).not.toContain("Canon and project material (required)");
+    expect(html).toContain("not included because");
     expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
     expect(html).toContain('route = "start"; render();');
     expect(html).not.toContain("The Tide House");
@@ -168,8 +181,22 @@ describe("studio api", () => {
     expect(html).toContain("requestAnimationFrame(() => window.scrollTo");
     expect(html).toContain("analysis-finding");
     expect(html).toContain("Continuation point");
-    expect(html).toContain("Show the runtime console");
+    expect(html).toContain("Show technical details");
     expect(html).toContain("outputCard");
+    expect(html).toContain("Ready to analyse");
+    expect(html).toContain("startProjectAnalysis");
+    expect(html).toContain("Prepare everything");
+    expect(html).toContain("Preparation package:");
+    expect(html).toContain("Show completed and pending documents");
+    expect(html).toContain("openPreparationDocument");
+    expect(html).toContain("runConsoleAtBottom");
+    expect(html).toContain("Preparation stopped");
+    expect(html).toContain("formatElapsed");
+    expect(html).not.toContain("artifacts still missing");
+    expect(html).toContain("Review the preparation");
+    expect(html).toContain("Continue to instructions");
+    expect(html).toContain("Retouch final book");
+    expect(html).toContain("View / print PDF");
   });
 
   it("previews and downloads the final manuscript through an allowlisted output", async () => {
@@ -189,6 +216,25 @@ describe("studio api", () => {
     const download = await fetch(`${base}/api/run/output/download?kind=book&format=md`);
     expect(download.status).toBe(200);
     expect(await download.text()).toContain("The finished book.");
+  });
+
+  it("lists chapter downloads and provides a print-friendly document view", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.draftingMode = "whole_book";
+    await save(state);
+    await mkdir(workspacePaths("test-book").final, { recursive: true });
+    await mkdir(workspacePaths("test-book").chapters, { recursive: true });
+    await writeFile(path.join(workspacePaths("test-book").final, "manuscript.md"), "# Final\n\nBook.", "utf8");
+    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-01-edited.md"), "# Chapter 1\n\nFirst.", "utf8");
+    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-02-edited.md"), "# Chapter 2\n\nSecond.", "utf8");
+
+    const output = await call("/api/run/output");
+    expect(output.body.files.filter((file: any) => file.kind === "chapter")).toHaveLength(4);
+    expect(output.body.files.some((file: any) => file.format === "docx" && file.chapter === 1)).toBe(true);
+    const view = await fetch(`${base}/api/run/output/view?kind=chapter&chapter=1`);
+    expect(view.status).toBe(200);
+    expect(await view.text()).toContain("Print / Save PDF");
   });
 
   it("returns state with a derived phase", async () => {
@@ -289,6 +335,21 @@ describe("studio api", () => {
     expect(result.body.choice.draftingProvider).toBe("anthropic");
     expect(result.body.resolvedModels.analysis).toBe("gpt-5.6-luna");
     expect(result.body.resolvedModels.drafting).toBe("claude-opus-5");
+  });
+
+  it("prefills the recommended providers when split mode is chosen", async () => {
+    const result = await call("/api/engine", { method: "PATCH", body: { routing: "split" } });
+    expect(result.body.choice.analysisProvider).toBe("openai");
+    expect(result.body.choice.draftingProvider).toBe("anthropic");
+  });
+
+  it("resolves the analysis runtime separately from drafting", async () => {
+    await call("/api/engine", { method: "PATCH", body: { routing: "split", analysisProvider: "openai", draftingProvider: "anthropic" } });
+    const analysis = await call("/api/run/runtime?role=analysis");
+    const drafting = await call("/api/run/runtime?role=drafting");
+    expect(analysis.body.provider).toBe("openai");
+    expect(analysis.body.model).toBe("gpt-5.6-luna");
+    expect(drafting.body.provider).toBe("anthropic");
   });
 
   it("keeps resources locked until the engine is continued", async () => {
@@ -599,6 +660,7 @@ describe("studio api", () => {
     expect(result.status).toBe(200);
     expect(result.body.styleCorpus.continuedAt).toBeTruthy();
     expect(result.body.phase).toBe("intake_analysis");
+    expect(result.body.projectAnalysis.completed).toBe(false);
   });
 
   it("extracts intake suggestions from indexed prose", async () => {
@@ -672,7 +734,7 @@ describe("studio api", () => {
   it("refuses to build a style corpus with no prose at all", async () => {
     const { status, body } = await call("/api/style/build", { method: "POST" });
     expect(status).toBe(400);
-    expect(body.error).toMatch(/no prose to learn from/i);
+    expect(body.error).toMatch(/voice reference/i);
   });
 
   it("validates a chapter and records flow and style results", async () => {
@@ -882,6 +944,45 @@ describe("source removal", () => {
   });
 });
 
+describe("source roles", () => {
+  it("keeps a series book as a voice reference, and keeps voice when canon is removed", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.sources = [{ driveId: "book", name: "Book", path: "/book", mimeType: "text/plain", isFolder: false, kinds: ["past_book", "reference_book"] }];
+    await save(state);
+
+    const cannotRemoveVoice = await call("/api/sources/book", { method: "PATCH", body: { kinds: ["past_book"] } });
+    expect(cannotRemoveVoice.body.sources[0].kinds).toEqual(["past_book", "reference_book"]);
+
+    const removedCanon = await call("/api/sources/book", { method: "PATCH", body: { kinds: ["reference_book"] } });
+    expect(removedCanon.body.sources[0].kinds).toEqual(["reference_book"]);
+  });
+});
+
+describe("series order", () => {
+  it("persists the author's title order and requires confirmation", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.shape = "series";
+    state.draftingMode = "chapter_by_chapter";
+    state.sources = [
+      { driveId: "first", name: "The Arrival", path: "/The Arrival", mimeType: "text/plain", isFolder: false, kinds: ["past_book", "reference_book"] },
+      { driveId: "second", name: "After the Storm", path: "/After the Storm", mimeType: "text/plain", isFolder: false, kinds: ["past_book", "reference_book"] }
+    ];
+    await save(state);
+
+    const unconfirmed = await call("/api/project/continue", { method: "POST" });
+    expect(unconfirmed.status).toBe(400);
+    const ordered = await call("/api/project/series-order", {
+      method: "PATCH",
+      body: { order: ["second", "first"], confirmed: true }
+    });
+    expect(ordered.body.seriesOrder).toEqual(["second", "first"]);
+    expect(ordered.body.seriesOrderReviewed).toBe(true);
+    expect((await call("/api/project/continue", { method: "POST" })).status).toBe(200);
+  });
+});
+
 describe("stored source migration", () => {
   it("carries a single kind forward into the kinds list", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
@@ -904,76 +1005,76 @@ describe("style source requirement", () => {
     await save(state);
   }
   const doc = (id: string, kinds: string[], wordCount: number) =>
-    ({ driveId: id, name: id, path: `/${id}`, mimeType: "text/plain", isFolder: false, kinds, wordCount });
+    ({ driveId: id, name: id, path: `/${id}`, mimeType: "text/plain", isFolder: false, kinds, wordCount,
+      voiceReferenceConfirmed: kinds.includes("reference_book") && !kinds.includes("past_book") });
 
-  it("accepts planning material without a style source", async () => {
-    await seed([doc("a", ["notes"], 50000)]);
+  it("requires both a voice reference and a plot outline", async () => {
+    await seed([doc("a", ["notes"], 50000), doc("plot", ["plot"], 1000)]);
     const check = await call("/api/sources/check");
     const { status } = await call("/api/sources/reviewed", { method: "POST" });
-    expect(status).toBe(200);
-    expect(check.body.style.ok).toBe(true);
-    expect(check.body.style.reason).toMatch(/without a measured style corpus/i);
+    expect(status).toBe(400);
+    expect(check.body.style.ok).toBe(false);
+    expect(check.body.plot.ok).toBe(true);
   });
 
-  it("requires references as well as a style source", async () => {
+  it("does not treat a Series book without its voice role as a complete project", async () => {
     await seed([doc("a", ["past_book"], 40000)]);
     const { body } = await call("/api/sources/check");
-    expect(body.style.ok).toBe(true);
-    expect(body.references.ok).toBe(false);
-    expect(body.references.reason).toMatch(/no plan|reference-book material/i);
-    expect((await call("/api/sources/reviewed", { method: "POST" })).status).toBe(400);
+    expect(body.style.ok).toBe(false);
+    expect(body.plot.ok).toBe(false);
   });
 
-  it("requires references to carry enough material", async () => {
-    await seed([doc("a", ["past_book"], 40000), doc("b", ["reference_book"], 200)]);
+  it("requires voice references to carry enough prose", async () => {
+    await seed([doc("a", ["past_book", "reference_book"], 200), doc("b", ["reference_book"], 200), doc("plot", ["plot"], 1000)]);
     const { body } = await call("/api/sources/check");
-    expect(body.references.ok).toBe(false);
-    expect(body.references.reason).toMatch(/little for the book to draw on/i);
+    expect(body.style.ok).toBe(false);
+    expect(body.plot.ok).toBe(true);
+    expect(body.style.reason).toMatch(/too noisy/i);
   });
 
   it("lets one document satisfy both requirements", async () => {
-    await seed([doc("both", ["past_book", "reference_book"], 40000)]);
+    await seed([doc("both", ["past_book", "reference_book", "plot"], 40000)]);
     const { body } = await call("/api/sources/check");
     expect(body.ok).toBe(true);
     expect(body.style.ok).toBe(true);
-    expect(body.references.ok).toBe(true);
+    expect(body.plot.ok).toBe(true);
     expect((await call("/api/sources/reviewed", { method: "POST" })).status).toBe(200);
   });
 
   it("refuses to continue when the prose is too short to measure", async () => {
-    await seed([doc("a", ["past_book", "reference_book"], 300)]);
+    await seed([doc("a", ["past_book", "reference_book"], 300), doc("plot", ["plot"], 1000)]);
     const { status, body } = await call("/api/sources/reviewed", { method: "POST" });
     expect(status).toBe(400);
     expect(body.error).toMatch(/too noisy/i);
   });
 
   it("accepts the author's own writing once it is long enough", async () => {
-    await seed([doc("a", ["past_book", "reference_book"], 40000)]);
+    await seed([doc("a", ["past_book", "reference_book"], 40000), doc("plot", ["plot"], 1000)]);
     const { status } = await call("/api/sources/reviewed", { method: "POST" });
     expect(status).toBe(200);
   });
 
   it("accepts references alone when the author has written nothing", async () => {
-    await seed([doc("a", ["reference_book"], 40000)]);
+    await seed([doc("a", ["reference_book"], 40000), doc("plot", ["plot"], 1000)]);
     const check = await call("/api/sources/check");
     expect(check.body.ok).toBe(true);
     expect(check.body.fromReference).toBe(true);
     expect((await call("/api/sources/reviewed", { method: "POST" })).status).toBe(200);
   });
 
-  it("prefers the author's own writing for style when both exist", async () => {
-    await seed([doc("mine", ["past_book"], 40000), doc("theirs", ["reference_book"], 90000)]);
+  it("uses every selected voice reference for style when both roles exist", async () => {
+    await seed([doc("mine", ["past_book", "reference_book"], 40000), doc("theirs", ["reference_book"], 90000), doc("plot", ["plot"], 1000)]);
     const { body } = await call("/api/sources/check");
     expect(body.fromReference).toBe(false);
-    expect(body.style.words).toBe(40000);
-    expect(body.references.words).toBe(90000);
+    expect(body.style.words).toBe(130000);
+    expect(body.plot.documents).toBe(1);
   });
 
-  it("refuses to build a corpus from reference writing unless asked", async () => {
-    await seed([doc("a", ["reference_book"], 40000)]);
-    const { status, body } = await call("/api/style/build", { method: "POST" });
-    expect(status).toBe(400);
-    expect(body.error).toMatch(/read like whoever wrote it/i);
+  it("accepts explicitly selected voice references", async () => {
+    await seed([doc("a", ["reference_book"], 40000), doc("plot", ["plot"], 1000)]);
+    const { body } = await call("/api/sources/check");
+    expect(body.style.words).toBe(40000);
+    expect(body.style.ok).toBe(true);
   });
 });
 
@@ -985,7 +1086,8 @@ describe("editing and rebuilding the style corpus", () => {
     const state = await load("test-book");
     state.sources = [
       { driveId: "mine", name: "Book One", path: "/Book One", mimeType: "text/plain", isFolder: false, kinds: ["past_book", "reference_book"], wordCount: 40000 },
-      { driveId: "ghost", name: "Ghostwritten", path: "/Ghostwritten", mimeType: "text/plain", isFolder: false, kinds: ["past_book"], wordCount: 40000 }
+      { driveId: "ghost", name: "Ghostwritten", path: "/Ghostwritten", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"], voiceReferenceConfirmed: true, wordCount: 40000 },
+      { driveId: "plot", name: "Plot", path: "/Plot", mimeType: "text/plain", isFolder: false, kinds: ["plot"], wordCount: 2000 }
     ];
     state.sourcesReviewed = true;
     await save(state);
@@ -1142,6 +1244,33 @@ describe("editing and rebuilding the project analysis", () => {
 });
 
 describe("run halt and resume", () => {
+  it("lets the author read preparation documents, add notes, and review the package", async () => {
+    await seedPreparationPackage();
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.preparationReviewed = false;
+    await save(state);
+
+    const docs = await call("/api/preparation/documents");
+    expect(docs.status).toBe(200);
+    expect(docs.body.documents).toHaveLength(9);
+    expect(docs.body.documents[0].content).toMatch(/project-brief/);
+    expect(docs.body.documents[0].rendered).toContain("<h1>");
+    const view = await fetch(`${base}/api/preparation/documents/project-brief.md/view`);
+    expect(view.status).toBe(200);
+    expect(await view.text()).toContain("Print / Save PDF");
+
+    const noted = await call("/api/preparation/documents/project-brief.md", {
+      method: "PATCH",
+      body: { note: "The ending direction needs another pass." }
+    });
+    expect(noted.body.preparationReviewed).toBe(false);
+
+    const reviewed = await call("/api/preparation/review", { method: "POST" });
+    expect(reviewed.status).toBe(200);
+    expect(reviewed.body.preparationReviewed).toBe(true);
+  });
+
   it("refuses to start drafting before the writing gate", async () => {
     const result = await call("/api/run/start", { method: "POST", body: { chapter: 1 } });
     expect(result.status).toBe(409);
@@ -1149,6 +1278,8 @@ describe("run halt and resume", () => {
 
   it("reports a missing preparation package before starting a run", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    await mkdir(workspacePaths("test-book").artifacts, { recursive: true });
+    await writeFile(path.join(workspacePaths("test-book").artifacts, "project-brief.md"), "# Project brief", "utf8");
     const state = await load("test-book");
     state.chapters = [{ number: 1, title: "One", synopsis: "", status: "planned", issues: [] }];
     state.writingConfirmed = true;
@@ -1157,6 +1288,15 @@ describe("run halt and resume", () => {
 
     const prep = await call("/api/preparation/status");
     expect(prep.body.ready).toBe(false);
+    expect(prep.body.artifactDirectory).toBe("workspaces/test-book/artifacts/");
+    expect(prep.body.present).toEqual(["project-brief.md"]);
+    expect(prep.body.missing).toHaveLength(8);
+    const docs = await call("/api/preparation/documents");
+    expect(docs.status).toBe(200);
+    expect(docs.body.documents.find((doc: { name: string }) => doc.name === "project-brief.md").content).toContain("Project brief");
+    expect(docs.body.documents.find((doc: { name: string }) => doc.name === "book-bible.md").content).toBeNull();
+    const missingView = await fetch(`${base}/api/preparation/documents/book-bible.md/view`);
+    expect(missingView.status).toBe(404);
     const result = await call("/api/run/start", { method: "POST" });
     expect(result.status).toBe(409);
     expect(result.body.error).toMatch(/Preparation is not ready/);
@@ -1210,6 +1350,29 @@ describe("run halt and resume", () => {
     expect(body.state.run.status).toBe("running");
     expect(body.state.run.reason).toBeNull();
   });
+
+  it("resumes with the current drafting provider after a provider switch", async () => {
+    await seedPreparationPackage();
+    await call("/api/chapters", {
+      method: "PUT",
+      body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }] }
+    });
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.writingConfirmed = true;
+    state.engine = { ...state.engine, provider: "anthropic", authMethod: "subscription", draftingProvider: "anthropic", draftingAuthMethod: "subscription" };
+    await save(state);
+    const started = await call("/api/run/start", { method: "POST" });
+    expect(started.body.run.role).toBe("drafting");
+    await call("/api/run/stop", { method: "POST" });
+    await call("/api/engine", { method: "PATCH", body: { routing: "split", analysisProvider: "openai", draftingProvider: "openai", analysisAuthMethod: "subscription", draftingAuthMethod: "subscription" } });
+
+    const resumed = await call("/api/run/resume", { method: "POST" });
+    expect(resumed.body.resumed).toBe(true);
+    expect(resumed.body.state.run.role).toBe("drafting");
+    expect(resumed.body.model).toBe("gpt-5.6-sol");
+    await call("/api/run/stop", { method: "POST" });
+  });
 });
 
 describe("starting the writing run", () => {
@@ -1231,6 +1394,53 @@ describe("starting the writing run", () => {
     expect(body.running).toBe(false);
   });
 
+  it("estimates tokens without inventing a subscription price", async () => {
+    await ready();
+    const { body } = await call("/api/run/estimate");
+    expect(body.model).toBe("claude-opus-5");
+    expect(body.chapters).toBe(1);
+    expect(body.totalTokens).toBeGreaterThan(body.outputTokens);
+    expect(body.totalCostUsd).toBeNull();
+  });
+
+  it("estimates API usage from the selected drafting model rates", async () => {
+    await ready();
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.engine = { ...state.engine, provider: "openai", authMethod: "api_key", draftingProvider: "openai", draftingAuthMethod: "api_key" };
+    await save(state);
+
+    const { body } = await call("/api/run/estimate");
+    expect(body.model).toBe("gpt-5.6-sol");
+    expect(body.inputCostUsd).toBeGreaterThan(0);
+    expect(body.outputCostUsd).toBeGreaterThan(0);
+    expect(body.totalCostUsd).toBe(body.inputCostUsd + body.outputCostUsd);
+  });
+
+  it("runs preparation through the analysis provider in split mode", async () => {
+    await seedPreparationPackage();
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.preparationReviewed = false;
+    state.writingConfirmed = true;
+    state.engine = {
+      ...state.engine,
+      routing: "split",
+      analysisProvider: "openai",
+      analysisAuthMethod: "subscription",
+      draftingProvider: "anthropic",
+      draftingAuthMethod: "subscription"
+    };
+    await save(state);
+
+    const started = await call("/api/preparation/run", { method: "POST" });
+    expect(started.status).toBe(200);
+    expect(started.body.model).toBe("gpt-5.6-luna");
+    expect(started.body.run.role).toBe("analysis");
+    expect(started.body.run.chapter).toBeNull();
+    await call("/api/run/stop", { method: "POST" });
+  });
+
   it("marks the book as running and records what it started", async () => {
     await ready();
     const { status, body } = await call("/api/run/start", { method: "POST", body: { note: "Start at chapter one." } });
@@ -1241,6 +1451,7 @@ describe("starting the writing run", () => {
     const events = await call("/api/run/events");
     expect(events.body.command).toContain("book-orchestrator");
     expect(events.body.events.map((event: { text: string }) => event.text).join(" ")).toMatch(/Starting/);
+    await call("/api/run/stop", { method: "POST" });
   });
 
   it("refuses to start without a writing engine", async () => {

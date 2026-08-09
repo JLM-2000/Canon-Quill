@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
-import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
+import { classifySource, isVoiceReference, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
 import {
   analyseProjectMaterial,
   applyAnalysisEdits,
@@ -65,9 +65,12 @@ import {
 import { workspacePaths } from "../workspace/paths.js";
 import { appendLog, logError, resolveErrors } from "../project/logs.js";
 import { checkCredentials, defaultModels, loadCatalog, type ProviderId } from "./engine.js";
+import { estimateWriting } from "./estimate.js";
 import { applyUpdate, getVersionInfo } from "./updates.js";
 import { deleteApiKey, maskKey, readApiKey, saveApiKey, verifyApiKey } from "./credentials.js";
 import { loadDotEnv } from "../config/env.js";
+import { generateMarkdownDocx } from "../project/docx.js";
+import { escapeHtml, renderMarkdown } from "../preview/markdown.js";
 
 // Read .env before anything looks at process.env.
 loadDotEnv();
@@ -280,7 +283,7 @@ export function createStudioApp() {
     return { analysis, state: withDerived(next) };
   }
 
-  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string }) {
+  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string; role?: "analysis" | "drafting" }) {
     if (isRunning()) throw new HttpError(409, "A run is already in progress.");
     if (pendingOutcome) {
       await pendingOutcome;
@@ -288,11 +291,15 @@ export function createStudioApp() {
     }
     explicitlyHalted.delete(slug);
     await resolveFixedRuntimeErrors(slug);
-    const provider = state.engine.draftingProvider ?? state.engine.provider;
+    const role = options.role ?? "drafting";
+    const provider = role === "analysis"
+      ? state.engine.analysisProvider ?? state.engine.provider
+      : state.engine.draftingProvider ?? state.engine.provider;
     if (!provider) throw new HttpError(400, "Choose a writing engine first.");
 
-    const model = resolveModels(await loadCatalog(), state.engine).drafting ?? null;
-    const chapter = options.chapter ?? nextChapterHint(state);
+    const resolvedModels = resolveModels(await loadCatalog(), state.engine);
+    const model = (role === "analysis" ? resolvedModels.analysis : resolvedModels.drafting) ?? null;
+    const chapter = role === "analysis" ? null : options.chapter ?? nextChapterHint(state);
     let started: { runtime: RuntimeId; command: string };
     try {
       started = startRun({
@@ -313,6 +320,17 @@ export function createStudioApp() {
             data: { phase: progress.phase, percent: progress.percent, chapter: progress.chapter }
           })).catch(() => undefined);
         },
+        onEvent: (event) => {
+          phaseLogQueue = phaseLogQueue.then(() => appendLog(slug, "phase", {
+            timestamp: event.at,
+            stage: "chapter_drafting",
+            stageName: role === "analysis" ? "Preparation" : "Drafting",
+            agent: "book-orchestrator",
+            event: "runtime_message",
+            message: event.text,
+            data: { seq: event.seq, kind: event.kind }
+          })).catch(() => undefined);
+        },
         onExit: (outcome) => {
           pendingOutcome = recordRunOutcome(slug, outcome);
           void pendingOutcome;
@@ -321,10 +339,12 @@ export function createStudioApp() {
     } catch (error) {
       throw new HttpError(400, message(error));
     }
+    await phaseLogQueue;
 
     const next = await updateState(slug, (current) => {
       current.run = {
         status: "running",
+        role,
         chapter,
         reason: null,
         detail: null,
@@ -335,10 +355,10 @@ export function createStudioApp() {
     await appendLog(slug, "audit", {
       timestamp: new Date().toISOString(),
       stage: "chapter_drafting",
-      stageName: "Drafting",
+      stageName: role === "analysis" ? "Preparation" : "Drafting",
       agent: started.runtime,
       event: "run_started",
-      data: { model, chapter, draftingMode: state.draftingMode }
+      data: { model, chapter, draftingMode: state.draftingMode, role }
     });
 
     return { ...withDerived(next), runtime: started.runtime, runtimeLabel: runtimeLabel(started.runtime), model };
@@ -368,39 +388,68 @@ export function createStudioApp() {
     if (kind === "book") {
       const fileName = format === "docx" ? "manuscript.docx" : "manuscript.md";
       const filePath = path.join(paths.final, fileName);
+      if (format === "docx" && !existsSync(filePath)) {
+        const markdownPath = path.join(paths.final, "manuscript.md");
+        if (existsSync(markdownPath)) await generateMarkdownDocx(await readFile(markdownPath, "utf8"), filePath);
+      }
       return existsSync(filePath) ? { kind, format, chapter: null, label: "Final manuscript", fileName, path: filePath } : null;
     }
-    if (format !== "md") return null;
-
     const numbers = new Set<number>();
     if (requestedChapter && Number.isInteger(requestedChapter)) numbers.add(requestedChapter);
-    if (state.run.chapter) numbers.add(state.run.chapter);
-    for (const chapter of state.chapters) numbers.add(chapter.number);
+    else {
+      if (state.run.chapter) numbers.add(state.run.chapter);
+      for (const chapter of state.chapters) numbers.add(chapter.number);
+    }
+    if (!requestedChapter) {
+      try {
+        for (const name of await readdir(paths.chapters)) {
+          const match = /^chapter-(\d+)-(?:draft|edited)\.md$/i.exec(name);
+          if (match) numbers.add(Number(match[1]));
+        }
+      } catch { /* no chapter artifacts yet */ }
+    }
+
+    for (const number of [...numbers].sort((a, b) => b - a)) {
+      const padded = String(number).padStart(2, "0");
+      const candidates = [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`, `chapter-${padded}-draft.md`, `chapter-${number}-draft.md`];
+      const markdownName = candidates.find((candidate) => existsSync(path.join(paths.chapters, candidate)));
+      if (!markdownName) continue;
+      if (format === "md") return { kind, format, chapter: number, label: `Chapter ${number}`, fileName: markdownName, path: path.join(paths.chapters, markdownName) };
+      const markdownPath = path.join(paths.chapters, markdownName);
+      const docxName = markdownName.replace(/\.md$/i, ".docx");
+      const docxPath = path.join(paths.chapters, docxName);
+      if (!existsSync(docxPath)) await generateMarkdownDocx(await readFile(markdownPath, "utf8"), docxPath);
+      return { kind, format, chapter: number, label: `Chapter ${number}`, fileName: docxName, path: docxPath };
+    }
+    return null;
+  }
+
+  async function allChapterOutputs(slug: string, state: StudioState): Promise<OutputFile[]> {
+    const paths = workspacePaths(slug);
+    const numbers = new Set<number>(state.chapters.map((chapter) => chapter.number));
     try {
       for (const name of await readdir(paths.chapters)) {
         const match = /^chapter-(\d+)-(?:draft|edited)\.md$/i.exec(name);
         if (match) numbers.add(Number(match[1]));
       }
     } catch { /* no chapter artifacts yet */ }
-
-    for (const number of [...numbers].sort((a, b) => b - a)) {
-      const padded = String(number).padStart(2, "0");
-      const candidates = [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`, `chapter-${padded}-draft.md`, `chapter-${number}-draft.md`];
-      const fileName = candidates.find((candidate) => existsSync(path.join(paths.chapters, candidate)));
-      if (fileName) return { kind, format, chapter: number, label: `Chapter ${number}`, fileName, path: path.join(paths.chapters, fileName) };
+    const outputs: OutputFile[] = [];
+    for (const number of [...numbers].sort((a, b) => a - b)) {
+      const markdown = await resolveOutput(slug, state, "chapter", "md", number);
+      const docx = await resolveOutput(slug, state, "chapter", "docx", number);
+      if (markdown) outputs.push(markdown);
+      if (docx) outputs.push(docx);
     }
-    return null;
+    return outputs;
   }
 
   async function availableOutputs(slug: string): Promise<{ primary: OutputFile | null; files: OutputFile[] }> {
     const state = await loadState(slug);
     const book = await resolveOutput(slug, state, "book", "md");
     const docx = await resolveOutput(slug, state, "book", "docx");
-    if (state.draftingMode === "whole_book" || book) {
-      return { primary: book, files: [book, docx].filter((file): file is OutputFile => Boolean(file)) };
-    }
-    const chapter = await resolveOutput(slug, state, "chapter", "md");
-    return { primary: chapter, files: chapter ? [chapter] : [] };
+    const chapters = await allChapterOutputs(slug, state);
+    const primary = book ?? chapters.filter((file) => file.format === "md").at(-1) ?? null;
+    return { primary, files: [...[book, docx].filter((file): file is OutputFile => Boolean(file)), ...chapters] };
   }
 
   /**
@@ -675,6 +724,7 @@ export function createStudioApp() {
         current.projectShapeReviewed = false;
         current.writingConfirmed = false;
       }
+      if (nextShape !== current.shape) current.seriesOrderReviewed = false;
       current.projectName = typeof projectName === "string" && projectName.trim() ? projectName.trim() : current.projectName;
       current.shape = nextShape;
       current.draftingMode = nextMode;
@@ -686,10 +736,29 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
+  app.patch("/api/project/series-order", route(async (req, res) => {
+    const slug = await requireSlug();
+    if (!Array.isArray(req.body?.order)) throw new HttpError(400, "order must be an array of series-book ids.");
+    const requested = [...new Set((req.body.order as unknown[]).map(String))] as string[];
+    const state = await updateState(slug, (current) => {
+      const valid = new Set(current.sources.filter((source) => source.kinds.includes("past_book")).map((source) => source.driveId));
+      const order = requested.filter((id) => valid.has(id));
+      current.seriesOrder = [...order, ...[...valid].filter((id) => !order.includes(id))];
+      current.seriesOrderReviewed = req.body?.confirmed === true;
+    });
+    res.json(withDerived(state));
+  }));
+
   app.post("/api/project/continue", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await updateState(slug, (current) => {
       if (!current.shape || !current.draftingMode) throw new HttpError(400, "Choose a book shape and drafting mode first.");
+      const seriesIds = current.sources.filter((source) => source.kinds.includes("past_book")).map((source) => source.driveId);
+      current.seriesOrder = [...(current.seriesOrder ?? []).filter((id) => seriesIds.includes(id)), ...seriesIds.filter((id) => !(current.seriesOrder ?? []).includes(id))];
+      if (current.shape === "series" && seriesIds.length > 0 && !current.seriesOrderReviewed) {
+        throw new HttpError(400, "Review and confirm the order of the series books first.");
+      }
+      current.seriesOrderReviewed = true;
       current.projectShapeReviewed = true;
     });
     await appendLog(slug, "audit", {
@@ -710,6 +779,8 @@ export function createStudioApp() {
       current.shape = null;
       current.draftingMode = null;
       current.projectShapeReviewed = false;
+      current.seriesOrder = [];
+      current.seriesOrderReviewed = false;
       current.manuscript = null;
       current.manuscriptReviewed = false;
       current.questions = [];
@@ -827,6 +898,12 @@ export function createStudioApp() {
       if (draftingAuthMethod !== undefined) current.engine.draftingAuthMethod = draftingAuthMethod;
       if (routing !== undefined) {
         current.engine.routing = routing;
+        if (routing === "split") {
+          // Split mode starts with the recommended division, while the role
+          // controls remain available for the author to change.
+          current.engine.analysisProvider = analysisProvider ?? "openai";
+          current.engine.draftingProvider = draftingProvider ?? "anthropic";
+        }
         if (routing === "single") {
           const selectedProvider = current.engine.draftingProvider ?? current.engine.analysisProvider;
           const selectedAuth = current.engine.draftingAuthMethod ?? current.engine.analysisAuthMethod;
@@ -1033,6 +1110,8 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       current.resourceMethod = "upload";
       current.sources = [...current.sources.filter((source) => !source.driveId.startsWith("local-")), ...uploaded];
+      current.seriesOrder = normalizeSeriesOrder(current.seriesOrder, current.sources);
+      current.seriesOrderReviewed = false;
       current.sourcesReviewed = false;
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
@@ -1077,7 +1156,7 @@ export function createStudioApp() {
             path: node.path,
             mimeType: node.mimeType,
             isFolder: false,
-            // Own past books supply both style and canon.
+            // Series books supply canon and are voice references automatically.
             kinds: sourceKinds(classification),
             wordCount: computeMetrics(text).wordCount,
             classification
@@ -1098,6 +1177,8 @@ export function createStudioApp() {
     const next = await updateState(slug, (current) => {
       current.resourceMethod = "drive";
       current.sources = found.map((entry) => entry.source);
+      current.seriesOrder = normalizeSeriesOrder(current.seriesOrder, current.sources);
+      current.seriesOrderReviewed = false;
       current.sourcesReviewed = false;
       current.drive.lastIndexedAt = new Date().toISOString();
       current.styleCorpus.built = false;
@@ -1131,7 +1212,17 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       const source = current.sources.find((entry) => entry.driveId === req.params.driveId);
       if (source) {
+        const wasSeriesBook = source.kinds.includes("past_book");
+        const wasVoiceReference = source.kinds.includes("reference_book");
+        const wantsSeriesBook = kinds.includes("past_book");
+        if (wantsSeriesBook && !kinds.includes("reference_book")) kinds.push("reference_book");
+        if (wasSeriesBook && !wantsSeriesBook && !kinds.includes("reference_book")) kinds.push("reference_book");
+        const wantsVoiceReference = kinds.includes("reference_book");
         source.kinds = kinds;
+        if (!wantsVoiceReference) source.voiceReferenceConfirmed = undefined;
+        else if (!wantsSeriesBook && (!wasVoiceReference || wasSeriesBook)) source.voiceReferenceConfirmed = true;
+        current.seriesOrder = normalizeSeriesOrder(current.seriesOrder, current.sources);
+        if (wasSeriesBook !== wantsSeriesBook) current.seriesOrderReviewed = false;
         current.styleCorpus.built = false;
         current.styleCorpus.continuedAt = null;
         resetAnalysis(current);
@@ -1144,7 +1235,10 @@ export function createStudioApp() {
   app.delete("/api/sources/:driveId", route(async (req, res) => {
     const slug = await requireSlug();
     const state = await updateState(slug, (current) => {
+      const wasSeriesBook = current.sources.find((entry) => entry.driveId === req.params.driveId)?.kinds.includes("past_book") ?? false;
       current.sources = current.sources.filter((entry) => entry.driveId !== req.params.driveId);
+      current.seriesOrder = normalizeSeriesOrder(current.seriesOrder, current.sources);
+      if (wasSeriesBook) current.seriesOrderReviewed = false;
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
       resetAnalysis(current);
@@ -1157,7 +1251,7 @@ export function createStudioApp() {
     const state = await loadState(slug);
     const check = sourcesCheck(state.sources);
     if (!check.ok) {
-      throw new HttpError(400, [check.style.reason, check.references.reason].filter(Boolean).join(" "));
+      throw new HttpError(400, [check.style.reason, check.plot.reason].filter(Boolean).join(" "));
     }
     res.json(withDerived(await updateState(slug, (current) => void (current.sourcesReviewed = true))));
   }));
@@ -1188,22 +1282,17 @@ export function createStudioApp() {
     const kept = (kind: SourceKind) =>
       state.sources.filter((source) => source.kinds.includes(kind) && !excluded.includes(source.driveId));
     const own = kept("past_book");
-    const reference = kept("reference_book");
-    const anyOwn = state.sources.some((source) => source.kinds.includes("past_book"));
-    const anyReference = state.sources.some((source) => source.kinds.includes("reference_book"));
-
-    const useReference = req.body?.useReference === true;
-    const chosen = own.length > 0 ? own : useReference ? reference : [];
+    const reference = kept("reference_book").filter((source) => isVoiceReference(source.kinds, source.voiceReferenceConfirmed));
+    const anyReference = state.sources.some((source) => isVoiceReference(source.kinds, source.voiceReferenceConfirmed));
+    const chosen = reference;
 
     if (chosen.length === 0) {
-      const excludedEverything = (anyOwn || (useReference && anyReference)) && excluded.length > 0;
+      const excludedEverything = anyReference && excluded.length > 0;
       throw new HttpError(
         400,
         excludedEverything
           ? "Every document you could learn from is excluded. Include at least one before rebuilding."
-          : anyReference
-            ? "Nothing is marked as your writing. You can build the corpus from your reference writing instead, but the book will read like whoever wrote it rather than like you."
-            : "Nothing is marked as your writing or your reference writing, so there is no prose to learn from. Group at least one document on the previous screen."
+          : "Nothing is marked as a voice reference. Mark the prose you want Canon Quill to study on the previous screen."
       );
     }
     if (!state.sourcesReviewed) {
@@ -1211,7 +1300,7 @@ export function createStudioApp() {
     }
     const sourceCheck = sourcesCheck(state.sources);
     if (!sourceCheck.ok) {
-      throw new HttpError(400, [sourceCheck.style.reason, sourceCheck.references.reason].filter(Boolean).join(" "));
+      throw new HttpError(400, [sourceCheck.style.reason, sourceCheck.plot.reason].filter(Boolean).join(" "));
     }
 
     const documents: CorpusDocument[] = [];
@@ -1223,7 +1312,7 @@ export function createStudioApp() {
     const corpus: StyleCorpus = {
       ...buildCorpus(state.projectName, documents),
       notes,
-      documentStats: own.length ? documents.map((document) => {
+      documentStats: documents.length ? documents.map((document) => {
         const analysis = analyseManuscript(document.text);
         return {
           source: document.source,
@@ -1247,14 +1336,14 @@ export function createStudioApp() {
         builtAt: corpus.builtAt,
         // A rebuild does not send the author back through a screen they passed.
         continuedAt: current.styleCorpus.continuedAt,
-        fromReference: own.length === 0,
+        fromReference: reference.length > 0 && own.length === 0,
         excluded,
         notes,
         documentStats: corpus.documentStats ?? []
       };
     });
 
-    res.json({ ...withDerived(next), fingerprint: corpus.fingerprint, fromReference: own.length === 0 });
+    res.json({ ...withDerived(next), fingerprint: corpus.fingerprint, fromReference: reference.length > 0 && own.length === 0 });
   }));
 
   app.post("/api/style/continue", route(async (_req, res) => {
@@ -1326,16 +1415,81 @@ export function createStudioApp() {
 
   app.get("/api/preparation/status", route(async (_req, res) => {
     const slug = await requireSlug();
-    res.json(preparationStatus(slug));
+    const state = await loadState(slug);
+    res.json({ ...preparationStatus(slug), reviewed: state.preparationReviewed });
+  }));
+
+  app.get("/api/preparation/documents", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+    const status = preparationStatus(slug);
+    const documents = await Promise.all(requiredPreparationArtifacts.map(async (name) => ({
+      name,
+      available: status.present.includes(name),
+      content: status.present.includes(name) ? await readFile(path.join(workspacePaths(slug).artifacts, name), "utf8") : null,
+      note: state.preparationNotes[name] ?? ""
+    })));
+    for (const document of documents) {
+      if (document.content !== null) (document as { rendered?: string }).rendered = renderMarkdown(document.content);
+    }
+    res.json({ documents, reviewed: state.preparationReviewed, ready: status.ready, present: status.present, missing: status.missing, artifactDirectory: status.artifactDirectory });
+  }));
+
+  app.get("/api/preparation/documents/:name/view", route(async (req, res) => {
+    const slug = await requireSlug();
+    const name = req.params.name;
+    if (!requiredPreparationArtifacts.includes(name)) throw new HttpError(404, "Unknown preparation document.");
+    const filePath = path.join(workspacePaths(slug).artifacts, name);
+    if (!existsSync(filePath)) throw new HttpError(404, "That preparation document is not ready yet.");
+    const content = await readFile(filePath, "utf8");
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(name)}</title><style>
+      :root{color-scheme:light;--paper:#fffdf8;--ink:#201914;--muted:#7c6f64;--rule:#e8decf;--accent:#8f5838}
+      body{margin:0;background:#eee7dc;color:var(--ink);font-family:Georgia,'Times New Roman',serif}
+      header{max-width:760px;margin:0 auto;padding:24px 22px;color:var(--muted);font:12px ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+      main{max-width:760px;margin:0 auto 60px;padding:58px clamp(24px,6vw,72px);background:var(--paper);border:1px solid var(--rule);box-shadow:0 20px 60px rgba(64,45,26,.16)}
+      h1,h2,h3{font-weight:500;line-height:1.15} h1{font-size:42px;margin:0 0 34px} h2{margin-top:42px;padding-top:24px;border-top:1px solid var(--rule);color:var(--accent)}
+      p,li{font-size:18px;line-height:1.78} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
+      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
+      @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p,li{font-size:12pt}}
+    </style></head><body><div class="toolbar"><button onclick="window.print()">Print / Save PDF</button></div><header>Canon Quill · ${escapeHtml(name)}</header><main>${renderMarkdown(content)}</main></body></html>`);
+  }));
+
+  app.patch("/api/preparation/documents/:name", route(async (req, res) => {
+    const slug = await requireSlug();
+    const name = req.params.name;
+    if (!requiredPreparationArtifacts.includes(name)) throw new HttpError(404, "Unknown preparation document.");
+    if (typeof req.body?.note !== "string") throw new HttpError(400, "note must be text.");
+    const note = req.body.note.trim().slice(0, 4000);
+    const state = await updateState(slug, (current) => {
+      if (note) current.preparationNotes[name] = note;
+      else delete current.preparationNotes[name];
+      current.preparationReviewed = false;
+    });
+    res.json(withDerived(state));
+  }));
+
+  app.post("/api/preparation/review", route(async (_req, res) => {
+    const slug = await requireSlug();
+    if (!preparationStatus(slug).ready) throw new HttpError(409, "Finish preparation before reviewing it.");
+    const state = await updateState(slug, (current) => { current.preparationReviewed = true; });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "preflight",
+      stageName: "Preparation review",
+      agent: "author",
+      event: "preparation_reviewed"
+    });
+    res.json(withDerived(state));
   }));
 
   app.post("/api/preparation/run", route(async (_req, res) => {
     const slug = await requireSlug();
     const current = await loadState(slug);
     const preparation = preparationStatus(slug);
-    if (preparation.ready) throw new HttpError(409, "Preparation is already ready.");
+    if (preparation.ready && current.preparationReviewed) throw new HttpError(409, "Preparation is already ready and reviewed.");
     const started = await launchRuntime(slug, current, {
       chapter: null,
+      role: "analysis",
       note: "PREPARATION_REPAIR: build the missing reference-extraction and preparation artifacts from the existing project analysis, decision log, cached sources, and style artifacts. Do not draft prose. Stop at preflight review once the package is complete."
     });
     res.json(started);
@@ -1610,7 +1764,10 @@ export function createStudioApp() {
   app.post("/api/writing/reopen", route(async (_req, res) => {
     const slug = await requireSlug();
     if (isRunning()) throw new HttpError(409, "Stop the run before reopening preparation.");
-    res.json(withDerived(await updateState(slug, (current) => void (current.writingConfirmed = false))));
+    res.json(withDerived(await updateState(slug, (current) => {
+      current.writingConfirmed = false;
+      current.preparationReviewed = false;
+    })));
   }));
 
   // --- Chapters -------------------------------------------------------------
@@ -1915,6 +2072,7 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       current.run = {
         status: "halted",
+        role: current.run?.role ?? null,
         chapter: Number(req.body?.chapter) || current.run?.chapter || null,
         reason,
         detail,
@@ -1949,9 +2107,30 @@ export function createStudioApp() {
     if (!preparation.ready) {
       throw new HttpError(409, `Preparation is not ready. Missing: ${preparation.missing.join(", ")}.`);
     }
+    if (!current.preparationReviewed) throw new HttpError(409, "Review the preparation documents before writing.");
     const started = await launchRuntime(slug, current, {
       chapter: Number(req.body?.chapter) || null,
       note: typeof req.body?.note === "string" ? req.body.note : undefined
+    });
+    res.json(started);
+  }));
+
+  app.post("/api/run/retouch", route(async (req, res) => {
+    const slug = await requireSlug();
+    const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 4000) : "";
+    if (!note) throw new HttpError(400, "Describe what should be retouched.");
+    const current = await loadState(slug);
+    if (!current.writingConfirmed || !current.preparationReviewed) throw new HttpError(409, "Finish preparation review before retouching the book.");
+    if (!preparationStatus(slug).ready) throw new HttpError(409, "Preparation is not ready.");
+    if (!existsSync(path.join(workspacePaths(slug).final, "manuscript.md"))) throw new HttpError(404, "The final manuscript is not available yet.");
+    if (isRunning()) throw new HttpError(409, "A run is already in progress.");
+    await updateState(slug, (state) => {
+      state.chapters = state.chapters.map((chapter) => ({ ...chapter, status: chapter.status === "approved" ? "needs_work" : chapter.status, updatedAt: new Date().toISOString() }));
+    });
+    const updated = await loadState(slug);
+    const started = await launchRuntime(slug, updated, {
+      chapter: null,
+      note: `RETTOUCH_FINAL: revise the existing final manuscript according to the author's instruction, preserve canon and approved structure, and run the normal editing and validation gates. ${note}`
     });
     res.json(started);
   }));
@@ -1967,7 +2146,11 @@ export function createStudioApp() {
 
   app.post("/api/run/stop", route(async (_req, res) => {
     const slug = await requireSlug();
-    if (!stopRun()) throw new HttpError(409, "Nothing is running.");
+    if (!stopRun()) {
+      await phaseLogQueue;
+      throw new HttpError(409, "Nothing is running.");
+    }
+    await phaseLogQueue;
     const state = await updateState(slug, (current) => {
       current.run = { ...current.run, status: "halted", reason: "cancelled", detail: null, haltedAt: new Date().toISOString() };
     });
@@ -1976,16 +2159,25 @@ export function createStudioApp() {
 
   app.get("/api/run/runtime", route(async (_req, res) => {
     const state = await loadState(await requireSlug());
-    const provider = state.engine.draftingProvider ?? state.engine.provider;
+    const role = _req.query.role === "analysis" ? "analysis" : "drafting";
+    const provider = role === "analysis"
+      ? state.engine.analysisProvider ?? state.engine.provider
+      : state.engine.draftingProvider ?? state.engine.provider;
     const runtime = provider ? selectRuntime(provider) : null;
     const catalog = await loadCatalog();
     res.json({
+      role,
       provider,
       runtime,
       label: runtime ? runtimeLabel(runtime) : null,
-      model: provider ? resolveModels(catalog, state.engine).drafting ?? null : null,
+      model: provider ? (role === "analysis" ? resolveModels(catalog, state.engine).analysis : resolveModels(catalog, state.engine).drafting) ?? null : null,
       running: isRunning()
     });
+  }));
+
+  app.get("/api/run/estimate", route(async (_req, res) => {
+    const state = await loadState(await requireSlug());
+    res.json(estimateWriting(await loadCatalog(), state));
   }));
 
   /** Return the newest finished manuscript or chapter without exposing workspace paths. */
@@ -2021,6 +2213,26 @@ export function createStudioApp() {
     });
   }));
 
+  app.get("/api/run/output/view", route(async (req, res) => {
+    const slug = await requireSlug();
+    const kind = req.query.kind === "book" ? "book" : req.query.kind === "chapter" ? "chapter" : null;
+    if (!kind) throw new HttpError(400, "Choose a valid output.");
+    const chapter = typeof req.query.chapter === "string" ? Number(req.query.chapter) : undefined;
+    const file = await resolveOutput(slug, await loadState(slug), kind, "md", chapter);
+    if (!file) throw new HttpError(404, "That output is not available yet.");
+    const markdown = await readFile(file.path, "utf8");
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(file.label)}</title><style>
+      :root{color-scheme:light;--paper:#fffdf8;--ink:#201914;--muted:#7c6f64;--rule:#e8decf;--accent:#8f5838}
+      body{margin:0;background:#eee7dc;color:var(--ink);font-family:Georgia,'Times New Roman',serif}
+      header{max-width:760px;margin:0 auto;padding:24px 22px;color:var(--muted);font:12px ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+      main{max-width:760px;margin:0 auto 60px;padding:58px clamp(24px,6vw,72px);background:var(--paper);border:1px solid var(--rule);box-shadow:0 20px 60px rgba(64,45,26,.16)}
+      h1,h2,h3{font-weight:500;line-height:1.15} h1{font-size:42px;margin:0 0 34px} h2{margin-top:42px;padding-top:24px;border-top:1px solid var(--rule);color:var(--accent)}
+      p{font-size:18px;line-height:1.78;margin:0 0 1.15em} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
+      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
+      @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p{font-size:12pt}}
+    </style></head><body><div class="toolbar"><button onclick="window.print()">Print / Save PDF</button></div><header>Canon Quill · ${escapeHtml(file.label)}</header><main>${renderMarkdown(markdown)}</main></body></html>`);
+  }));
+
   app.get("/api/run/output/download", route(async (req, res) => {
     const slug = await requireSlug();
     const kind = req.query.kind === "book" ? "book" : req.query.kind === "chapter" ? "chapter" : null;
@@ -2042,20 +2254,26 @@ export function createStudioApp() {
   app.post("/api/run/resume", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
-    requireWritingPhase(state);
+    const preparationRun = state.run.role === "analysis" && !state.preparationReviewed;
+    if (!preparationRun) requireWritingPhase(state);
     await resolveFixedRuntimeErrors(slug);
     const preparation = preparationStatus(slug);
-    if (!preparation.ready) {
+    if (!preparationRun && !preparation.ready) {
       throw new HttpError(409, `Preparation is not ready. Missing: ${preparation.missing.join(", ")}.`);
     }
+    if (!preparationRun && !state.preparationReviewed) throw new HttpError(409, "Review the preparation documents before writing.");
 
-    const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
-    const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
-    if (draftingProvider && draftingAuth === "api_key") {
-      const key = (await readApiKey(draftingProvider))
-        ?? process.env[draftingProvider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"];
+    const resumeProvider = preparationRun
+      ? state.engine.analysisProvider ?? state.engine.provider
+      : state.engine.draftingProvider ?? state.engine.provider;
+    const resumeAuth = preparationRun
+      ? state.engine.analysisAuthMethod ?? state.engine.authMethod
+      : state.engine.draftingAuthMethod ?? state.engine.authMethod;
+    if (resumeProvider && resumeAuth === "api_key") {
+      const key = (await readApiKey(resumeProvider))
+        ?? process.env[resumeProvider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"];
       if (key) {
-        const check = await verifyApiKey(draftingProvider, key);
+        const check = await verifyApiKey(resumeProvider, key);
         if (!check.ok) {
           res.status(409).json({ resumed: false, blockedBy: check });
           return;
@@ -2065,9 +2283,13 @@ export function createStudioApp() {
 
     // The first chapter that is not finished is where the work continues.
     const next = state.chapters.find((chapter) => chapter.status !== "approved");
-    const updated = await launchRuntime(slug, state, { chapter: next?.number ?? null });
+    const updated = await launchRuntime(slug, state, {
+      chapter: preparationRun ? null : next?.number ?? null,
+      role: preparationRun ? "analysis" : "drafting",
+      note: preparationRun ? "PREPARATION_REPAIR: continue preparing the package. Do not draft prose." : undefined
+    });
 
-    res.json({ resumed: true, resumeAt: next?.number ?? null, state: updated });
+    res.json({ resumed: true, resumeAt: next?.number ?? null, state: updated, runtime: updated.runtime, runtimeLabel: updated.runtimeLabel, model: updated.model });
   }));
 
   app.post("/api/chapters/:number/status", route(async (req, res) => {
@@ -2178,13 +2400,14 @@ const requiredPreparationArtifacts = [
   "preparation-manifest.json"
 ];
 
-function preparationStatus(slug: string): { ready: boolean; missing: string[]; present: string[] } {
+function preparationStatus(slug: string): { ready: boolean; missing: string[]; present: string[]; artifactDirectory: string } {
   const artifacts = workspacePaths(slug).artifacts;
   const present = requiredPreparationArtifacts.filter((name) => existsSync(path.join(artifacts, name)));
   return {
     ready: present.length === requiredPreparationArtifacts.length,
     missing: requiredPreparationArtifacts.filter((name) => !present.includes(name)),
-    present
+    present,
+    artifactDirectory: `workspaces/${slug}/artifacts/`
   };
 }
 
@@ -2197,11 +2420,14 @@ function sourceKinds(classification: { kind: SourceKind; suggestedKinds?: Source
   return [...kinds];
 }
 
+function normalizeSeriesOrder(order: string[] | undefined, sources: SelectedSource[]): string[] {
+  const seriesIds = sources.filter((source) => source.kinds.includes("past_book")).map((source) => source.driveId);
+  const existing = (order ?? []).filter((id) => seriesIds.includes(id));
+  return [...existing, ...seriesIds.filter((id) => !existing.includes(id))];
+}
+
 /** Minimum prose for a useful style measurement. */
 const minimumStyleWords = 2000;
-
-/** Minimum material for a useful reference set. */
-const minimumReferenceWords = 1000;
 
 export interface SourceRequirement {
   ok: boolean;
@@ -2214,19 +2440,18 @@ export interface SourceRequirement {
 export interface SourcesCheck {
   ok: boolean;
   style: SourceRequirement;
-  references: SourceRequirement;
-  /** Style is being learned from someone else's prose. */
+  plot: SourceRequirement;
+  /** Style is being learned from voice references without a series book among them. */
   fromReference: boolean;
 }
 
-/** Validate style and reference source requirements. */
+/** Validate the two source requirements that block the writing workflow. */
 export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
-  const own = sources.filter((source) => source.kinds?.includes("past_book"));
-  const references = sources.filter((source) => source.kinds?.includes("reference_book"));
-  const planning = sources.filter((source) => source.kinds?.some((kind) => ["characters", "timeline", "world", "plot", "notes"].includes(kind)));
-  const referenceMaterial = references.length > 0 ? references : planning;
-  const styleSources = own.length > 0 ? own : references;
-  const fromReference = own.length === 0 && references.length > 0;
+  const seriesBooks = sources.filter((source) => source.kinds?.includes("past_book"));
+  const voiceReferences = sources.filter((source) => isVoiceReference(source.kinds, source.voiceReferenceConfirmed));
+  const plotSources = sources.filter((source) => source.kinds?.includes("plot"));
+  const styleSources = voiceReferences;
+  const fromReference = styleSources.length > 0 && seriesBooks.length === 0;
 
   const words = (list: SelectedSource[]) => list.reduce((total, s) => total + (s.wordCount ?? 0), 0);
 
@@ -2235,33 +2460,27 @@ export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
     documents: styleSources.length,
     words: styleWords,
     minWords: minimumStyleWords,
-    ok: own.length === 0 || styleWords >= minimumStyleWords,
+    ok: styleSources.length > 0 && styleWords >= minimumStyleWords,
       reason:
-        own.length === 0
-        ? "No past book is marked as the author's style source. Drafting can continue without a measured style corpus."
+        styleSources.length === 0
+        ? "Mark at least one Voice reference with 2,000 or more words."
         : styleWords < minimumStyleWords
           ? `Only ${styleWords.toLocaleString()} words to learn the voice from. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by.`
           : ""
   };
 
-  const referenceWords = words(referenceMaterial);
-  const referenceRequirement: SourceRequirement = {
-    documents: referenceMaterial.length,
-    words: referenceWords,
-    minWords: references.length > 0 ? minimumReferenceWords : 1,
-    ok: referenceMaterial.length > 0 && (references.length === 0 || referenceWords >= minimumReferenceWords),
-    reason:
-      referenceMaterial.length === 0
-        ? "No plan, timeline, character, world, note, or reference-book material has been selected yet."
-        : referenceWords < minimumReferenceWords
-          ? `Only ${referenceWords.toLocaleString()} words of reference material. Below about ${minimumReferenceWords.toLocaleString()} there is little for the book to draw on.`
-          : ""
+  const plotRequirement: SourceRequirement = {
+    documents: plotSources.length,
+    words: words(plotSources),
+    minWords: 1,
+    ok: plotSources.length > 0,
+    reason: plotSources.length === 0 ? "Mark at least one Plot & outline document." : ""
   };
 
   return {
-    ok: style.ok && referenceRequirement.ok,
+    ok: style.ok && plotRequirement.ok,
     style,
-    references: referenceRequirement,
+    plot: plotRequirement,
     fromReference
   };
 }

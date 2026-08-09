@@ -20,12 +20,7 @@ export async function generateDocx(slug: string): Promise<GenerateDocxResult> {
   }
 
   const markdown = await readFile(inputPath, "utf8");
-  const doc = new Document({
-    sections: [{ properties: {}, children: markdownToParagraphs(markdown) }]
-  });
-
-  await mkdir(paths.final, { recursive: true });
-  await writeFile(outputPath, await Packer.toBuffer(doc));
+  await generateMarkdownDocx(markdown, outputPath);
 
   await appendLog(slug, "audit", {
     timestamp: new Date().toISOString(),
@@ -37,6 +32,14 @@ export async function generateDocx(slug: string): Promise<GenerateDocxResult> {
   });
 
   return { inputPath, outputPath };
+}
+
+export async function generateMarkdownDocx(markdown: string, outputPath: string): Promise<void> {
+  const doc = new Document({
+    sections: [{ properties: {}, children: markdownToParagraphs(markdown) }]
+  });
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, await Packer.toBuffer(doc));
 }
 
 function markdownToParagraphs(markdown: string): Paragraph[] {
