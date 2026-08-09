@@ -36,13 +36,13 @@
     font-family: var(--sans); font-size: 14px; line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
-  .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+  .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
 
   /* --- sidebar --- */
   aside {
     background: var(--surface); border-right: 1px solid var(--border);
     padding: 18px 12px; display: flex; flex-direction: column; gap: 4px;
-    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    position: sticky; top: 0; width: 232px; min-width: 232px; height: 100vh; overflow-y: auto;
   }
   .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 14px; }
   .brand b { font-size: 15px; letter-spacing: -0.01em; }
@@ -72,7 +72,7 @@
   .navgroup-toggle:hover { color:var(--text); }
 
   /* --- main --- */
-  main { padding: 26px 32px 80px; max-width: 1080px; }
+  main { min-width: 0; width: 100%; padding: 26px 32px 80px; max-width: 1080px; }
   .verline { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
   .ver { color: var(--faint); font-size: 10.5px; font-family: var(--mono); }
   .newver { width: 15px; height: 15px; border-radius: 50%; border: none; cursor: pointer;
@@ -271,7 +271,7 @@
   code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
   @media (max-width: 760px) {
     .app { grid-template-columns: 1fr; }
-    aside { position: static; height: auto; flex-direction: row; overflow-x: auto; }
+    aside { position: static; width: 100%; min-width: 0; height: auto; flex-direction: row; overflow-x: auto; }
     main { padding: 18px; }
   }
 </style>
