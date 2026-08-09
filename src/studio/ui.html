@@ -1129,14 +1129,6 @@ function viewConnect() {
         <code>https://www.googleapis.com/auth/drive.file</code> and restart. Browsing stops working and you
         paste folder links instead.</p></div></div>` : ""}
 
-    <div class="card">
-      <b>Upload planning material instead</b>
-      <p class="sub" style="margin:6px 0 10px">Use this for a plan, timeline, character sheet, outline or notes on this computer. Files are copied into this book's private workspace.</p>
-      <input id="local-sources" type="file" multiple accept=".txt,.md,.markdown,.rtf,.html,.csv,.json" hidden onchange="showSelectedFiles(this)" />
-      <div class="row" style="margin-top:10px"><label class="file-button" for="local-sources">Choose file</label><span id="selected-files" class="hint">No file selected</span></div>
-      <div class="row" style="margin-top:10px"><button onclick="uploadSources(this)">Continue</button></div>
-    </div>
-
     ${next === "ready" ? `<div class="card"><b>Select sources</b>
        <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
        notes, timelines and references.</p>
@@ -1150,8 +1142,16 @@ function viewConnect() {
          <button class="ghost" onclick="checkDrive(this)">Check again</button>
          <button class="text-link" onclick="showDriveRecovery = false; render()">Hide</button></div>
        <div id="authlink" class="hint" style="margin-top:10px"></div>
-     </div>` : ""}` : ""}
-  `}`;
+      </div>` : ""}` : ""}
+
+    <div class="card">
+      <b>Upload planning material instead</b>
+      <p class="sub" style="margin:6px 0 10px">Use this for a plan, timeline, character sheet, outline or notes on this computer. Files are copied into this book's private workspace.</p>
+      <input id="local-sources" type="file" multiple accept=".txt,.md,.markdown,.rtf,.html,.csv,.json" hidden onchange="showSelectedFiles(this)" />
+      <div class="row" style="margin-top:10px"><label class="file-button" for="local-sources">Choose file</label><span id="selected-files" class="hint">No file selected</span></div>
+      <div class="row" style="margin-top:10px"><button onclick="uploadSources(this)">Continue</button></div>
+    </div>
+   `}`;
 }
 
 async function connectDrive(btn) {

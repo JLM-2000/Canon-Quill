@@ -140,6 +140,7 @@ describe("studio api", () => {
     expect(html).toContain("Choose file");
     expect(html).toContain('id="selected-files"');
     expect(html).not.toContain("Can't connect?");
+    expect(html.indexOf("Select sources")).toBeLessThan(html.indexOf("Upload planning material instead"));
     expect(html).toContain("credentialsByRole");
     expect(html).toContain("Analysis and outlines");
     expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
