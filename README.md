@@ -9,7 +9,7 @@ npm run setup
 npm run studio
 ```
 
-It prints the URL and opens your browser. In VS Code, press **F5** and pick **Studio**.
+It prints the URL and opens your browser. In VS Code, press **F5** and pick **Studio**. For a terminal-only launch, pick **Studio (run in terminal)**. The debugger requires Node 20.19+ in the VS Code host; when using WSL, open the folder with the Remote-WSL extension so breakpoints use the WSL Node installation.
 
 Works with **Claude Code** (`.claude/agents/`) or **OpenCode** (`.opencode/agents/`) as the writing runtime, on an Anthropic or OpenAI model, authenticated by subscription or API key. You choose in the Studio.
 

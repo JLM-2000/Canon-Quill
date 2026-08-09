@@ -48,7 +48,14 @@ next to the author's actual prose. Load all four, in this order:
    Concrete targets: mean sentence length, fragment rate, dialogue share, tag
    habits, adverb and filter-verb rates.
 4. **Canon**, character, world and plot bibles, and the chapter plan entry.
-5. **The continuation brief**, `GET /api/manuscript/brief`. Returns 404 when
+5. **The approved preparation package**, including `project-brief.md`,
+   `book-bible.md`, `character-bible.md`, `plot-bible.md`, `chapter-plan.md`,
+   and `validation-rubric.md` under `workspaces/<book>/artifacts/`. These are the
+   target book's preparation contract.
+6. **Author decisions**, `workspaces/<book>/artifacts/decision-log.md`. This is
+   the complete question-and-answer record. Treat answered author decisions as
+   binding, and do not ask again for something already answered there.
+7. **The continuation brief**, `GET /api/manuscript/brief`. Returns 404 when
    the book is being written from scratch, which is the normal case. When it
    returns a brief, the book is already part-written and you are adding to
    someone's work in progress:
@@ -72,13 +79,13 @@ next to the author's actual prose. Load all four, in this order:
    If the author chose to write into a separate document, still match the
    conventions and the continuation point; only the destination differs.
 
-6. **Pending instructions from the author**, `GET /api/directions`. These are
+8. **Pending instructions from the author**, `GET /api/directions`. These are
    corrections and changes of direction given since the last chapter. Apply
    every one whose scope is `book`, plus any scoped to this chapter, and mark
    each applied with `POST /api/directions/<id>/applied` once you have. They
    outrank the chapter plan where the two disagree: the plan was written
    earlier and the author has since said otherwise.
-7. **The chapter conversation**, `GET /api/chapters/<n>/chat`. Treat every
+9. **The chapter conversation**, `GET /api/chapters/<n>/chat`. Treat every
    author message as a concrete brief: required events, important details,
    dialogue intentions, emotional turns, and deliberate omissions. The chat
    supplements the approved plan; it does not permit contradicting canon.

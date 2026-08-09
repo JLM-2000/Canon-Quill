@@ -28,6 +28,13 @@ async function call(path: string, init?: { method?: string; body?: unknown }) {
   return { status: response.status, body: await response.json().catch(() => ({})) as any };
 }
 
+async function seedPreparationPackage() {
+  const files = ["project-brief.md", "book-bible.md", "character-bible.md", "world-bible.md", "plot-bible.md", "style-guide.md", "chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"];
+  const artifacts = workspacePaths("test-book").artifacts;
+  await mkdir(artifacts, { recursive: true });
+  await Promise.all(files.map((name) => writeFile(path.join(artifacts, name), name.endsWith(".json") ? "{}" : `# ${name}\n`, "utf8")));
+}
+
 beforeEach(async () => {
   await rm(workspacesRoot(), { recursive: true, force: true });
   await rm(path.join(process.cwd(), ".auth", "credentials.json"), { force: true });
@@ -146,6 +153,10 @@ describe("studio api", () => {
     expect(html.indexOf("Select sources")).toBeLessThan(html.indexOf("Upload from this computer"));
     expect(html).toContain("credentialsByRole");
     expect(html).toContain("Analysis and outlines");
+    expect(html).toContain("Main cast");
+    expect(html).toContain("Change existing draft");
+    expect(html).toContain("Use this existing draft?");
+    expect(html).toContain("Start without an existing draft");
     expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
     expect(html).toContain('route = "start"; render();');
     expect(html).not.toContain("The Tide House");
@@ -194,6 +205,35 @@ describe("studio api", () => {
     expect(body.shape).toBe("series");
     expect(body.draftingMode).toBe("whole_book");
     expect(body.intake.audience).toBe("adult");
+  });
+
+  it("confirms project shape on the first request and can reset there", async () => {
+    await call("/api/project/start", {
+      method: "POST",
+      body: { projectStart: "from_scratch", startingBrief: "A detailed premise about a return home, a buried family secret, and the choice that changes the protagonist's future." }
+    });
+    await call("/api/engine", {
+      method: "PATCH",
+      body: {
+        provider: "anthropic",
+        authMethod: "subscription",
+        analysisProvider: "anthropic",
+        analysisAuthMethod: "subscription",
+        draftingProvider: "anthropic",
+        draftingAuthMethod: "subscription"
+      }
+    });
+    await call("/api/engine/continue", { method: "POST" });
+    await call("/api/project", { method: "PATCH", body: { shape: "series", draftingMode: "whole_book" } });
+    const continued = await call("/api/project/continue", { method: "POST" });
+    expect(continued.body.projectShapeReviewed).toBe(true);
+    expect(continued.body.phase).toBe("draft");
+
+    const reset = await call("/api/project/reset-to-shape", { method: "POST" });
+    expect(reset.body.projectShapeReviewed).toBe(false);
+    expect(reset.body.shape).toBeNull();
+    expect(reset.body.draftingMode).toBeNull();
+    expect(reset.body.phase).toBe("intake");
   });
 
   it("asks for the starting point before engine setup", async () => {
@@ -497,6 +537,26 @@ describe("studio api", () => {
     expect(result.status).toBe(200);
     expect(result.body.manuscript).toBeNull();
     expect(result.body.manuscriptReviewed).toBe(true);
+  });
+
+  it("writes phase milestones and the workspace decision log", async () => {
+    await call("/api/project/start", {
+      method: "POST",
+      body: {
+        projectStart: "from_scratch",
+        startingBrief: "A detailed premise about a student returning home to uncover a family secret and decide what kind of life comes next."
+      }
+    });
+    await call("/api/intake/analyse", { method: "POST" });
+
+    const paths = workspacePaths("test-book");
+    const decisionLog = await readFile(path.join(paths.artifacts, "decision-log.md"), "utf8");
+    const phaseLog = JSON.parse(await readFile(path.join(paths.logs, "phase-log.json"), "utf8")) as Array<{ event: string }>;
+    const errorLog = JSON.parse(await readFile(path.join(paths.logs, "errors-log.json"), "utf8")) as unknown[];
+    expect(decisionLog).toContain("# Author decision log");
+    expect(decisionLog).toContain("Planned decisions");
+    expect(phaseLog.map((entry) => entry.event)).toEqual(expect.arrayContaining(["entry_confirmed", "analysis_complete"]));
+    expect(errorLog).toEqual([]);
   });
 
   it("persists source and target selections with their labels", async () => {
@@ -963,6 +1023,9 @@ describe("editing and rebuilding the style corpus", () => {
       body: { notes: "My dialogue runs shorter than book one suggests." }
     });
     expect(body.styleCorpus.notes).toMatch(/dialogue runs shorter/);
+    expect(body.styleCorpus.documentStats[0].wordCount).toBeGreaterThan(0);
+    expect(body.styleCorpus.documentStats[0].chapterCount).toBe(1);
+    expect(body.styleCorpus.documentStats[0].wordsPerChapter).toHaveLength(1);
 
     const fingerprint = await readFile(path.join(workspacePaths("test-book").artifacts, "style-fingerprint.md"), "utf8");
     expect(fingerprint).toMatch(/## Author notes on this voice/);
@@ -1084,6 +1147,21 @@ describe("run halt and resume", () => {
     expect(result.status).toBe(409);
   });
 
+  it("reports a missing preparation package before starting a run", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.chapters = [{ number: 1, title: "One", synopsis: "", status: "planned", issues: [] }];
+    state.writingConfirmed = true;
+    state.engine = { ...state.engine, provider: "anthropic", authMethod: "subscription", draftingProvider: "anthropic", draftingAuthMethod: "subscription" };
+    await save(state);
+
+    const prep = await call("/api/preparation/status");
+    expect(prep.body.ready).toBe(false);
+    const result = await call("/api/run/start", { method: "POST" });
+    expect(result.status).toBe(409);
+    expect(result.body.error).toMatch(/Preparation is not ready/);
+  });
+
   it("records a halt with its reason and the chapter it stopped on", async () => {
     await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }] } });
     const { body } = await call("/api/run/halt", {
@@ -1112,6 +1190,7 @@ describe("run halt and resume", () => {
   });
 
   it("resumes at the first chapter that is not approved", async () => {
+    await seedPreparationPackage();
     await call("/api/chapters", {
       method: "PUT",
       body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }, { number: 3, title: "Three" }] }
@@ -1135,6 +1214,7 @@ describe("run halt and resume", () => {
 
 describe("starting the writing run", () => {
   async function ready() {
+    await seedPreparationPackage();
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "One" }] } });
     const state = await load("test-book");

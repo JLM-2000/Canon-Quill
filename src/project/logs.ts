@@ -21,6 +21,8 @@ export interface ErrorLogEntry extends BaseLogEntry {
   errorName?: string;
   errorMessage: string;
   stack?: string;
+  resolvedAt?: string;
+  resolution?: string;
 }
 
 const logFiles: Record<LogKind, string> = {
@@ -52,6 +54,22 @@ export async function appendLog(slug: string, kind: LogKind, entry: BaseLogEntry
 
 export async function readLog(slug: string, kind: LogKind): Promise<unknown[]> {
   return readJsonArray(logPath(slug, kind));
+}
+
+export async function resolveErrors(slug: string, matches: (entry: ErrorLogEntry) => boolean, resolution: string): Promise<number> {
+  await initializeLogs(slug);
+  const filePath = logPath(slug, "error");
+  const entries = await readJsonArray(filePath) as ErrorLogEntry[];
+  const resolvedAt = new Date().toISOString();
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.resolvedAt || !matches(entry)) continue;
+    entry.resolvedAt = resolvedAt;
+    entry.resolution = resolution;
+    count += 1;
+  }
+  if (count) await writeFile(filePath, JSON.stringify(entries, null, 2));
+  return count;
 }
 
 export async function logError(slug: string, error: unknown, context: Partial<BaseLogEntry> = {}): Promise<void> {

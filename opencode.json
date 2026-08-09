@@ -12,11 +12,6 @@
       "type": "local",
       "command": ["node", "dist/mcp/drive-server.js"],
       "enabled": true,
-      "environment": {
-        "GOOGLE_OAUTH_CLIENT_JSON": "{env:GOOGLE_OAUTH_CLIENT_JSON}",
-        "CANON_QUILL_DRIVE_SCOPES": "{env:CANON_QUILL_DRIVE_SCOPES}",
-        "CANON_QUILL_ALLOW_OVERWRITE": "{env:CANON_QUILL_ALLOW_OVERWRITE}"
-      },
       "timeout": 30000
     }
   },

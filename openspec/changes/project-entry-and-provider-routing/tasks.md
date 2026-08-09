@@ -10,6 +10,6 @@
 - [x] Add explicit post-question writing confirmation endpoint and modal.
 - [x] Add collapsible navigation groups and automatic collapse after confirmation.
 - [x] Add tests for new state, API, source, provider, chat, and gate behavior.
-- [ ] Run full build, OpenSpec/workflow validation, and all tests.
+- [x] Run full build, OpenSpec/workflow validation, and all tests.
 - [ ] Run security review for upload limits, credential responses, and Drive writes.
 - [ ] Run end-to-end handoff test from project entry through chapter guidance.

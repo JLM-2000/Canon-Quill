@@ -18,7 +18,8 @@ import {
   hasAnalysisEdits,
   type AnalysisEdits,
   type FindingKey,
-  type IntakeQuestionPlan
+  type IntakeQuestionPlan,
+  type ProjectAnalysis
 } from "../analysis/intake.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
 import { detectNarration, narrationOptions, povLabel, povOptions, tenseLabel, tenseOptions } from "../style/narration.js";
@@ -62,7 +63,7 @@ import {
   touchProject
 } from "../workspace/registry.js";
 import { workspacePaths } from "../workspace/paths.js";
-import { appendLog } from "../project/logs.js";
+import { appendLog, logError, resolveErrors } from "../project/logs.js";
 import { checkCredentials, defaultModels, loadCatalog, type ProviderId } from "./engine.js";
 import { applyUpdate, getVersionInfo } from "./updates.js";
 import { deleteApiKey, maskKey, readApiKey, saveApiKey, verifyApiKey } from "./credentials.js";
@@ -95,6 +96,81 @@ export function createStudioApp() {
     return slug;
   }
 
+  /** Keep the author decisions in one workspace artifact for every downstream agent. */
+  async function writeDecisionLog(slug: string): Promise<void> {
+    const state = await loadState(slug);
+    const paths = workspacePaths(slug);
+    const planned = state.projectAnalysis.questionPlan || [];
+    const questions = state.questions || [];
+    const conversation = state.conversation || [];
+    const lines = [
+      "# Author decision log",
+      "",
+      "This is the author-facing intake record. Author answers outrank source inference and model assumptions.",
+      "Read it with project-analysis.json before making preparation or drafting decisions.",
+      "",
+      "## Planned decisions",
+      "",
+      ...(planned.length
+        ? planned.map((question) => `- **${question.key}**: ${question.question} (${question.blocking ? "blocking" : "advisory"})`)
+        : ["No unresolved decisions were identified by the deterministic analysis."]),
+      "",
+      "## Questions and answers",
+      "",
+      ...(questions.length
+        ? questions.flatMap((question) => [
+            `### ${question.key || question.id}`,
+            "",
+            `**Question:** ${question.question}`,
+            `**Answer:** ${question.answer ?? "Unanswered"}`,
+            ""
+          ])
+        : ["No questions have been asked.", ""]),
+      "## Intake conversation",
+      "",
+      ...(conversation.length
+        ? conversation.map((message) => `- **${message.role}**: ${message.text}`)
+        : ["No freeform intake messages."]),
+      ""
+    ];
+    await mkdir(paths.artifacts, { recursive: true });
+    await writeFile(path.join(paths.artifacts, "decision-log.md"), lines.join("\n"), "utf8");
+  }
+
+  async function logPhase(slug: string, stage: string, stageName: string, event: string, data?: unknown): Promise<void> {
+    await appendLog(slug, "phase", {
+      timestamp: new Date().toISOString(),
+      stage,
+      stageName,
+      agent: "studio",
+      event,
+      data
+    });
+  }
+
+  async function resolveFixedRuntimeErrors(slug: string): Promise<void> {
+    try {
+      JSON.parse(await readFile(path.join(process.cwd(), "opencode.json"), "utf8"));
+    } catch {
+      return;
+    }
+    const resolved = await resolveErrors(
+      slug,
+      (entry) => /InvalidEscapeCharacter|opencode\.json.*not valid JSON/i.test(`${entry.errorMessage} ${entry.stack ?? ""}`),
+      "opencode.json now validates successfully; the historical configuration failure is resolved."
+    );
+    if (resolved) {
+      await appendLog(slug, "audit", {
+        timestamp: new Date().toISOString(),
+        stage: "chapter_drafting",
+        stageName: "Drafting",
+        agent: "studio",
+        event: "runtime_configuration_resolved",
+        data: { resolvedErrors: resolved }
+      });
+    }
+  }
+
   async function refreshExistingManuscript(slug: string, driveId: string) {
     const meta = await drive.getMetadata(driveId);
     if (meta.mimeType === "application/vnd.google-apps.folder") {
@@ -104,7 +180,8 @@ export function createStudioApp() {
     const text = await drive.readFileText(driveId);
     const analysis = analyseManuscript(text);
     const prior = await loadState(slug);
-    const notes = prior.manuscript?.driveId === driveId ? prior.manuscript.notes ?? "" : "";
+    const sameDraft = prior.manuscript?.driveId === driveId;
+    const notes = sameDraft ? prior.manuscript?.notes ?? "" : "";
     const paths = workspacePaths(slug);
     await mkdir(paths.artifacts, { recursive: true });
     await writeFile(
@@ -130,11 +207,15 @@ export function createStudioApp() {
         completenessReason: analysis.completenessReason,
         backMatterHeading: analysis.backMatter?.heading,
         backMatterWords: analysis.backMatter?.wordCount,
+        epilogueHeading: analysis.epilogue?.heading,
+        epilogueWords: analysis.epilogue?.wordCount,
         notes,
         analysedAt: new Date().toISOString()
       };
-      current.manuscriptReviewed = false;
-      current.writingConfirmed = false;
+      if (!sameDraft) {
+        current.manuscriptReviewed = false;
+        current.writingConfirmed = false;
+      }
     });
 
     return { analysis, state: withDerived(state) };
@@ -162,6 +243,7 @@ export function createStudioApp() {
       draftingMode: state.draftingMode,
       intake,
       existingDraft: Boolean(state.manuscript),
+      pastBookCount: documents.filter((document) => document.kinds.includes("past_book")).length,
       authorNotes: state.projectAnalysis.authorNotes ?? ""
     };
     const corrected = applyAnalysisEdits(analyseProjectMaterial(documents, context), edits);
@@ -190,6 +272,11 @@ export function createStudioApp() {
       apply("audience", audience, edits.findings?.audience !== undefined);
       apply("spice", intimacy, edits.findings?.intimacy !== undefined);
     });
+    await writeDecisionLog(slug);
+    await logPhase(slug, "intake_analysis", "Project analysis", "analysis_complete", {
+      documents: analysis.documentsRead,
+      questions: analysis.questionPlan.length
+    });
     return { analysis, state: withDerived(next) };
   }
 
@@ -200,6 +287,7 @@ export function createStudioApp() {
       pendingOutcome = null;
     }
     explicitlyHalted.delete(slug);
+    await resolveFixedRuntimeErrors(slug);
     const provider = state.engine.draftingProvider ?? state.engine.provider;
     if (!provider) throw new HttpError(400, "Choose a writing engine first.");
 
@@ -322,7 +410,10 @@ export function createStudioApp() {
    */
   async function reconcileRun(slug: string): Promise<StudioState> {
     const state = await loadState(slug);
-    if (state.run.status !== "running" || isRunning()) return state;
+    const phaseNeedsRepair = state.phase !== derivePhase(state);
+    if (state.run.status !== "running" || isRunning()) {
+      return phaseNeedsRepair ? updateState(slug, (current) => { current.phase = derivePhase(current); }) : state;
+    }
     return updateState(slug, (current) => {
       current.run = {
         ...current.run,
@@ -394,11 +485,24 @@ export function createStudioApp() {
   }
 
   const route = (handler: (req: express.Request, res: express.Response) => Promise<void>) =>
-    (req: express.Request, res: express.Response) => {
-      handler(req, res).catch((error: unknown) => {
+    async (req: express.Request, res: express.Response) => {
+      try {
+        await handler(req, res);
+      } catch (error: unknown) {
         const status = error instanceof HttpError ? error.status : 500;
+        const slug = await activeSlug().catch(() => null);
+        if (slug) {
+          await logError(slug, new Error(redactSensitiveText(message(error))), {
+            stage: "studio_api",
+            stageName: "Studio API",
+            agent: "studio",
+            event: "request_failed",
+            data: { method: req.method, path: req.path, status }
+          }).catch(() => undefined);
+        }
+        if (res.headersSent) return;
         res.status(status).json({ error: message(error) });
-      });
+      }
     };
 
   // --- UI -------------------------------------------------------------------
@@ -522,6 +626,15 @@ export function createStudioApp() {
         current.drive.targetFolderName = null;
       }
     });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "project_start",
+      stageName: "Project entry",
+      agent: "author",
+      event: "project_start_selected",
+      data: { projectStart }
+    });
+    await logPhase(slug, "project_start", "Project entry", "entry_confirmed", { projectStart });
     res.json(withDerived(state));
   }));
 
@@ -579,6 +692,46 @@ export function createStudioApp() {
       if (!current.shape || !current.draftingMode) throw new HttpError(400, "Choose a book shape and drafting mode first.");
       current.projectShapeReviewed = true;
     });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "project_shape",
+      stageName: "Project shape",
+      agent: "author",
+      event: "project_shape_confirmed",
+      data: { shape: state.shape, draftingMode: state.draftingMode }
+    });
+    await logPhase(slug, "project_shape", "Project shape", "shape_confirmed", { shape: state.shape, draftingMode: state.draftingMode });
+    res.json(withDerived(state));
+  }));
+
+  app.post("/api/project/reset-to-shape", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      current.shape = null;
+      current.draftingMode = null;
+      current.projectShapeReviewed = false;
+      current.manuscript = null;
+      current.manuscriptReviewed = false;
+      current.questions = [];
+      current.conversation = [];
+      current.conversationStartedAt = null;
+      current.writingConfirmed = false;
+      resetAnalysis(current);
+    });
+    try {
+      await unlink(path.join(workspacePaths(slug).artifacts, "project-analysis.json"));
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    await writeDecisionLog(slug);
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "project_shape",
+      stageName: "Project shape",
+      agent: "author",
+      event: "reset_to_project_shape"
+    });
+    await logPhase(slug, "project_shape", "Project shape", "reset_to_shape");
     res.json(withDerived(state));
   }));
 
@@ -862,9 +1015,7 @@ export function createStudioApp() {
         path: `/${name}`,
         mimeType: mimeType || "text/plain",
         isFolder: false,
-        kinds: classification.kind === "past_book"
-          ? ["past_book", "reference_book"]
-          : [String(classification.kind) === "unclassified" ? "notes" : classification.kind],
+        kinds: sourceKinds(classification),
         wordCount: computeMetrics(text).wordCount,
         classification
       };
@@ -927,10 +1078,7 @@ export function createStudioApp() {
             mimeType: node.mimeType,
             isFolder: false,
             // Own past books supply both style and canon.
-            kinds:
-              classification.kind === "past_book"
-                ? ["past_book", "reference_book"]
-                : [classification.kind],
+            kinds: sourceKinds(classification),
             wordCount: computeMetrics(text).wordCount,
             classification
           },
@@ -965,6 +1113,7 @@ export function createStudioApp() {
       event: "sources_indexed",
       data: { count: found.length }
     });
+    await logPhase(slug, "source_analysis", "Source analysis", "sources_indexed", { count: found.length });
 
     res.json(withDerived(next));
   }));
@@ -1071,7 +1220,19 @@ export function createStudioApp() {
       if (text) documents.push({ source: source.name, text });
     }
 
-    const corpus: StyleCorpus = { ...buildCorpus(state.projectName, documents), notes };
+    const corpus: StyleCorpus = {
+      ...buildCorpus(state.projectName, documents),
+      notes,
+      documentStats: own.length ? documents.map((document) => {
+        const analysis = analyseManuscript(document.text);
+        return {
+          source: document.source,
+          wordCount: analysis.storyWords,
+          chapterCount: analysis.chapters.length,
+          wordsPerChapter: analysis.chapters.map((chapter) => chapter.wordCount)
+        };
+      }) : []
+    };
     const paths = workspacePaths(slug);
     await mkdir(paths.artifacts, { recursive: true });
     await writeFile(path.join(paths.artifacts, "style-corpus.json"), JSON.stringify(corpus, null, 2), "utf8");
@@ -1088,7 +1249,8 @@ export function createStudioApp() {
         continuedAt: current.styleCorpus.continuedAt,
         fromReference: own.length === 0,
         excluded,
-        notes
+        notes,
+        documentStats: corpus.documentStats ?? []
       };
     });
 
@@ -1162,6 +1324,23 @@ export function createStudioApp() {
     });
   }));
 
+  app.get("/api/preparation/status", route(async (_req, res) => {
+    const slug = await requireSlug();
+    res.json(preparationStatus(slug));
+  }));
+
+  app.post("/api/preparation/run", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const current = await loadState(slug);
+    const preparation = preparationStatus(slug);
+    if (preparation.ready) throw new HttpError(409, "Preparation is already ready.");
+    const started = await launchRuntime(slug, current, {
+      chapter: null,
+      note: "PREPARATION_REPAIR: build the missing reference-extraction and preparation artifacts from the existing project analysis, decision log, cached sources, and style artifacts. Do not draft prose. Stop at preflight review once the package is complete."
+    });
+    res.json(started);
+  }));
+
   app.post("/api/intake/analyse", route(async (req, res) => {
     const slug = await requireSlug();
     const notes = req.body?.notes;
@@ -1208,8 +1387,46 @@ export function createStudioApp() {
       edits.findings = findings;
     }
     if (!hasAnalysisEdits(edits)) throw new HttpError(400, "No corrections were sent.");
-    await updateState(slug, (current) => void (current.projectAnalysis.edits = edits));
-    res.json(await analyseProject(slug));
+    const measured = {
+      ...state.projectAnalysis,
+      analysedAt: state.projectAnalysis.analysedAt ?? new Date().toISOString()
+    } as ProjectAnalysis;
+    const intake = { ...state.intake };
+    const applyIntake = (key: string, value: string | null | undefined) => {
+      if (value) intake[key] = value;
+      else delete intake[key];
+    };
+    if (edits.genre !== undefined) applyIntake("genre", edits.genre);
+    if (edits.subgenre !== undefined) applyIntake("subgenre", edits.subgenre);
+    if (edits.findings?.audience !== undefined) applyIntake("audience", edits.findings.audience.replace(/\s*\/\s*/g, "|"));
+    if (edits.findings?.intimacy !== undefined) applyIntake("spice", edits.findings.intimacy);
+    const corrected = deriveAnalysisGaps(applyAnalysisEdits(measured, edits), {
+      shape: state.shape,
+      draftingMode: state.draftingMode,
+      intake,
+      existingDraft: Boolean(state.manuscript),
+      pastBookCount: state.sources.filter((source) => source.kinds.includes("past_book")).length,
+      authorNotes: state.projectAnalysis.authorNotes ?? ""
+    });
+    await mkdir(workspacePaths(slug).artifacts, { recursive: true });
+    await writeFile(path.join(workspacePaths(slug).artifacts, "project-analysis.json"), JSON.stringify(corrected, null, 2), "utf8");
+    const next = await updateState(slug, (current) => {
+      current.projectAnalysis = { ...corrected, completed: true, continuedAt: null };
+      current.intake = intake;
+      current.questions = [];
+      current.conversation = [];
+      current.conversationStartedAt = null;
+    });
+    await writeDecisionLog(slug);
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "intake_analysis",
+      stageName: "Project analysis",
+      agent: "author",
+      event: "analysis_corrections_saved",
+      data: { findings: Object.keys(edits.findings ?? {}), genre: edits.genre !== undefined, subgenre: edits.subgenre !== undefined }
+    });
+    res.json({ analysis: corrected, state: withDerived(next) });
   }));
 
   app.post("/api/intake/analysis/continue", route(async (_req, res) => {
@@ -1218,6 +1435,8 @@ export function createStudioApp() {
       if (!current.projectAnalysis.completed) throw new HttpError(400, "Finish project analysis first.");
       current.projectAnalysis.continuedAt = new Date().toISOString();
     });
+    await writeDecisionLog(slug);
+    await logPhase(slug, "intake_analysis", "Project analysis", "analysis_reviewed");
     res.json(withDerived(state));
   }));
 
@@ -1235,6 +1454,7 @@ export function createStudioApp() {
     } catch (error) {
       if (!isMissingFile(error)) throw error;
     }
+    await writeDecisionLog(slug);
     res.json(withDerived(state));
   }));
 
@@ -1249,6 +1469,8 @@ export function createStudioApp() {
         appendNextPlannedQuestion(current, startedAt);
       }
     });
+    await writeDecisionLog(slug);
+    await logPhase(slug, "intake", "Intake", "intake_started", { plannedQuestions: state.projectAnalysis.questionPlan.length });
     res.json(withDerived(state));
   }));
 
@@ -1282,6 +1504,15 @@ export function createStudioApp() {
         createdAt: question.askedAt
       });
     });
+    await writeDecisionLog(slug);
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "intake",
+      stageName: "Questions",
+      agent: question.askedBy,
+      event: "question_asked",
+      data: { key: question.key, blocking: question.blocking }
+    });
     res.status(201).json({ question, state: withDerived(state) });
   }));
 
@@ -1306,6 +1537,15 @@ export function createStudioApp() {
       });
       appendNextPlannedQuestion(current, question.answeredAt);
     });
+    await writeDecisionLog(slug);
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "intake",
+      stageName: "Questions",
+      agent: "author",
+      event: "question_answered",
+      data: { questionId: req.params.id }
+    });
     res.json(withDerived(state));
   }));
 
@@ -1322,6 +1562,15 @@ export function createStudioApp() {
         phase: "intake",
         createdAt: new Date().toISOString()
       });
+    });
+    await writeDecisionLog(slug);
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "intake",
+      stageName: "Questions",
+      agent: "author",
+      event: "conversation_message",
+      data: { messageLength: text.length }
     });
     res.status(201).json(withDerived(state));
   }));
@@ -1347,6 +1596,14 @@ export function createStudioApp() {
       current.conversationStartedAt ??= new Date().toISOString();
       current.writingConfirmed = true;
     });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "preflight",
+      stageName: "Preparation gate",
+      agent: "author",
+      event: "writing_confirmed"
+    });
+    await logPhase(slug, "preflight", "Preparation gate", "writing_unlocked");
     res.json(withDerived(state));
   }));
 
@@ -1566,6 +1823,13 @@ export function createStudioApp() {
       current.manuscriptReviewed = true;
       current.writingConfirmed = false;
     });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "existing_draft",
+      stageName: "Existing draft",
+      agent: "author",
+      event: "existing_draft_skipped"
+    });
     res.json(withDerived(state));
   }));
 
@@ -1677,6 +1941,14 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const current = await loadState(slug);
     requireWritingPhase(current);
+    if (!(current.engine.draftingProvider ?? current.engine.provider)) {
+      throw new HttpError(400, "Choose a writing engine first.");
+    }
+    await resolveFixedRuntimeErrors(slug);
+    const preparation = preparationStatus(slug);
+    if (!preparation.ready) {
+      throw new HttpError(409, `Preparation is not ready. Missing: ${preparation.missing.join(", ")}.`);
+    }
     const started = await launchRuntime(slug, current, {
       chapter: Number(req.body?.chapter) || null,
       note: typeof req.body?.note === "string" ? req.body.note : undefined
@@ -1771,6 +2043,11 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const state = await loadState(slug);
     requireWritingPhase(state);
+    await resolveFixedRuntimeErrors(slug);
+    const preparation = preparationStatus(slug);
+    if (!preparation.ready) {
+      throw new HttpError(409, `Preparation is not ready. Missing: ${preparation.missing.join(", ")}.`);
+    }
 
     const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
     const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
@@ -1887,6 +2164,37 @@ class HttpError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
   }
+}
+
+const requiredPreparationArtifacts = [
+  "project-brief.md",
+  "book-bible.md",
+  "character-bible.md",
+  "world-bible.md",
+  "plot-bible.md",
+  "style-guide.md",
+  "chapter-plan.md",
+  "validation-rubric.md",
+  "preparation-manifest.json"
+];
+
+function preparationStatus(slug: string): { ready: boolean; missing: string[]; present: string[] } {
+  const artifacts = workspacePaths(slug).artifacts;
+  const present = requiredPreparationArtifacts.filter((name) => existsSync(path.join(artifacts, name)));
+  return {
+    ready: present.length === requiredPreparationArtifacts.length,
+    missing: requiredPreparationArtifacts.filter((name) => !present.includes(name)),
+    present
+  };
+}
+
+function sourceKinds(classification: { kind: SourceKind; suggestedKinds?: SourceKind[] }): SourceKind[] {
+  const kinds = new Set<SourceKind>(classification.suggestedKinds?.length ? classification.suggestedKinds : [classification.kind]);
+  if (classification.kind === "past_book") {
+    kinds.add("past_book");
+    kinds.add("reference_book");
+  }
+  return [...kinds];
 }
 
 /** Minimum prose for a useful style measurement. */

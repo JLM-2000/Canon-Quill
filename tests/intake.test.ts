@@ -15,6 +15,16 @@ describe("project intake analysis", () => {
     expect(result.unknowns).not.toContain("genre and subgenre");
   });
 
+  it("does not call ordinary romance language fantasy", () => {
+    const result = analyseProjectMaterial([{
+      name: "Romance notes",
+      kinds: ["plot"],
+      text: "Premise: The magic of their first kiss changes how they see each other. They build a quiet life in the city."
+    }]);
+    expect(result.genre).toBe("Romance");
+    expect(result.subgenre).not.toBe("Fantasy romance");
+  });
+
   it("leaves an unsupported genre as an author question", () => {
     const result = analyseProjectMaterial([{ name: "Notes", text: "A woman waits beside a window." }]);
     expect(result.genre).toBeNull();
@@ -90,12 +100,86 @@ describe("project intake analysis", () => {
       }
     ]);
 
-    expect(result.findings.protagonist?.value).not.toMatch(/\b(?:The|You)\b/);
-    expect(result.findings.protagonist?.value).not.toMatch(/\b(?:And|But)\b/);
+    expect(result.findings.protagonist).toBeNull();
+    expect(result.findings.cast?.value).toMatch(/Rowan/);
+    expect(result.findings.cast?.value).toMatch(/Ellis/);
+    expect(result.findings.cast?.value).not.toMatch(/\b(?:The|You|And|But)\b/);
     expect(result.findings.relationships?.value).toMatch(/Rowan/);
     expect(result.findings.relationships?.value).toMatch(/Ellis/);
     expect(result.findings.relationships?.value).not.toMatch(/\b(?:And|But)\b/);
     expect(result.findings.relationships?.confidence).toBeLessThan(0.8);
+    expect(result.questionPlan.find((question) => question.key === "relationshipArc")?.question).not.toMatch(/\.,/);
+  });
+
+  it("does not promote dialogue interjections to cast members", () => {
+    const result = analyseProjectMaterial([{
+      name: "Prose Sample",
+      kinds: ["reference_book"],
+      text: "Chapter One\n\n\"Yeah,\" Rowan said. \"Okay,\" Ellis answered. Ellis moved away. There was no one else in the room. Rowan shut the door."
+    }]);
+
+    expect(result.findings.cast?.value).toMatch(/Rowan/);
+    expect(result.findings.cast?.value).toMatch(/Ellis/);
+    expect(result.findings.cast?.value).not.toMatch(/\b(?:Yeah|Okay|There)\b/);
+  });
+
+  it("reports an epilogue separately from the ending", () => {
+    const result = analyseProjectMaterial([{
+      name: "Book plan",
+      kinds: ["plot"],
+      text: "Ending: the couple chooses a quiet life together.\nEpilogue: Five years later, they open the bakery."
+    }]);
+
+    expect(result.findings.structure?.value).toMatch(/quiet life together/);
+    expect(result.findings.epilogue?.value).toBe("Present: Five years later, they open the bakery.");
+  });
+
+  it("reports a prologue separately and asks for book targets without past books", () => {
+    const result = analyseProjectMaterial([{
+      name: "Starting brief",
+      kinds: ["notes"],
+      text: "Prologue: Before the move, the promise is made. Premise: A student returns home to choose a different life."
+    }], { pastBookCount: 0 });
+
+    expect(result.findings.prologue?.value).toMatch(/Before the move/);
+    expect(result.questionPlan.map((question) => question.key)).toEqual(expect.arrayContaining([
+      "chapterWords", "chapterCount", "lengthTarget", "epilogue"
+    ]));
+    expect(result.questionPlan.map((question) => question.key)).not.toContain("prologue");
+  });
+
+  it("uses character documents to separate main cast from incidental named people", () => {
+    const result = analyseProjectMaterial([
+      { name: "Mara Voss", kinds: ["characters"], text: "Mara is the viewpoint character." },
+      { name: "Tess Arden", kinds: ["characters"], text: "Tess is Mara's closest friend." },
+      {
+        name: "Prior novel",
+        kinds: ["past_book"],
+        text: "Mara looked across the room at Tess. Tess nodded to Mara. A man named Noah waved from the doorway. The lights dimmed. His coat was still wet."
+      }
+    ]);
+
+    expect(result.findings.cast?.value).toBe("Mara, Tess");
+    expect(result.findings.cast?.value).not.toMatch(/Noah|The|His/);
+  });
+
+  it("recognizes an established couple from selected prior material", () => {
+    const result = analyseProjectMaterial([
+      {
+        name: "Series plan",
+        kinds: ["plot"],
+        text: "Character: Morgan. Character: Riley. Morgan and Riley are already a couple at the opening."
+      },
+      {
+        name: "Prior novel",
+        kinds: ["past_book"],
+        text: "Morgan kissed Riley before they went home. Riley was Morgan's boyfriend, and they were happy together."
+      }
+    ]);
+
+    expect(result.findings.relationships?.value).toMatch(/established as a romantic couple/);
+    expect(result.findings.relationships?.confidence).toBeGreaterThan(0.8);
+    expect(result.questionPlan.map((question) => question.key)).not.toContain("relationshipArc");
   });
 
   it("infers the lead from focus and arc evidence without hardcoding a cast", () => {

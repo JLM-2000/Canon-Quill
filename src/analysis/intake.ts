@@ -38,6 +38,8 @@ export interface IntakeContext {
   draftingMode?: string | null;
   intake?: Record<string, string>;
   existingDraft?: boolean;
+  /** Number of selected sources explicitly marked as the author's past books. */
+  pastBookCount?: number;
   /** Author notes for this run, read alongside the selected material. */
   authorNotes?: string;
 }
@@ -54,11 +56,14 @@ export interface ProjectAnalysis {
   findings: {
     premise: IntakeFinding | null;
     protagonist: IntakeFinding | null;
+    cast: IntakeFinding | null;
     relationships: IntakeFinding | null;
     centralConflict: IntakeFinding | null;
     setting: IntakeFinding | null;
     timeline: IntakeFinding | null;
     structure: IntakeFinding | null;
+    prologue: IntakeFinding | null;
+    epilogue: IntakeFinding | null;
     narration: IntakeFinding | null;
     audience: IntakeFinding | null;
     intimacy: IntakeFinding | null;
@@ -81,8 +86,8 @@ export interface AnalysisEdits {
 }
 
 export const findingKeys: FindingKey[] = [
-  "premise", "protagonist", "relationships", "centralConflict", "setting",
-  "timeline", "structure", "narration", "audience", "intimacy"
+  "premise", "protagonist", "cast", "relationships", "centralConflict", "setting",
+  "timeline", "structure", "prologue", "epilogue", "narration", "audience", "intimacy"
 ];
 
 export function hasAnalysisEdits(edits: AnalysisEdits | undefined): boolean {
@@ -142,11 +147,14 @@ export function analyseProjectMaterial(documents: IntakeDocument[], context: Int
   const premise = findPremise(targetDocuments);
   const names = extractNames(nonEmpty);
   const protagonist = findProtagonist(targetDocuments, names);
-  const relationships = findRelationships(targetDocuments, names, genre);
+  const cast = findCast(names);
+  const relationships = findRelationships(nonEmpty.filter(isRelationshipEvidenceDocument), names, genre);
   const centralConflict = findConflict(targetDocuments, genre, names);
   const setting = findSetting(nonEmpty);
   const timeline = findTimeline(targetDocuments, nonEmpty);
   const structure = findStructure(targetDocuments, nonEmpty);
+  const prologue = findPrologue(nonEmpty);
+  const epilogue = findEpilogue(nonEmpty);
   const narration = profile ? findNarration(profile) : null;
   const audience = profile?.audience.values.length ? {
     value: profile.audience.values.join(" / "),
@@ -159,7 +167,7 @@ export function analyseProjectMaterial(documents: IntakeDocument[], context: Int
     evidence: profile.intimacy.evidence
   } : null;
 
-  const findings = { premise, protagonist, relationships, centralConflict, setting, timeline, structure, narration, audience, intimacy };
+  const findings = { premise, protagonist, cast, relationships, centralConflict, setting, timeline, structure, prologue, epilogue, narration, audience, intimacy };
   const base: ProjectAnalysis = {
     documentsRead: selected.length,
     wordsRead,
@@ -232,7 +240,7 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
   const setting = findings.setting?.value || "the setting implied by the selected material";
   const evidence = (finding: IntakeFinding | null, fallback: string) => finding?.evidence[0] || fallback;
   const add = (question: IntakeQuestionPlan) => {
-    if (!intake[question.key]) plan.push(question);
+    if (!intake[question.key] && !plan.some((candidate) => candidate.key === question.key)) plan.push(question);
   };
 
   if (!findings.premise) {
@@ -257,9 +265,10 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
   }
 
   if (genre === "Romance" && (!findings.relationships || findings.relationships.confidence < 0.8)) {
+    const relationshipSignal = findings.relationships?.value?.replace(/[.!?]+$/, "") || "a romantic relationship";
     add({
       key: "relationshipArc",
-      question: `The material points toward ${findings.relationships?.value || "a romantic relationship"}, but it does not define this book's relationship arc. What changes between them from the opening to the ending, and what must they choose or risk to get there?`,
+      question: `The material points toward ${relationshipSignal}, but it does not define this book's relationship arc. What changes between them from the opening to the ending, and what must they choose or risk to get there?`,
       rationale: "Romance preparation needs a relationship progression, not only a genre label or attraction signal.",
       blocking: true
     });
@@ -345,6 +354,45 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
     });
   }
 
+  if ((context.pastBookCount ?? 0) === 0) {
+    add({
+      key: "lengthTarget",
+      question: "What total word-count range should this book target?",
+      rationale: "There are no selected past-series books to use as a length baseline, so the target must be an author decision.",
+      blocking: true
+    });
+    add({
+      key: "chapterWords",
+      question: "How many words should a normal chapter contain? Give a target or a range.",
+      rationale: "Chapter length controls the drafting and validation plan when no prior-series chapter pattern is available.",
+      blocking: true
+    });
+    add({
+      key: "chapterCount",
+      question: "How many chapters should the book have, approximately?",
+      rationale: "The chapter count is part of the book architecture and cannot be safely inferred without a prior-series baseline.",
+      blocking: true
+    });
+    if (!findings.prologue) {
+      add({
+        key: "prologue",
+        question: "Should this book have a prologue? If yes, what should it establish that Chapter 1 should not?",
+        rationale: "No prologue is established in the selected material, and its presence changes the opening contract.",
+        options: ["Yes", "No", "Undecided"],
+        blocking: true
+      });
+    }
+    if (!findings.epilogue) {
+      add({
+        key: "epilogue",
+        question: "Should this book have an epilogue? If yes, what should it show beyond the main ending?",
+        rationale: "No epilogue is established in the selected material, and its presence changes the ending and continuation contract.",
+        options: ["Yes", "No", "Undecided"],
+        blocking: true
+      });
+    }
+  }
+
   return plan;
 }
 
@@ -370,6 +418,13 @@ function findUnknowns(input: {
   if (!findings.timeline) unknowns.push("timeline and sequence");
   if (genre === "Romance" && !findings.relationships) unknowns.push("relationship arc");
   if (!findings.structure) unknowns.push("ending and structural handoff");
+  if ((context.pastBookCount ?? 0) === 0) {
+    if (!context.intake?.lengthTarget) unknowns.push("target word count");
+    if (!context.intake?.chapterWords) unknowns.push("words per chapter");
+    if (!context.intake?.chapterCount) unknowns.push("chapter count");
+    if (!findings.prologue && !context.intake?.prologue) unknowns.push("prologue decision");
+    if (!findings.epilogue && !context.intake?.epilogue) unknowns.push("epilogue decision");
+  }
   if (!findings.audience) unknowns.push("audience and age category");
   if (genre === "Romance" && !context.intake?.spice) unknowns.push("intimacy boundary");
   if ((genre === "Mystery" || genre === "Thriller") && !context.intake?.revealPolicy) unknowns.push("reveal policy");
@@ -410,11 +465,29 @@ function findProtagonist(documents: IntakeDocument[], names: string[]): IntakeFi
   }
   const characterDocuments = documents.filter((document) => document.kinds?.includes("characters"));
   if (!names.length) return null;
-  const selected = names.slice(0, 5).join(", ");
+  if (names.length > 1) return null;
+  const explicitlyNamed = documents.some((document) =>
+    documentsNamePattern(names[0]).test(document.text)
+  );
+  if (!characterDocuments.length && !explicitlyNamed) return null;
+  return {
+    value: names[0],
+    confidence: characterDocuments.length ? 0.72 : 0.4,
+    evidence: [`Selected material names ${names[0]}.`]
+  };
+}
+
+function documentsNamePattern(name: string): RegExp {
+  return new RegExp(`\\b(?:called|named)\\s+${escapeRegExp(name)}\\b`, "i");
+}
+
+function findCast(names: string[]): IntakeFinding | null {
+  if (!names.length) return null;
+  const selected = names.slice(0, 8).join(", ");
   return {
     value: selected,
-    confidence: characterDocuments.length ? (names.length === 1 ? 0.72 : 0.55) : 0.4,
-    evidence: [`Selected material names ${selected}.`]
+    confidence: 0.86,
+    evidence: [`Named cast members found across the selected material: ${selected}.`]
   };
 }
 
@@ -423,6 +496,18 @@ function findRelationships(documents: IntakeDocument[], names: string[], genre: 
   if (labeled) return labeled;
   const pair = rankRelationshipPair(documents, names);
   if (genre === "Romance" && pair) {
+    const paragraphs = splitParagraphs(documents.map((document) =>
+      isNarrativeDocument(document) ? narrativeText(document) : document.text
+    ).join("\n\n")).map((paragraph) => paragraph.text);
+    const shared = paragraphs.filter((paragraph) => pair.names.every((name) => namePattern(name).test(paragraph)));
+    const established = shared.some((paragraph) => /\b(?:boyfriend|girlfriend|partner|husband|wife|dating|couple|lovers?|in a relationship|together)\b/i.test(paragraph));
+    if (established) {
+      return {
+        value: `${pair.names[0]} and ${pair.names[1]} are established as a romantic couple in the selected material.`,
+        confidence: 0.92,
+        evidence: [`${pair.sharedScenes} shared narrative sections, including ${pair.romanceScenes} with relationship signals and established-couple language.`]
+      };
+    }
     return {
       value: `${pair.names[0]} and ${pair.names[1]} share relationship evidence, but the full arc is not explicit yet.`,
       confidence: 0.58,
@@ -477,11 +562,11 @@ function findTimeline(documents: IntakeDocument[], allDocuments: IntakeDocument[
 }
 
 function findStructure(documents: IntakeDocument[], allDocuments: IntakeDocument[]): IntakeFinding | null {
-  const labeled = findLabeledSnippet(documents, /(?:ending|resolution|climax|epilogue|final chapter|book ending|structure|chapter plan|beat sheet)\s*[:\-]\s*([^\n]+)/i);
+  const labeled = findLabeledSnippet(documents, /(?:ending|resolution|climax|final chapter|book ending|structure|chapter plan|beat sheet)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
   const chapterCount = allDocuments.reduce((total, document) => total + countChapterHeadings(document.text), 0);
   const plotDocument = documents.find((document) => document.kinds?.includes("plot"));
-  const endingLine = findLine(documents.map((document) => document.text).join("\n"), /\b(?:happily ever after|happy ending|resolution|epilogue|final chapter|climax|ending)\b/i);
+  const endingLine = findLine(documents.map((document) => document.text).join("\n"), /\b(?:happily ever after|happy ending|resolution|final chapter|climax|ending)\b/i);
   if (endingLine) return { value: endingLine, confidence: 0.68, evidence: ["An ending or structural marker is explicit in the selected material."] };
   if (plotDocument || chapterCount > 0) {
     return {
@@ -489,6 +574,40 @@ function findStructure(documents: IntakeDocument[], allDocuments: IntakeDocument
       confidence: 0.42,
       evidence: [plotDocument ? `${plotDocument.name} is marked as plot material.` : `${chapterCount} chapter headings were found in the selected prose.`]
     };
+  }
+  return null;
+}
+
+function findPrologue(documents: IntakeDocument[]): IntakeFinding | null {
+  for (const document of documents) {
+    const lines = document.text.split(/\r?\n/).map((value) => value.trim());
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = lines[index].match(/^(?:#{0,3}\s*)?(?:[-*•]\s*)?prologue(?:\s+plan)?\s*[:\-]?\s*(.*)$/i);
+      if (!match) continue;
+      const detail = cleanSnippet(match[1]) || lines.slice(index + 1).find((value) => value.length >= 20 && !/^[-*#]/.test(value)) || "Present as a separate opening section.";
+      return {
+        value: `Present: ${detail}`,
+        confidence: 0.9,
+        evidence: [`An explicit prologue heading was found in ${document.name}.`]
+      };
+    }
+  }
+  return null;
+}
+
+function findEpilogue(documents: IntakeDocument[]): IntakeFinding | null {
+  for (const document of documents) {
+    const lines = document.text.split(/\r?\n/).map((value) => value.trim());
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = lines[index].match(/^(?:#{0,3}\s*)?(?:[-*•]\s*)?epilogue(?:\s+plan)?\s*[:\-]?\s*(.*)$/i);
+      if (!match) continue;
+      const detail = cleanSnippet(match[1]) || lines.slice(index + 1).find((value) => value.length >= 20 && !/^[-*#]/.test(value)) || "Present as a separate section.";
+      return {
+        value: `Present: ${detail}`,
+      confidence: 0.9,
+      evidence: [`An explicit epilogue heading was found in ${document.name}.`]
+      };
+    }
   }
   return null;
 }
@@ -526,27 +645,39 @@ function summariseDocument(document: IntakeDocument): IntakeSourceSummary {
 }
 
 function extractNames(documents: IntakeDocument[]): string[] {
-  const candidates = new Map<string, { score: number; mentions: number }>();
-  const add = (candidate: string, score: number, mentions = 1) => {
+  const characterNames = new Set(
+    documents
+      .filter((document) => document.kinds?.includes("characters"))
+      .flatMap((document) => document.name.match(/[A-Z][a-zÀ-ɏ]{2,}/g) ?? [])
+      .map((name) => name.toLowerCase())
+  );
+  const hasCharacterDocuments = characterNames.size > 0;
+  const candidates = new Map<string, { score: number; mentions: number; trusted: boolean }>();
+  const add = (candidate: string, score: number, mentions = 1, trusted = false) => {
     const normalized = candidate.trim().replace(/\s+/g, " ");
     if (!normalized) return;
     if (!/^[A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3}$/.test(normalized)) return;
-    if (normalized.split(/\s+/).some((token) => NON_NAME_TOKENS.has(token.toLowerCase()))) return;
-    const current = candidates.get(normalized) ?? { score: 0, mentions: 0 };
+    const current = candidates.get(normalized) ?? { score: 0, mentions: 0, trusted: false };
     current.score += score;
     current.mentions += mentions;
+    current.trusted ||= trusted;
     candidates.set(normalized, current);
   };
 
   for (const document of documents) {
-    for (const match of document.text.matchAll(/(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/gi)) add(match[1], 4);
-    for (const match of document.text.matchAll(/\b(?:called|named)\s+([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})\b/g)) add(match[1], 3);
+    for (const match of document.text.matchAll(/(?:^|(?<=[.!?])\s+)(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/gim)) add(match[1], 4, 1, true);
+    if (!isNarrativeDocument(document)) {
+      for (const match of document.text.matchAll(/\b(?:called|named)\s+([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})\b/g)) add(match[1], 3, 1, true);
+    }
 
     if (!isNarrativeDocument(document)) continue;
     const narrative = narrativeText(document);
     const seen = new Map<string, { mentions: number; nonSentence: number }>();
     for (const match of narrative.matchAll(/\b([A-Z][a-zÀ-ɏ]{2,}(?:\s+[A-Z][a-zÀ-ɏ]{2,}){0,2})\b/g)) {
       const candidate = match[1];
+      // Dialogue contains many capitalized sentence starters that are not names.
+      // Explicit character material can still establish one through the paths above.
+      if (insideQuotes(narrative, match.index ?? 0)) continue;
       const before = narrative.slice(0, match.index).trimEnd();
       const previous = before.at(-1) ?? "";
       const sentenceStart = !previous || /[.!?]/.test(previous);
@@ -557,14 +688,27 @@ function extractNames(documents: IntakeDocument[]): string[] {
     }
     for (const [candidate, evidence] of seen) {
       if (evidence.mentions < 2 || evidence.nonSentence < 1) continue;
-      add(candidate, evidence.mentions * 2 + evidence.nonSentence, evidence.mentions);
+      const trustedByCharacterDocument = matchesCharacterDocumentName(candidate, characterNames, documents);
+      if (hasCharacterDocuments && !trustedByCharacterDocument) continue;
+      add(candidate, evidence.mentions * 2 + evidence.nonSentence, evidence.mentions, !hasCharacterDocuments || trustedByCharacterDocument);
     }
   }
 
   return [...candidates.entries()]
+    .filter(([, evidence]) => evidence.trusted)
     .sort((a, b) => b[1].score - a[1].score || b[1].mentions - a[1].mentions || a[0].localeCompare(b[0]))
     .slice(0, 8)
     .map(([name]) => name);
+}
+
+function matchesCharacterDocumentName(candidate: string, names: Set<string>, documents: IntakeDocument[]): boolean {
+  const parts = candidate.split(/\s+/).map((part) => part.toLowerCase());
+  if (parts.every((part) => names.has(part))) return true;
+  const prefix = parts.length === 1 && parts[0].length >= 3 && [...names].some((name) => name.startsWith(parts[0]));
+  if (!prefix) return false;
+  return documents
+    .filter(isNarrativeDocument)
+    .some((document) => new RegExp(`\\b${escapeRegExp(candidate)}['’]s\\b`, "i").test(narrativeText(document)));
 }
 
 function rankRelationshipPair(documents: IntakeDocument[], names: string[]): { names: [string, string]; sharedScenes: number; romanceScenes: number } | null {
@@ -572,7 +716,7 @@ function rankRelationshipPair(documents: IntakeDocument[], names: string[]): { n
   const romancePattern = signals.find((signal) => signal.genre === "Romance")?.pattern;
   const scores: Array<{ names: [string, string]; sharedScenes: number; romanceScenes: number; score: number }> = [];
   const prose = documents
-    .filter((document) => isNarrativeDocument(document) || isPlanningDocument(document))
+    .filter(isRelationshipEvidenceDocument)
     .map((document) => isNarrativeDocument(document) ? narrativeText(document) : document.text)
     .join("\n\n");
   const paragraphs = splitParagraphs(prose).map((paragraph) => paragraph.text);
@@ -587,17 +731,14 @@ function rankRelationshipPair(documents: IntakeDocument[], names: string[]): { n
   return scores.sort((a, b) => b.score - a.score || b.sharedScenes - a.sharedScenes)[0] ?? null;
 }
 
-const NON_NAME_TOKENS = new Set([
-  "the", "this", "that", "these", "those", "then", "you", "your", "they", "their", "them",
-  "she", "her", "he", "his", "him", "we", "our", "us", "it", "its", "what", "when", "where",
-  "who", "why", "how", "and", "but", "or", "so", "yet", "also", "still", "however", "because",
-  "before", "after", "while", "as", "if", "though", "although", "once", "until", "since",
-  "chapter", "book", "part", "setting", "conflict", "ending", "premise"
-]);
-
 function isNarrativeDocument(document: IntakeDocument): boolean {
   const kinds = document.kinds ?? [];
   return kinds.length === 0 || kinds.includes("past_book") || kinds.includes("reference_book");
+}
+
+function isRelationshipEvidenceDocument(document: IntakeDocument): boolean {
+  const kinds = document.kinds ?? [];
+  return kinds.length === 0 || kinds.includes("past_book") || isPlanningDocument(document);
 }
 
 function narrativeText(document: IntakeDocument): string {
@@ -677,7 +818,8 @@ function inferSubgenre(genre: string, text: string): string | null {
   const explicit = /\bsubgenre\s*[:\-]\s*([^\n]+)/i.exec(text)?.[1]?.trim();
   if (explicit) return explicit;
   if (genre === "Romance") {
-    if (/\b(?:magic|fae|kingdom|vampire|werewolf)\b/i.test(text)) return "Fantasy romance";
+    const fantasyTerms = [...new Set((text.match(/\b(?:magic|fae|kingdom|vampire|werewolf|spell|dragon|witch|wizard|demon|supernatural|paranormal)\b/gi) ?? []).map((term) => term.toLowerCase()))];
+    if (fantasyTerms.length >= 2) return "Fantasy romance";
     if (/\b(?:historical|regency|victorian|duke|earl)\b/i.test(text)) return "Historical romance";
     if (/\b(?:contemporary|apartment|office|city|modern)\b/i.test(text)) return "Contemporary romance";
   }

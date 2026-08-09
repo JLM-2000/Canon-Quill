@@ -29,10 +29,15 @@ Follow `workflows/book-writing.workflow.yaml` and the authoritative state at
 
 ## Operating loop
 
-1. Read the active workspace state, the latest phase log, and the required input
-   artifacts before delegating.
+1. Read the active workspace state, all three workspace logs, the project
+   analysis, the author decision log, and the required input artifacts before
+   delegating.
+   Error entries with `resolvedAt` are historical records, not active blockers.
 2. Verify the current phase's entry contract. If an input is missing or stale,
    stop in that phase and report the exact repair instead of improvising.
+   Exception: when the run note begins `PREPARATION_REPAIR`, missing reference
+   extraction or preparation artifacts are the work to perform. Delegate
+   book-03 and book-04 in order, then stop at preflight review; do not draft.
 3. Delegate only the work owned by the current phase agent. Specialists are
    auditors, not alternate orchestrators, and may not silently advance state.
 4. Require the phase's output manifest or report before accepting success.

@@ -25,6 +25,8 @@ export interface Classification {
   reasons: string[];
   /** Runner-up, offered as a one-click correction. */
   alternative?: SourceKind;
+  /** Additional groups strongly supported by the same document. */
+  suggestedKinds?: SourceKind[];
 }
 
 export interface ClassifyInput {
@@ -86,10 +88,18 @@ const nameSignals: Array<[SourceKind, RegExp, number]> = [
   ["characters", /\b(character|characters|cast|dramatis|personae|profiles?|bios?)\b/i, 3],
   ["timeline", /\b(timeline|chronolog|calendar|history|events?|dates?)\b/i, 3],
   ["world", /\b(world|worldbuilding|setting|lore|magic|geograph|map|factions?|glossar)\b/i, 3],
-  ["plot", /\b(outline|synopsis|beats?|plot|structure|arc|treatment|pitch)\b/i, 3],
+  ["plot", /\b(outline|synopsis|beats?|plot|structure|arc|treatment|pitch|plan|blueprint|roadmap|editorial)\b/i, 4],
   ["reference_book", /\b(reference|comp|comparison|inspiration|research|influences?|study)\b/i, 3],
   ["past_book", /\b(book\s*\d|vol(?:ume)?\s*\d|manuscript|novel|draft|final)\b/i, 2.5],
   ["notes", /\b(notes?|misc|scratch|ideas?|todo|random)\b/i, 2]
+];
+
+const pathSignals: Array<[SourceKind, RegExp, number]> = [
+  ["characters", /(?:^|[\\/])(?:characters?|cast|bios?|profiles?)(?:[\\/]|$)/i, 8],
+  ["timeline", /(?:^|[\\/])(?:timeline|chronolog(?:y|ies)|history|calendar|events?)(?:[\\/]|$)/i, 8],
+  ["world", /(?:^|[\\/])(?:world|worldbuilding|lore|setting|geography|factions?)(?:[\\/]|$)/i, 8],
+  ["plot", /(?:^|[\\/])(?:plot|outlines?|plans?|blueprints?|roadmaps?|story(?:line|boards?))(?:[\\/]|$)/i, 8],
+  ["notes", /(?:^|[\\/])(?:notes?|misc|scratch|ideas?)(?:[\\/]|$)/i, 5]
 ];
 
 export function classifySource(input: ClassifyInput): Classification {
@@ -115,6 +125,10 @@ export function classifySource(input: ClassifyInput): Classification {
     const match = pattern.exec(haystack);
     if (match) note(kind, weight, `name/path contains "${match[0]}"`);
   }
+  for (const [kind, pattern, weight] of pathSignals) {
+    const match = pattern.exec(input.path ?? "");
+    if (match) note(kind, weight, `folder path indicates ${sourceKindLabels[kind].toLowerCase()}`);
+  }
 
   // --- Structural signals --------------------------------------------------
   const text = input.text;
@@ -139,6 +153,7 @@ export function classifySource(input: ClassifyInput): Classification {
   const dateLines = lines.filter((line) =>
     /\b(?:year|day|month|age|era|\d{3,4}\s*(?:AD|BC|CE|BCE))\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/i.test(line)
   ).length;
+  const looksLikePersonDocument = /^[A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){1,3}$/.test(input.name.trim());
 
   // Prose means no list or sheet structure, plus a positive sign of narrative:
   // dialogue or sustained paragraphs. A high mean paragraph length would
@@ -159,6 +174,10 @@ export function classifySource(input: ClassifyInput): Classification {
     note("reference_book", scale * 0.66, "narrative prose could also be another author's book");
   }
 
+  if (looksLikePersonDocument && chapterHeadings < 3) {
+    note("characters", 5, "filename looks like a person name and the document has no chapter structure");
+  }
+
   // Chapter headings mark a book regardless of how the prose test resolved.
   if (chapterHeadings >= 3) {
     note("past_book", 2, `${chapterHeadings} chapter headings`);
@@ -172,6 +191,7 @@ export function classifySource(input: ClassifyInput): Classification {
     note("plot", 1.5, `${Math.round(bulletRatio * 100)}% bulleted lines`);
     note("notes", 1, "heavily bulleted");
   }
+  if (bulletRatio > 0.08) note("notes", 1.5, "working-note or outline lists are present");
   if (dateLines / lines.length > 0.2) {
     note("timeline", 3, `${dateLines} lines carry dates or era markers`);
   }
@@ -205,11 +225,17 @@ export function classifySource(input: ClassifyInput): Classification {
   const strength = Math.min(topScore / 6, 1);
   const confidence = Math.round(Math.max(0.15, Math.min(0.98, strength * 0.6 + margin * 0.4)) * 100) / 100;
 
+  const suggested = new Set<SourceKind>([topKind]);
+  if (topKind !== "timeline" && dateLines / lines.length > 0.08) suggested.add("timeline");
+  if (topKind !== "plot" && (bulletRatio > 0.08 || /\b(?:outline|plan|blueprint|roadmap|table of contents)\b/i.test(haystack))) suggested.add("plot");
+  if (topKind !== "notes" && bulletRatio > 0.08 && !isProse) suggested.add("notes");
+
   return {
     kind: topKind,
     confidence,
     reasons: (reasons[topKind] ?? ["no strong signal; filed as a general note"]).slice(0, 4),
-    alternative: altScore > 0 && altKind !== topKind ? altKind : undefined
+    alternative: altScore > 0 && altKind !== topKind ? altKind : undefined,
+    suggestedKinds: [...suggested]
   };
 }
 

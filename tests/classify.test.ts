@@ -45,6 +45,24 @@ describe("classification", () => {
     expect(result.confidence).toBeGreaterThan(reviewThreshold);
   });
 
+  it("recognises a person-named character document even when it is prose", () => {
+    const result = classifySource({
+      name: "Julian Scott Reid",
+      text: "PHYSICAL APPEARANCE\nJulian is tall and athletic. His personality is guarded but loyal.\n\nPERSONALITY\nHe avoids conflict until someone he loves is threatened."
+    });
+    expect(result.kind).toBe("characters");
+  });
+
+  it("trusts an explicit Characters folder over prose shape", () => {
+    const result = classifySource({
+      name: "Cassandro Giuliano Montfort",
+      path: "/His Golden Heart/Characters/Cassandro Giuliano Montfort",
+      text: "PHYSICAL APPEARANCE\nCassandro is tall and athletic. His personality is guarded but loyal."
+    });
+    expect(result.kind).toBe("characters");
+    expect(result.reasons.join(" ")).toMatch(/folder path/i);
+  });
+
   it("recognises a timeline", () => {
     const result = classifySource({
       name: "chronology.md",
@@ -88,6 +106,15 @@ describe("classification", () => {
       ].join("\n")
     });
     expect(result.kind).toBe("plot");
+  });
+
+  it("suggests several groups for a working plan", () => {
+    const result = classifySource({
+      name: "Book 3 Full Plan",
+      text: "* Timeline and series position\n* Detailed chapter roadmap\n* Notes on the ending and epilogue\nYear 2026: graduation."
+    });
+    expect(result.kind).toBe("plot");
+    expect(result.suggestedKinds).toEqual(expect.arrayContaining(["plot", "timeline", "notes"]));
   });
 
   it("recognises a long prose manuscript as a past book", () => {

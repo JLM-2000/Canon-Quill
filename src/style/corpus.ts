@@ -36,6 +36,7 @@ export interface StyleCorpus {
   profile: WritingProfile;
   /** Author guidance attached after the build, not measured from the text. */
   notes?: string;
+  documentStats?: Array<{ source: string; wordCount: number; chapterCount: number; wordsPerChapter: number[] }>;
   builtAt: string;
 }
 

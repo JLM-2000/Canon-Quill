@@ -34,6 +34,14 @@ export interface BackMatter {
   wordCount: number;
 }
 
+export interface Epilogue {
+  /** Character offset where it starts. New chapters go before this. */
+  offset: number;
+  /** The heading as written. */
+  heading: string;
+  wordCount: number;
+}
+
 export interface ManuscriptAnalysis {
   totalWords: number;
   /** Words of actual story, excluding back matter. */
@@ -41,6 +49,7 @@ export interface ManuscriptAnalysis {
   /** Where the story ends and the back matter begins. */
   storyEndOffset: number;
   backMatter: BackMatter | null;
+  epilogue: Epilogue | null;
   chapters: ManuscriptChapter[];
   /**
    * Whether the final chapter reads as finished. A draft that stops mid
@@ -161,6 +170,20 @@ function findBackMatter(text: string, lines: string[]): BackMatter | null {
   return null;
 }
 
+function findEpilogue(text: string, lines: string[]): Epilogue | null {
+  let offset = 0;
+  for (const line of lines) {
+    const at = offset;
+    offset += line.length + newlineLength(text, offset + line.length);
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length > 90) continue;
+    if (isHeading(trimmed) && /^\s*#{0,3}\s*epilogue\b/i.test(trimmed)) {
+      return { offset: at, heading: trimmed, wordCount: words(text.slice(at)).length };
+    }
+  }
+  return null;
+}
+
 function newlineLength(text: string, offset: number): number {
   if (text.startsWith("\r\n", offset)) return 2;
   return text[offset] === "\n" || text[offset] === "\r" ? 1 : 0;
@@ -179,7 +202,9 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
   // Everything below reasons about the story, not the matter after it.
   const storyEndOffset = backMatter?.offset ?? text.length;
   const story = text.slice(0, storyEndOffset);
-  const lines = story.split(/\r?\n/);
+  const epilogue = findEpilogue(story, story.split(/\r?\n/));
+  const mainStory = epilogue ? story.slice(0, epilogue.offset).trimEnd() : story;
+  const lines = mainStory.split(/\r?\n/);
   const chapters: ManuscriptChapter[] = [];
 
   let offset = 0;
@@ -187,7 +212,7 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
   let currentHeading: string | null = null;
 
   const push = (endOffset: number) => {
-    const body = story.slice(currentStart, endOffset);
+    const body = mainStory.slice(currentStart, endOffset);
     const count = words(body).length;
     if (count === 0) return; // nothing there at all
     if (count < 20 && chapters.length > 0 && !isExplicitChapterHeading(currentHeading)) return;
@@ -201,33 +226,34 @@ export function analyseManuscript(text: string): ManuscriptAnalysis {
 
   for (const line of lines) {
     if (isHeading(line) && !isSceneBreak(line)) {
-      if (currentHeading !== null || words(story.slice(currentStart, offset)).length > 20) {
+      if (currentHeading !== null || words(mainStory.slice(currentStart, offset)).length > 20) {
         push(offset);
       }
       currentHeading = line.trim();
       currentStart = offset;
     }
-    offset += line.length + newlineLength(story, offset + line.length);
+    offset += line.length + newlineLength(mainStory, offset + line.length);
   }
-  push(story.length);
+  push(mainStory.length);
 
   // A document with no headings at all is still one body of work.
-  if (chapters.length === 0 && words(story).length > 0) {
+  if (chapters.length === 0 && words(mainStory).length > 0) {
     chapters.push({ index: 1, heading: "Untitled", wordCount: words(story).length, offset: 0 });
   }
 
-  const complete = assessCompleteness(story, chapters);
+  const complete = assessCompleteness(mainStory, chapters);
 
   return {
     totalWords: words(text).length,
     storyWords: words(story).length,
     storyEndOffset,
     backMatter,
+    epilogue,
     chapters,
     lastChapterComplete: complete.complete,
     completenessReason: complete.reason,
-    tail: tailOf(story, 400),
-    conventions: readConventions(story, lines),
+    tail: tailOf(mainStory, 400),
+    conventions: readConventions(mainStory, lines),
     metrics: computeMetrics(story)
   };
 }
@@ -359,8 +385,18 @@ export function renderContinuationBrief(analysis: ManuscriptAnalysis, documentNa
     "",
     `The book is already ${analysis.storyWords.toLocaleString()} words of story across ` +
       `${analysis.chapters.length} section${analysis.chapters.length === 1 ? "" : "s"}. You are adding to ` +
-      `it, not starting it.`,
+    `it, not starting it.`,
     "",
+    ...(analysis.epilogue
+      ? [
+          "## Epilogue",
+          "",
+          `An epilogue starts at "${analysis.epilogue.heading}" (${analysis.epilogue.wordCount} words).`,
+          "The epilogue is separate from the main ending and must remain after any new chapters.",
+          "**New chapters go before the epilogue.** Do not rewrite or move it.",
+          ""
+        ]
+      : []),
     ...(analysis.backMatter
       ? [
           "## Where to insert",
@@ -415,7 +451,9 @@ export function mergeContinuation(existingText: string, additions: string): stri
   if (!clean) return existingText;
 
   const analysis = analyseManuscript(existingText);
-  const offset = analysis.backMatter?.offset ?? existingText.length;
+  const insertionOffsets = [analysis.epilogue?.offset, analysis.backMatter?.offset]
+    .filter((value): value is number => value !== undefined);
+  const offset = insertionOffsets.length ? Math.min(...insertionOffsets) : existingText.length;
   const before = existingText.slice(0, offset);
   const after = existingText.slice(offset);
   const prefix = before.length === 0 || /\n\s*$/.test(before) ? before : `${before}\n\n`;

@@ -94,6 +94,17 @@ describe("whether the draft is finished", () => {
     const a = analyseManuscript(chapter("# Chapter One", `${prose} "Go home," she said."`));
     expect(a.lastChapterComplete).toBe(true);
   });
+
+  it("keeps an epilogue separate from the main ending", () => {
+    const text = chapter("# Chapter One", prose) + chapter("Epilogue", "Five years later, the bakery was full.");
+    const a = analyseManuscript(text);
+
+    expect(a.chapters).toHaveLength(1);
+    expect(a.epilogue?.heading).toBe("Epilogue");
+    expect(a.lastChapterComplete).toBe(true);
+    expect(a.tail).not.toContain("Five years later");
+    expect(renderContinuationBrief(a, "draft.gdoc")).toContain("New chapters go before the epilogue");
+  });
 });
 
 describe("typographic conventions", () => {
@@ -263,6 +274,12 @@ describe("continuation merge", () => {
     const merged = mergeContinuation(original, "# Chapter Two\n\nThe next morning, he left.");
     expect(merged.indexOf("# Chapter Two")).toBeLessThan(merged.indexOf("Thank you for reading!"));
     expect(merged).toContain("Please leave a review.");
+  });
+
+  it("inserts new prose before an epilogue", () => {
+    const original = `${chapter("# Chapter One", prose)}Epilogue\n\nFive years later, the bakery was full.`;
+    const merged = mergeContinuation(original, "# Chapter Two\n\nThe next morning, he left.");
+    expect(merged.indexOf("# Chapter Two")).toBeLessThan(merged.indexOf("Epilogue"));
   });
 
   it("does not change an existing document when there is no addition", () => {

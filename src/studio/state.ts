@@ -164,6 +164,8 @@ export interface ExistingManuscript {
   completenessReason: string;
   backMatterHeading?: string;
   backMatterWords?: number;
+  epilogueHeading?: string;
+  epilogueWords?: number;
   /** Author clarification for the continuation agent. */
   notes?: string;
   analysedAt: string;
@@ -227,6 +229,7 @@ export interface StudioState {
     excluded: string[];
     /** Author guidance about their voice, carried into the fingerprint document. */
     notes: string;
+    documentStats: Array<{ source: string; wordCount: number; chapterCount: number; wordsPerChapter: number[] }>;
   };
   createdAt: string;
   updatedAt: string;
@@ -285,11 +288,14 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
       findings: {
         premise: null,
         protagonist: null,
+        cast: null,
         relationships: null,
         centralConflict: null,
         setting: null,
         timeline: null,
         structure: null,
+        prologue: null,
+        epilogue: null,
         narration: null,
         audience: null,
         intimacy: null
@@ -307,7 +313,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     directions: [],
     run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),
-    styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null, excluded: [], notes: "" },
+    styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null, excluded: [], notes: "", documentStats: [] },
     createdAt: now,
     updatedAt: now
   };
@@ -342,7 +348,11 @@ export async function loadState(slug: string): Promise<StudioState> {
       engineReviewed: parsed.engineReviewed ?? false,
       intake,
       drive: { ...base.drive, ...(parsed.drive ?? {}) },
-      projectAnalysis: { ...base.projectAnalysis, ...(parsed.projectAnalysis ?? {}) },
+      projectAnalysis: {
+        ...base.projectAnalysis,
+        ...(parsed.projectAnalysis ?? {}),
+        findings: { ...base.projectAnalysis.findings, ...(parsed.projectAnalysis?.findings ?? {}) }
+      },
       chapterChats: parsed.chapterChats ?? {},
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       writingConfirmed: parsed.writingConfirmed ?? Boolean(parsed.chapters?.length),
@@ -383,7 +393,7 @@ function migrateSources(sources: SelectedSource[]): SelectedSource[] {
 export async function saveState(state: StudioState): Promise<StudioState> {
   const paths = workspacePaths(state.slug);
   await mkdir(paths.root, { recursive: true });
-  const next = { ...state, updatedAt: new Date().toISOString() };
+  const next = { ...state, phase: derivePhase(state), updatedAt: new Date().toISOString() };
   // Atomic replacement, and a unique name per write: two writes in one
   // process would otherwise race to rename the same temp file.
   const temp = `${paths.stateFile}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;

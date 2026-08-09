@@ -340,7 +340,6 @@ let target = null;         // {id, name} of the folder finished chapters go to
 let indexing = false;
 let draftPicker = false;
 let indexError = null;
-let draftAnalysisLoading = false;
 let selectionSave = Promise.resolve();
 let questionPoll = null;
 let chapterPoll = null;
@@ -768,7 +767,6 @@ function go(r) {
   if (r === "questions") { loadQuestions(); startQuestionPolling(); }
   else stopQuestionPolling();
   if (r === "chapters") enterChapters(); else stopChapterPolling();
-  if (r === "draft" && S.manuscript) loadDraftAnalysis();
 }
 
 function toggleNavGroup(group) {
@@ -1773,7 +1771,12 @@ async function setProject(patch) {
 
 async function continueProjectShape(btn) {
   btn.disabled = true;
-  try { S = await api("/api/project/continue", { method: "POST" }); go("draft"); }
+  try {
+    S = await api("/api/project/continue", { method: "POST" });
+    route = "draft";
+    analysisEditing = false;
+    render();
+  }
   catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
@@ -1792,7 +1795,7 @@ function draftSection() {
       </svg>
       <span class="name">${esc(e.name)}</span>
       ${e.isFolder ? "" : `<button class="sm ${chosen ? "" : "ghost"}"
-        onclick="event.stopPropagation();useAsDraft('${e.id}','${safe}',this)">
+         onclick="event.stopPropagation();confirmDraftSelection('${e.id}','${safe}')">
         ${chosen ? "Selected ✓" : "Select"}</button>`}
     </div>`;
   }).join("");
@@ -1802,11 +1805,12 @@ function draftSection() {
   the draft goes, whether the last chapter finished, and the typographic habits of the document, so
   anything it adds is indistinguishable from what is already there.</p>
 
-  ${m ? `<div class="card" style="border-color:var(--good)">
+  ${!draftPicker && m ? `<div class="card" style="border-color:var(--good)">
     <div class="row" style="margin-bottom:8px">
       <b>${esc(m.name)}</b>
       <span class="pill">${plural(m.totalWords, "word", null, m.totalWords.toLocaleString())}</span>
       <span class="pill">${plural(m.chapterCount, "section")}</span>
+      <button class="ghost sm" style="margin-left:auto" onclick="openDraftPicker()">Change existing draft</button>
     </div>
     <div class="info ok" style="margin:0 0 12px">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -1827,9 +1831,10 @@ function draftSection() {
         <p style="margin-top:6px">Writing will finish the chapter in progress before starting another. If that is wrong, say so in the instructions box on the chapter board.</p>
        </div></div>` : ""}
 
-    ${draftAnalysisLoading ? '<div class="hint" style="margin:0 0 12px"><span class="spin"></span> Checking the ending for closing material...</div>' : ""}
+     ${m.epilogueHeading ? `<div class="hint" style="margin:0 0 12px"><b>Epilogue:</b>
+       “${esc(m.epilogueHeading)}”${m.epilogueWords ? `, ${plural(m.epilogueWords, "word", null, m.epilogueWords.toLocaleString())}` : ""}</div>` : ""}
 
-    ${m.backMatterHeading ? `<div class="info" style="margin:0 0 12px">
+     ${m.backMatterHeading ? `<div class="info" style="margin:0 0 12px">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
        <div><b>Closing material found</b>
@@ -1855,6 +1860,10 @@ function draftSection() {
       <button ${m.target ? "" : "disabled"} onclick="continueDraft(this)">Continue</button>
       ${!m.target ? '<span class="hint" style="color:var(--warn)">Choose where new chapters go first.</span>' : ""}
     </div>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" onclick="startFreshFromDraft()">Start without an existing draft</button>
+      <span class="hint">Keep the selected references, but write from the first line instead.</span>
+    </div>
   </div>` : (!draftPicker ? `
   <div class="card">
     <b>Is the book already part-written?</b>
@@ -1878,12 +1887,24 @@ function draftSection() {
   <div class="row"><button class="ghost" onclick="closeDraftPicker()">Cancel</button></div>`)}`;
 }
 
+function confirmDraftSelection(driveId, name) {
+  showModal({
+    title: "Use this existing draft?",
+    body: `<p>This will read <b>${esc(name)}</b> and replace the current existing-draft selection if one is already chosen.</p>
+      <p class="hint">Canon Quill will analyse its continuation point, ending, epilogue, closing material, and formatting before you continue.</p>`,
+    actions: `<button id="use-draft-btn" onclick="useAsDraft('${driveId}', '${esc(name).replace(/'/g, "\\'")}', this)">Use this draft</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
 async function useAsDraft(driveId, name, btn) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Reading…';
   try {
+    closeModal();
     const r = await api("/api/manuscript/analyse", { method: "POST", body: { driveId } });
-    S = r.state; render();
-    await loadDraftAnalysis();
+    S = r.state;
+    draftPicker = false;
+    render();
     toast(`Read ${plural(r.analysis.totalWords, "word", null, r.analysis.totalWords.toLocaleString())} from "${name}".`);
   } catch (e) {
     toast(e.message, "error");
@@ -1902,6 +1923,21 @@ async function skipDraft(btn) {
     toast(e.message, "error");
     btn.disabled = false;
   }
+}
+
+function startFreshFromDraft() {
+  showModal({
+    title: "Start from the first line?",
+    body: `<p>This removes the existing-draft continuation choice from this book.</p>
+      <p class="hint">Your selected source material stays in place. Canon Quill will write a new manuscript rather than continue the draft.</p>`,
+    actions: `<button onclick="skipDraftFromModal(this)">Start fresh</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function skipDraftFromModal(btn) {
+  closeModal();
+  await skipDraft(btn);
 }
 
 async function setDraftTarget(target) {
@@ -1933,20 +1969,6 @@ function closeDraftPicker() { draftPicker = false; render(); }
 
 function viewDraft() {
   return `<h1>Existing draft</h1>${draftSection()}`;
-}
-
-async function loadDraftAnalysis() {
-  if (!S?.manuscript || draftAnalysisLoading) return;
-  draftAnalysisLoading = true;
-  if (route === "draft") render();
-  try {
-    const r = await api("/api/manuscript/reanalyse", { method: "POST" });
-    S = r.state;
-  } catch (e) {
-    toast(`Could not refresh the draft analysis: ${e.message}`, "warn");
-  }
-  draftAnalysisLoading = false;
-  if (route === "draft") render();
 }
 
 /** Documents the corpus can learn from: the author's own, or reference prose if they have none. */
@@ -1992,8 +2014,13 @@ function viewStyle() {
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <path d="M4 5h16M4 10h16M4 15h10"/></svg>
       <div><b>Your notes on this voice</b><p style="white-space:pre-wrap">${esc(sc.notes)}</p>
-        <p style="margin-top:6px">The drafting and editing agents read these with the fingerprint, and follow them where a measured target disagrees.</p></div></div>` : ""}
-    <div id="fp"><span class="spin"></span></div>
+         <p style="margin-top:6px">The drafting and editing agents read these with the fingerprint, and follow them where a measured target disagrees.</p></div></div>` : ""}
+    ${sc.documentStats?.length ? `<div style="margin:14px 0 0"><h3 style="margin:0 0 8px">Corpus sources</h3>
+      <table><tr><th>Source</th><th class="num">Words</th><th class="num">Chapters</th><th class="num">Words / chapter</th></tr>
+      ${sc.documentStats.map((doc) => `<tr><td>${esc(doc.source)}</td><td class="num">${doc.wordCount.toLocaleString()}</td><td class="num">${doc.chapterCount}</td><td class="num">${doc.wordsPerChapter.map((count) => count.toLocaleString()).join(", ") || "N/A"}</td></tr>`).join("")}</table>
+    </div>` : ""}
+    ${sc.fromReference && !sc.documentStats?.length ? '<div class="hint" style="margin-top:14px">This corpus is learned from reference material rather than series books, so chapter-by-chapter book metrics are not shown.</div>' : ""}
+    <div id="fp" style="margin-top:24px"><span class="spin"></span></div>
     <div class="row" style="margin-top:16px">
       <button onclick="continueFromStyle(this)">Continue</button>
     </div>
@@ -2046,6 +2073,7 @@ async function buildStyle(btn) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Building…';
   try {
     S = await api("/api/style/build", { method: "POST", body });
+    FINGERPRINT = null;
     closeModal();
     toast("Style corpus built."); render(); loadFingerprint();
   }
@@ -2067,12 +2095,15 @@ async function continueFromStyle(btn) {
 
 const FINDING_ROWS = [
   ["premise", "Story promise"],
-  ["protagonist", "Protagonist / cast"],
+  ["protagonist", "Protagonist"],
+  ["cast", "Main cast"],
   ["relationships", "Relationship arc"],
   ["centralConflict", "Conflict and stakes"],
   ["setting", "Setting"],
   ["timeline", "Timeline"],
   ["structure", "Structure / ending"],
+  ["prologue", "Prologue"],
+  ["epilogue", "Epilogue"],
   ["narration", "Narration"],
   ["audience", "Audience"],
   ["intimacy", "Intimacy signal"]
@@ -2101,7 +2132,10 @@ function viewIntakeAnalysis() {
         <textarea class="analysis-finding" data-finding="${key}" data-orig="${esc(finding?.value || "")}" rows="3"
           placeholder="Not established. Type what is true, or leave it empty.">${esc(finding?.value || "")}</textarea></td></tr>`;
     }
-    if (!finding) return `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`;
+    if (!finding) {
+      if (key === "prologue" || key === "epilogue") return `<tr><td><b>${esc(label)}</b></td><td>N/A</td><td class="hint">N/A</td></tr>`;
+      return `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`;
+    }
     return `<tr><td><b>${esc(label)}</b></td><td>${esc(finding.value)}
       ${finding.authorEdited ? '<span class="pill good" style="margin-left:6px">Yours</span>' : ""}</td>
       <td class="hint">${esc((finding.evidence || []).join(" "))}</td></tr>`;
@@ -2249,9 +2283,19 @@ async function continueFromAnalysis(btn) {
 let FINGERPRINT = null;
 async function loadFingerprint() {
   const el = document.getElementById("fp"); if (!el) return;
+  if (FINGERPRINT) {
+    paintFingerprint(el);
+    return;
+  }
   try {
     const { fingerprint: f, profile } = await api("/api/style/fingerprint");
     FINGERPRINT = { fingerprint: f, profile };
+    paintFingerprint(el);
+  } catch { el.innerHTML = '<div class="hint">Fingerprint unavailable.</div>'; }
+}
+
+function paintFingerprint(el) {
+    const { fingerprint: f, profile } = FINGERPRINT;
     const pct = (v) => Math.round(v * 100) + "%";
     const profileRows = profile ? [
       ["Narration", profile.narration.label],
@@ -2282,11 +2326,10 @@ async function loadFingerprint() {
          ["Plain dialogue tags", pct(f.dialogue.invisibleTagShare)],
          ["-ly adverbs / 1k", f.texture.lyAdverbsPer1k],
          ["Filter verbs / 1k", f.texture.filterVerbsPer1k],
-         ["Abstract nouns / 1k", f.texture.abstractNounsPer1k],
-         ["Similes / 1k", f.texture.similesPer1k],
-         ["Vocabulary variety", f.texture.typeTokenRatio]]
-         .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
-  } catch { el.innerHTML = '<div class="hint">Fingerprint unavailable.</div>'; }
+          ["Abstract nouns / 1k", f.texture.abstractNounsPer1k],
+          ["Similes / 1k", f.texture.similesPer1k],
+          ["Vocabulary variety", f.texture.typeTokenRatio]]
+          .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
 }
 
 function viewQuestions() {
@@ -2490,7 +2533,58 @@ async function loadRuntime() {
   catch { /* the start button explains itself when this is unknown */ }
 }
 
-function startWritingModal() {
+function showPreparationRequired(status) {
+  showModal({
+    title: "Preparation is not ready",
+    body: `<p>The existing draft is optional. The approved preparation package is not optional: it is what the writer uses to draft safely.</p>
+      <p class="hint">The run has not started and no provider time was used. Missing artifacts:</p>
+      <ul>${status.missing.map((name) => `<li>${esc(name)}</li>`).join("")}</ul>
+      <p class="hint">Reopen preparation, complete the reference-extraction and preparation phases, then return here to start writing.</p>`,
+    actions: `<button onclick="startPreparationRun(this)">Generate preparation package</button>
+      <button class="ghost" onclick="closeModal(); reopenPreparationFromMissing(this)">Reopen preparation</button>
+      <button class="ghost" onclick="closeModal()">Close</button>`
+  });
+}
+
+async function startPreparationRun(btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Starting…';
+  try {
+    const r = await api("/api/preparation/run", { method: "POST" });
+    S = r;
+    closeModal();
+    route = "chapters";
+    runEvents = [];
+    runLatest = 0;
+    runProgress = null;
+    runOutput = null;
+    render();
+    startRunPolling();
+    toast(`${r.runtimeLabel || "The runtime"} is preparing the book.`);
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+    btn.textContent = "Generate preparation package";
+  }
+}
+
+async function reopenPreparationFromMissing(btn) {
+  await reopenPreparation(btn);
+  route = "questions";
+  render();
+}
+
+async function startWritingModal() {
+  try {
+    const preparation = await api("/api/preparation/status");
+    if (!preparation.ready) {
+      showPreparationRequired(preparation);
+      return;
+    }
+  } catch (e) {
+    toast(e.message, "error");
+    return;
+  }
   const r = RUNTIME || {};
   const dirs = (S.directions || []).filter((d) => !d.appliedAt);
   showModal({
@@ -2530,7 +2624,16 @@ async function startWriting(btn) {
     render();
     startRunPolling();
     toast(`${r.runtimeLabel || "The runtime"} is working.`);
-  } catch (e) { toast(e.message, "error"); closeModal(); render(); }
+  } catch (e) {
+    closeModal();
+    if (/^Preparation is not ready\./.test(e.message)) {
+      try { showPreparationRequired(await api("/api/preparation/status")); }
+      catch { toast(e.message, "error"); }
+    } else {
+      toast(e.message, "error");
+    }
+    render();
+  }
 }
 
 async function stopWriting(btn) {
@@ -2904,7 +3007,12 @@ async function resumeRun(btn) {
     toast(r.resumeAt ? `Resuming at chapter ${r.resumeAt}.` : "Resumed.");
   } catch (e) {
     // A 409 carries why it refused to resume, which is more useful than the status.
-    toast(e.message, "error");
+    if (/^Preparation is not ready\./.test(e.message)) {
+      try { showPreparationRequired(await api("/api/preparation/status")); }
+      catch { toast(e.message, "error"); }
+    } else {
+      toast(e.message, "error");
+    }
     btn.disabled = false; btn.textContent = "Resume";
   }
 }
@@ -2929,7 +3037,6 @@ async function setStatus(number, status) {
     if (route === "sources" && (S.drive.connected || !(S.sources || []).some((source) => source.driveId.startsWith("local-")))) loadBrowse("root");
     if (route === "engine") loadEngine();
     if (route === "connect") loadDrive();
-    if (route === "draft" && S.manuscript) loadDraftAnalysis();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
     if (route === "intake_analysis") loadProjectAnalysis();
     if (route === "questions") { loadQuestions(); startQuestionPolling(); }
