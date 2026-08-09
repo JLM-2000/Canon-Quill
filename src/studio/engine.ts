@@ -117,7 +117,7 @@ export async function checkCredentials(
         ready: true,
         env,
         runtime: "studio",
-        detail: "A key entered in the Studio is stored in .auth/credentials.json (gitignored, 0600)."
+        detail: `An API key for ${providerLabel(provider)} is stored in Studio credentials.`
       };
     }
     if (process.env[env]?.trim()) {
@@ -128,13 +128,13 @@ export async function checkCredentials(
         ready: true,
         env,
         runtime: "opencode",
-        detail: `OpenCode has an API key stored for ${provider}. Run it through OpenCode, or export ${env} to use it elsewhere.`
+        detail: `OpenCode has an API key stored for ${providerLabel(provider)}. Nothing else to do.`
       };
     }
     return {
       ready: false,
       env,
-      detail: `No key found for ${provider}. Paste one below, export ${env}, or run \`opencode auth login\` and choose the API key option.`
+      detail: `No API key found for ${providerLabel(provider)}. Paste one below, export ${env}, or sign in through OpenCode.`
     };
   }
 
@@ -143,7 +143,7 @@ export async function checkCredentials(
     return {
       ready: true,
       runtime: "opencode",
-      detail: `OpenCode is signed in to ${provider} with a plan. Nothing else to do.`
+      detail: `OpenCode has a subscription login for ${providerLabel(provider)}. Nothing else to do.`
     };
   }
 
@@ -151,16 +151,16 @@ export async function checkCredentials(
     return {
       ready: true,
       runtime: "claude-code",
-      detail:
-        "Claude Code has a login stored in ~/.claude. Canon Quill cannot see inside it, so if writing fails on auth, run `claude` and sign in again."
+      detail: `Claude Code has a subscription login for ${providerLabel(provider)}. Nothing else to do.`
     };
   }
 
   return {
     ready: false,
-    detail:
-      provider === "anthropic"
-        ? "No plan sign-in found. Run `claude` and sign in once. A Claude plan cannot be used through OpenCode; use an API key on that runtime."
-        : "No plan sign-in found. Run `opencode auth login`, pick OpenAI, and choose the ChatGPT sign-in option. Claude Code cannot use a ChatGPT plan."
+    detail: `No subscription login found for ${providerLabel(provider)}. Sign in through ${provider === "anthropic" ? "Claude Code" : "OpenCode"}, or choose an API key.`
   };
+}
+
+function providerLabel(provider: ProviderId): string {
+  return provider === "anthropic" ? "Anthropic" : "OpenAI";
 }

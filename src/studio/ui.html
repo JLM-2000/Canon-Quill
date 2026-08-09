@@ -558,6 +558,7 @@ async function reload(attempt = 0) {
     const r = await api("/api/state");
     S = r.state; PROJECTS = r.projects || [];
     questionSnapshot = null;
+    startSelection = S && !S.projectStart ? readStartDraft().projectStart || null : null;
     KINDS = r.kinds || KINDS; KIND_COUNTS = r.kindCounts || KIND_COUNTS;
     KIND_PURPOSE = r.kindPurpose || KIND_PURPOSE;
     NARRATION_OPTIONS = r.narrationOptions || NARRATION_OPTIONS;
@@ -741,17 +742,33 @@ function render() {
 let ENGINE = null;
 let startSelection = null;
 
+function startDraftKey() { return S ? `canon-quill-start:${S.slug}` : "canon-quill-start"; }
+function readStartDraft() {
+  try { return JSON.parse(sessionStorage.getItem(startDraftKey()) || "null") || {}; }
+  catch { return {}; }
+}
+function saveStartDraft(projectStart, startingBrief) {
+  try { sessionStorage.setItem(startDraftKey(), JSON.stringify({ projectStart, startingBrief })); }
+  catch { /* session storage is only a navigation convenience */ }
+}
+function clearStartDraft() {
+  try { sessionStorage.removeItem(startDraftKey()); }
+  catch { /* session storage is only a navigation convenience */ }
+}
+
 function viewStart() {
-  const selected = startSelection || S.projectStart;
+  const draft = readStartDraft();
+  const selected = startSelection || S.projectStart || draft.projectStart;
+  const brief = S.startingBrief || draft.startingBrief || "";
   return `
   <h1>How are you starting this book?</h1>
   <p class="sub">This decides whether Canon Quill waits for planning material or helps you build the project from a detailed brief.</p>
   <div class="choices">
-    <div class="choice ${selected === "from_scratch" ? "on" : ""}" onclick="startSelection='from_scratch'; render()">
+    <div class="choice ${selected === "from_scratch" ? "on" : ""}" onclick="chooseProjectStart('from_scratch')">
       <b>From scratch</b>
       <p>No plan, timeline, character file or outline yet. You will first describe in detail what the book is about, then we set up the project.</p>
     </div>
-    <div class="choice ${selected === "with_material" ? "on" : ""}" onclick="startSelection='with_material'; render()">
+    <div class="choice ${selected === "with_material" ? "on" : ""}" onclick="chooseProjectStart('with_material')">
       <b>I already have material</b>
       <p>I have a plan, timeline, characters, outline or related documents. Upload files directly or connect Google Drive and choose what Canon Quill may read.</p>
     </div>
@@ -759,22 +776,31 @@ function viewStart() {
   ${selected === "from_scratch" ? `<div class="card">
     <label>What is this book about?</label>
     <p class="hint">Describe the premise, protagonist, conflict, setting, tone and anything you already know. The more concrete this is, the fewer assumptions the preparation phase has to make.</p>
-    <textarea id="starting-brief" rows="9" placeholder="This book is about..." oninput="document.getElementById('start-continue').disabled=this.value.trim().length<40">${esc(S.startingBrief || "")}</textarea>
+    <textarea id="starting-brief" rows="9" placeholder="This book is about..." oninput="saveStartDraft('from_scratch',this.value);document.getElementById('start-continue').disabled=this.value.trim().length<40">${esc(brief)}</textarea>
   </div>` : ""}
   <div class="row" style="margin-top:16px">
-    <button id="start-continue" ${selected && (selected !== "from_scratch" || (S.startingBrief || "").trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
-    ${selected === "from_scratch" && (S.startingBrief || "").trim().length < 40 ? '<span class="hint" style="color:var(--warn)">Write a few detailed sentences before continuing.</span>' : ""}
+    <button id="start-continue" ${selected && (selected !== "from_scratch" || brief.trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
+    ${selected === "from_scratch" && brief.trim().length < 40 ? '<span class="hint" style="color:var(--warn)">Write a few detailed sentences before continuing.</span>' : ""}
   </div>`;
 }
 
+function chooseProjectStart(projectStart) {
+  startSelection = projectStart;
+  const draft = readStartDraft();
+  saveStartDraft(projectStart, projectStart === "from_scratch" ? draft.startingBrief || S.startingBrief || "" : "");
+  render();
+}
+
 async function continueProjectStart(btn) {
-  const projectStart = startSelection || S.projectStart;
-  const startingBrief = document.getElementById("starting-brief")?.value || S.startingBrief || "";
+  const draft = readStartDraft();
+  const projectStart = startSelection || S.projectStart || draft.projectStart;
+  const startingBrief = document.getElementById("starting-brief")?.value || S.startingBrief || draft.startingBrief || "";
   if (!projectStart) return;
   btn.disabled = true;
   try {
     S = await api("/api/project/start", { method: "POST", body: { projectStart, startingBrief } });
     startSelection = null;
+    clearStartDraft();
     route = "engine";
     render();
     loadEngine();
