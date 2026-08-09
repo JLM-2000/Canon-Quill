@@ -387,11 +387,15 @@ export function derivePhase(state: StudioState): PhaseId {
     return "export";
   }
   if (state.chapters.length > 0) return "writing";
-  if (!state.projectStart) return "start";
   const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
   const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
   const analysisProvider = state.engine.analysisProvider ?? draftingProvider;
   const analysisAuth = state.engine.analysisAuthMethod ?? draftingAuth;
+  if (!state.projectStart && !draftingProvider && !analysisProvider) return "start";
+  // A project created by an older Studio may already have engine choices but
+  // no entry marker. Keep the author on the engine screen until that legacy
+  // state is migrated, rather than sending them back to the first screen.
+  if (!state.projectStart) return "engine";
   if (!draftingProvider || !draftingAuth || !analysisProvider || !analysisAuth) return "engine";
   if (state.projectStart === "with_material") {
     const hasLocalSources = state.sources.some((source) => source.driveId.startsWith("local-"));

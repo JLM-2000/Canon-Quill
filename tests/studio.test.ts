@@ -167,6 +167,27 @@ describe("studio api", () => {
     expect(started.body.phase).toBe("engine");
   });
 
+  it("keeps legacy provider setup on the engine screen after reload", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.engine = {
+      provider: null,
+      authMethod: null,
+      analysisProvider: "openai",
+      analysisAuthMethod: "subscription",
+      draftingProvider: "anthropic",
+      draftingAuthMethod: "subscription",
+      routing: "split",
+      models: {}
+    };
+    await save(state);
+    expect((await call("/api/state")).body.state.phase).toBe("engine");
+    await call("/api/engine");
+    const reloaded = await call("/api/state");
+    expect(reloaded.body.state.projectStart).toBe("with_material");
+    expect(reloaded.body.state.phase).toBe("connect");
+  });
+
   it("supports separate providers for analysis and drafting", async () => {
     const result = await call("/api/engine", {
       method: "PATCH",

@@ -348,7 +348,10 @@ export function createStudioApp() {
   // --- Engine (provider, auth, models) --------------------------------------
   app.get("/api/engine", route(async (_req, res) => {
     const slug = await requireSlug();
-    const state = await loadState(slug);
+    let state = await loadState(slug);
+    if (!state.projectStart && (state.engine.provider || state.engine.analysisProvider || state.engine.draftingProvider)) {
+      state = await updateState(slug, (current) => { current.projectStart = "with_material"; });
+    }
     const catalog = await loadCatalog();
     const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
     const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
