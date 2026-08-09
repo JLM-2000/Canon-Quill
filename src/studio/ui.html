@@ -67,6 +67,9 @@
   }
   .navgroup { color: var(--faint); font-size: 10px; text-transform: uppercase;
     letter-spacing: .08em; padding: 14px 10px 5px; font-weight: 700; }
+  .navgroup-toggle { display:flex; justify-content:space-between; align-items:center; width:100%;
+    border:0; background:none; font:inherit; cursor:pointer; text-align:left; }
+  .navgroup-toggle:hover { color:var(--text); }
 
   /* --- main --- */
   main { padding: 26px 32px 80px; max-width: 1080px; }
@@ -107,6 +110,7 @@
   button:hover { filter: brightness(1.1); }
   button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
   button.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  button.text-link { background: none; color: var(--accent); padding: 0; font-size: inherit; font-weight: 600; }
   button.sm { padding: 4px 9px; font-size: 12px; }
   input, textarea, select {
     background: var(--bg); border: 1px solid var(--border); color: var(--text);
@@ -307,6 +311,8 @@ let selectionSave = Promise.resolve();
 let questionPoll = null;
 let questionSnapshot = null;
 let projectAnalysisLoading = false;
+let collapsedGroups = { "Set up": false, Prepare: false, Write: false };
+let chapterChat = null;
 
 // Filled from /api/state so there is only ever one definition of these.
 let KINDS = {};
@@ -317,6 +323,7 @@ let POV_OPTIONS = ["Close third", "First person", "Multiple POVs", "Omniscient t
 let TENSE_OPTIONS = ["Mixed", "Past", "Present"];
 
 const PHASES = [
+  { id: "start",       label: "Starting point", group: "Set up" },
   { id: "engine",      label: "Writing engine", group: "Set up" },
   { id: "connect",     label: "Connect Drive", group: "Set up" },
   { id: "sources",     label: "Select sources", group: "Set up" },
@@ -614,11 +621,17 @@ function renderNav() {
 
   if (S) {
     let group = "";
-    for (const p of PHASES) {
-      if (p.group !== group) { group = p.group; html += `<div class="navgroup">${group}</div>`; }
+    const order = phaseOrder();
+    for (const p of PHASES.filter((phase) => order.includes(phase.id))) {
+      if (p.group !== group) {
+        group = p.group;
+        html += `<button class="navgroup navgroup-toggle" onclick="toggleNavGroup('${group}')">
+          <span>${group}</span><span>${collapsedGroups[group] ? "▸" : "▾"}</span></button>`;
+      }
+      if (collapsedGroups[group]) continue;
       const locked = isLocked(p.id);
       const done = !locked && isDone(p.id);
-      const cur = !locked && PHASE_ORDER[furthestReached()] === p.id;
+      const cur = !locked && phaseOrder()[furthestReached()] === p.id;
       html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""} ${locked ? "locked" : ""}"
         onclick="go('${p.id}')" ${locked ? 'title="Finish the earlier steps first"' : ""}>
         <span class="dot"></span>${p.label}${
@@ -634,11 +647,13 @@ function renderNav() {
 function isDone(id) {
   if (!S) return false;
   switch (id) {
+    case "start":     return !!S.projectStart;
     case "engine":    return !!(S.engine?.provider && S.engine?.authMethod);
     case "connect":   return S.drive.connected;
-    case "sources":   return S.drive.referenceRoots.length > 0;
-    case "analyze":   return S.sources.length > 0 && S.sourcesReviewed;
-    case "intake":    return !!S.shape && !!S.draftingMode;
+    case "sources":   return !indexError && S.drive.referenceRoots.length > 0
+      && (!!S.drive.targetFolderId || route === "analyze" || S.sourcesReviewed);
+    case "analyze":   return !indexError && S.sources.length > 0 && S.sourcesReviewed;
+    case "intake":    return !!S.shape && !!S.draftingMode && !!S.projectShapeReviewed;
     case "draft":     return !!S.manuscriptReviewed;
     // Answered either way: a draft was picked, or starting fresh was chosen.
     case "style":     return S.styleCorpus.built;
@@ -652,31 +667,38 @@ function isDone(id) {
 }
 
 /** Steps in order. You may revisit anything reached, but not skip ahead. */
-const PHASE_ORDER = ["engine", "connect", "sources", "analyze", "intake", "draft", "style", "intake_analysis", "questions", "chapters"];
+function phaseOrder() {
+  if (!S?.projectStart) return ["start"];
+  if (S.projectStart === "from_scratch") {
+    return ["start", "engine", "intake", "draft", "intake_analysis", "questions", "chapters"];
+  }
+  const order = ["start", "engine", "connect", "sources", "analyze", "intake", "draft", "style", "intake_analysis", "questions", "chapters"];
+  return order.filter((id) => id !== "style" || S.sources.some((source) => source.kinds?.includes("past_book")));
+}
 
 function furthestReached() {
   if (!S) return 0;
-  const map = { engine: "engine", connect: "connect", sources: "sources", analyze: "analyze",
+  const map = { start: "start", engine: "engine", connect: "connect", sources: "sources", analyze: "analyze",
     intake: "intake", draft: "draft", preparation: "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
     review: "chapters", export: "chapters", complete: "chapters" };
   const current = map[S.phase] || "engine";
-  return Math.max(PHASE_ORDER.indexOf(current), 0);
+  return Math.max(phaseOrder().indexOf(current), 0);
 }
 
 function isLocked(id) {
-  const i = PHASE_ORDER.indexOf(id);
+  const i = phaseOrder().indexOf(id);
   return i > furthestReached();
 }
 
 function go(r) {
   if (isLocked(r)) {
-    const need = PHASE_ORDER[furthestReached()];
+    const need = phaseOrder()[furthestReached()];
     const label = PHASES.find((p) => p.id === need)?.label || need;
     toast(`Finish ${label} first.`, "info");
     return;
   }
   route = r; render();
-  if (r === "sources") loadBrowse(browse.folderId);   // always re-fetch: the grant may have changed
+  if (r === "sources" && (S.drive.connected || !(S.sources || []).some((source) => source.driveId.startsWith("local-")))) loadBrowse(browse.folderId);   // always re-fetch when Drive is available
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
   if (r === "analyze") loadCheck();
@@ -686,6 +708,11 @@ function go(r) {
   if (r === "questions") { loadQuestions(); startQuestionPolling(); }
   else stopQuestionPolling();
   if (r === "draft" && S.manuscript) loadDraftAnalysis();
+}
+
+function toggleNavGroup(group) {
+  collapsedGroups[group] = !collapsedGroups[group];
+  renderNav();
 }
 
 // --- views -----------------------------------------------------------------
@@ -706,12 +733,53 @@ function render() {
     return;
   }
   v.innerHTML = ({
-    engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
+    start: viewStart, engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
     intake: viewIntake, draft: viewDraft, style: viewStyle, intake_analysis: viewIntakeAnalysis, questions: viewQuestions, chapters: viewChapters
   }[route] || viewConnect)();
 }
 
 let ENGINE = null;
+let startSelection = null;
+
+function viewStart() {
+  const selected = startSelection || S.projectStart;
+  return `
+  <h1>How are you starting this book?</h1>
+  <p class="sub">This decides whether Canon Quill waits for planning material or helps you build the project from a detailed brief.</p>
+  <div class="choices">
+    <div class="choice ${selected === "from_scratch" ? "on" : ""}" onclick="startSelection='from_scratch'; render()">
+      <b>From scratch</b>
+      <p>No plan, timeline, character file or outline yet. You will first describe in detail what the book is about, then we set up the project.</p>
+    </div>
+    <div class="choice ${selected === "with_material" ? "on" : ""}" onclick="startSelection='with_material'; render()">
+      <b>I already have material</b>
+      <p>I have a plan, timeline, characters, outline or related documents. Upload files directly or connect Google Drive and choose what Canon Quill may read.</p>
+    </div>
+  </div>
+  ${selected === "from_scratch" ? `<div class="card">
+    <label>What is this book about?</label>
+    <p class="hint">Describe the premise, protagonist, conflict, setting, tone and anything you already know. The more concrete this is, the fewer assumptions the preparation phase has to make.</p>
+    <textarea id="starting-brief" rows="9" placeholder="This book is about..." oninput="document.getElementById('start-continue').disabled=this.value.trim().length<40">${esc(S.startingBrief || "")}</textarea>
+  </div>` : ""}
+  <div class="row" style="margin-top:16px">
+    <button id="start-continue" ${selected && (selected !== "from_scratch" || (S.startingBrief || "").trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
+    ${selected === "from_scratch" && (S.startingBrief || "").trim().length < 40 ? '<span class="hint" style="color:var(--warn)">Write a few detailed sentences before continuing.</span>' : ""}
+  </div>`;
+}
+
+async function continueProjectStart(btn) {
+  const projectStart = startSelection || S.projectStart;
+  const startingBrief = document.getElementById("starting-brief")?.value || S.startingBrief || "";
+  if (!projectStart) return;
+  btn.disabled = true;
+  try {
+    S = await api("/api/project/start", { method: "POST", body: { projectStart, startingBrief } });
+    startSelection = null;
+    route = "engine";
+    render();
+    loadEngine();
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+}
 
 async function loadEngine() {
   try { ENGINE = await api("/api/engine"); if (route === "engine") render(); }
@@ -723,6 +791,12 @@ function viewEngine() {
   const cat = ENGINE?.catalog;
   const cred = ENGINE?.credentials;
   const resolved = ENGINE?.resolvedModels || {};
+  const split = choice.routing === "split";
+  const analysisProvider = choice.analysisProvider || choice.provider;
+  const draftingProvider = choice.draftingProvider || choice.provider;
+  const analysisAuth = choice.analysisAuthMethod || choice.authMethod;
+  const draftingAuth = choice.draftingAuthMethod || choice.authMethod;
+  const keyProviders = [...new Set((split ? [analysisProvider, draftingProvider] : [choice.provider]).filter(Boolean))];
 
   const providerCard = (id, label, blurb) => `
     <div class="choice ${choice.provider === id ? "on" : ""}" onclick="setEngine({provider:'${id}'})">
@@ -732,6 +806,14 @@ function viewEngine() {
     <div class="choice ${choice.authMethod === id ? "on" : ""}" onclick="setEngine({authMethod:'${id}'})">
       <b>${label}</b><p>${blurb}</p></div>`;
 
+  const roleProviderCard = (role, id, label) => `<div class="choice ${(role === "analysis" ? analysisProvider : draftingProvider) === id ? "on" : ""}"
+    onclick="setEngine({${role === "analysis" ? "analysisProvider" : "draftingProvider"}:'${id}'})"><b>${label}</b></div>`;
+  const roleAuthCard = (role, id, label, blurb) => `<div class="choice ${(role === "analysis" ? analysisAuth : draftingAuth) === id ? "on" : ""}"
+    onclick="setEngine({${role === "analysis" ? "analysisAuthMethod" : "draftingAuthMethod"}:'${id}'})"><b>${label}</b><p>${blurb}</p></div>`;
+  const assignmentReady = split
+    ? analysisProvider && analysisAuth && draftingProvider && draftingAuth
+    : choice.provider && choice.authMethod;
+
   return `
   <h1>Writing engine</h1>
   <p class="sub">Canon Quill's own engine runs without any model. Measuring your prose, building the
@@ -739,20 +821,47 @@ function viewEngine() {
   work offline. A model is only needed to write the chapters, and this is where you choose which.</p>
 
   <div class="sectionlabel">Choose</div>
-  <h2 style="margin-top:0">Provider</h2>
+  <h2 style="margin-top:0">How should the work be split?</h2>
   <div class="choices">
-    ${providerCard("anthropic", "Anthropic", "Claude. Works with a Pro or Max plan, or an API key. Either runtime.")}
-    ${providerCard("openai", "OpenAI", "GPT. Works with a ChatGPT plan through OpenCode, or an API key.")}
+    <div class="choice ${!split ? "on" : ""}" onclick="setEngine({routing:'single'})">
+      <b>Use one provider</b><p>One sign-in handles analysis, planning, editing and writing.</p></div>
+    <div class="choice ${split ? "on" : ""}" onclick="setEngine({routing:'split'})">
+      <b>Use the best provider for each task</b><p>Recommended when you want ChatGPT/OpenAI for analysis and outlines, and Claude/Anthropic for prose.</p></div>
   </div>
 
-  ${choice.provider ? `
-  <h2>How to authenticate</h2>
+  ${!split ? `<h2>Provider</h2>
+  <div class="choices">
+    ${providerCard("anthropic", "Anthropic", "Claude. Works with a Pro or Max plan, or an API key.")}
+    ${providerCard("openai", "OpenAI", "GPT. Works with a ChatGPT plan through OpenCode, or an API key.")}
+  </div>
+  ${choice.provider ? `<h2>How to authenticate</h2>
   <div class="choices">
     ${authCard("subscription", "Subscription", choice.provider === "anthropic"
-        ? "Your Claude Pro or Max plan, through Claude Code. Sign in once with <code>claude</code>. No key, no per-token cost."
-        : "Your ChatGPT plan, through OpenCode: <code>opencode auth login</code>. Claude Code cannot use one.")}
-    ${authCard("api_key", "API key", "Pay per token. The key stays in your environment.")}
-  </div>` : ""}
+        ? "Your Claude Pro or Max plan, through Claude Code."
+        : "Your ChatGPT plan, through OpenCode.")}
+    ${authCard("api_key", "API key", "Pay per token. The key stays outside the project state.")}
+  </div>` : ""}` : `<div class="card">
+    <h2 style="margin-top:0">Analysis and outlines</h2>
+    <p class="sub">Use this for source extraction, project analysis, questions and chapter planning.</p>
+    <div class="choices">
+      ${roleProviderCard("analysis", "openai", "OpenAI / ChatGPT")}
+      ${roleProviderCard("analysis", "anthropic", "Anthropic / Claude")}
+    </div>
+    ${analysisProvider ? `<div class="choices" style="margin-top:10px">
+      ${roleAuthCard("analysis", "subscription", "Subscription", analysisProvider === "openai" ? "ChatGPT through OpenCode." : "Claude through Claude Code.")}
+      ${roleAuthCard("analysis", "api_key", "API key", "Use a separate key for analysis.")}
+    </div>` : ""}
+    <h2>Chapter prose and editing</h2>
+    <p class="sub">Use this for drafting, editing and prose-level work.</p>
+    <div class="choices">
+      ${roleProviderCard("drafting", "anthropic", "Anthropic / Claude")}
+      ${roleProviderCard("drafting", "openai", "OpenAI / ChatGPT")}
+    </div>
+    ${draftingProvider ? `<div class="choices" style="margin-top:10px">
+      ${roleAuthCard("drafting", "subscription", "Subscription", draftingProvider === "openai" ? "ChatGPT through OpenCode." : "Claude through Claude Code.")}
+      ${roleAuthCard("drafting", "api_key", "API key", "Use a separate key for prose.")}
+    </div>` : ""}
+  </div>`}
 
   ${cred || choice.provider ? '<div class="sectionlabel">Status</div>' : ""}
 
@@ -766,55 +875,55 @@ function viewEngine() {
       ${cred.env && !cred.ready ? `<p style="margin-top:6px"><code>export ${esc(cred.env)}=...</code>, then restart the Studio.</p>` : ""}
     </div></div>` : ""}
 
-  ${choice.provider && choice.authMethod === "api_key" ? `<div class="card">
-    <label>${esc(cat?.providers?.[choice.provider]?.label || choice.provider)} API key</label>
-    ${ENGINE?.storedKey ? `<div class="row" style="margin-bottom:8px">
-        <span class="pill good">stored</span>
-        <code>${esc(ENGINE.storedKey)}</code>
-        <button class="ghost sm" onclick="verifyKey(this)">Verify</button>
-        <button class="ghost sm" onclick="removeKey(this)">Remove</button>
-      </div>` : ""}
-    <div class="row">
-      <input id="apikey" type="password" autocomplete="off" spellcheck="false"
-        placeholder="${choice.provider === "anthropic" ? "sk-ant-..." : "sk-..."}"
-        onkeydown="if(event.key==='Enter')saveKey(this.nextElementSibling)" />
-      <button onclick="saveKey(this)">${ENGINE?.storedKey ? "Replace" : "Save and verify"}</button>
-    </div>
-    <div id="keyresult" class="hint" style="margin-top:8px"></div>
-    <div class="hint" style="margin-top:8px">Saved to <code>.auth/credentials.json</code> in this project,
-    file mode 0600 and gitignored. It is never written into your book's state and never sent back to this
-    page, only a mask. An environment variable takes precedence if you set one.</div>
-  </div>` : ""}
+  ${((!split && choice.provider && choice.authMethod === "api_key") || (split && (analysisAuth === "api_key" || draftingAuth === "api_key")))
+    ? keyProviders.map((provider) => `<div class="card">
+       <label>${esc(cat?.providers?.[provider]?.label || provider)} API key</label>
+      ${(ENGINE?.storedKeys?.[provider] || (!split && ENGINE?.storedKey)) ? `<div class="row" style="margin-bottom:8px">
+          <span class="pill good">stored</span>
+          <code>${esc(ENGINE?.storedKeys?.[provider] || ENGINE?.storedKey)}</code>
+          <button class="ghost sm" onclick="verifyKey(this,'${provider}')">Verify</button>
+          <button class="ghost sm" onclick="removeKey(this,'${provider}')">Remove</button>
+        </div>` : ""}
+      <div class="row">
+        <input id="apikey-${provider}" type="password" autocomplete="off" spellcheck="false"
+          placeholder="Paste the ${esc(provider)} key"
+          onkeydown="if(event.key==='Enter')saveKey(this.nextElementSibling,'${provider}')" />
+        <button onclick="saveKey(this,'${provider}')">Save and verify</button>
+      </div>
+      <div id="keyresult-${provider}" class="hint" style="margin-top:8px"></div>
+      <div class="hint" style="margin-top:8px">The key stays in <code>.auth/credentials.json</code>, mode 0600, and is never written into the project state.</div>
+    </div>`).join("") : ""}
 
 
-  ${choice.provider && cat ? `
+  ${assignmentReady && cat ? `
   <h2>Models per phase</h2>
   <p class="sub">Drafting is the one worth paying for. Everything else is structured work the engine
   has already narrowed down.</p>
   <div class="card" style="padding:0"><table>
     <tr><th>Phase</th><th>Model</th><th class="num">Cost / Mtok</th></tr>
     ${Object.entries(cat.roles).map(([role, r]) => {
+      const roleProvider = ["drafting", "editing"].includes(role) ? draftingProvider : analysisProvider;
       const id = resolved[role];
-      const m = (cat.providers[choice.provider]?.models || []).find((x) => x.id === id);
+      const m = (cat.providers[roleProvider]?.models || []).find((x) => x.id === id);
       const price = m && m.input_per_mtok !== null
         ? `$${m.input_per_mtok} in / $${m.output_per_mtok} out`
         : '<span style="color:var(--faint)">unverified</span>';
       return `<tr><td><b>${esc(role)}</b><div class="s" style="color:var(--faint);font-size:11.5px">${esc((r.description||"").trim().slice(0,90))}</div></td>
         <td><select onchange="setEngine({models:{${role}:this.value}})">
-          ${(cat.providers[choice.provider]?.models || []).map((x) =>
+           ${(cat.providers[roleProvider]?.models || []).map((x) =>
             `<option value="${esc(x.id)}" ${x.id === id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}
         </select></td>
         <td class="num">${price}</td></tr>`;
     }).join("")}
   </table></div>
-  ${cat.estimates && choice.authMethod !== "subscription" ? renderEstimates(cat, choice.provider) : ""}
-  ${choice.authMethod === "subscription" ? `<div class="info">
+   ${cat.estimates && (split ? analysisAuth !== "subscription" || draftingAuth !== "subscription" : choice.authMethod !== "subscription") ? renderEstimates(cat, draftingProvider) : ""}
+   ${assignmentReady && (split ? analysisAuth === "subscription" && draftingAuth === "subscription" : choice.authMethod === "subscription") ? `<div class="info">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
       <path d="M20 6L9 17l-5-5"/></svg>
     <div><b>No per-token cost</b>
       <p>Writing is covered by your plan, subject to its usage limits.</p></div></div>` : ""}` : ""}
 
-  ${choice.provider && choice.authMethod ? `<button onclick="go('connect')">Connect Drive</button>` : ""}`;
+  ${assignmentReady ? `<button onclick="go('${S.projectStart === "from_scratch" ? "intake" : "connect"}')">Continue</button>` : ""}`;
 }
 
 function renderEstimates(cat, provider) {
@@ -844,15 +953,15 @@ function renderEstimates(cat, provider) {
     </div></div>`;
 }
 
-async function saveKey(btn) {
-  const input = document.getElementById("apikey");
+async function saveKey(btn, provider) {
+  const input = document.getElementById(`apikey-${provider}`);
   const key = input?.value?.trim();
-  const out = document.getElementById("keyresult");
+  const out = document.getElementById(`keyresult-${provider}`);
   if (!key) { toast("Paste a key first.", "warn"); return; }
 
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Verifying…';
   try {
-    const r = await api("/api/engine/key", { method: "POST", body: { provider: S.engine.provider, key } });
+    const r = await api("/api/engine/key", { method: "POST", body: { provider, key } });
     if (input) input.value = "";
     if (out) out.innerHTML = `<span style="color:var(--${r.verification.ok ? "good" : "warn"})">${
       r.verification.ok ? "✓" : "!"} ${esc(r.verification.detail)}</span>`;
@@ -862,21 +971,21 @@ async function saveKey(btn) {
   finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Save and verify"; } }
 }
 
-async function verifyKey(btn) {
-  const out = document.getElementById("keyresult");
+async function verifyKey(btn, provider) {
+  const out = document.getElementById(`keyresult-${provider}`);
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
   try {
-    const r = await api("/api/engine/key/verify", { method: "POST", body: { provider: S.engine.provider } });
+    const r = await api("/api/engine/key/verify", { method: "POST", body: { provider } });
     if (out) out.innerHTML = `<span style="color:var(--${r.ok ? "good" : "bad"})">${r.ok ? "✓" : "✗"} ${esc(r.detail)}</span>`;
     toast(r.ok ? "Key works." : "Key did not verify.", r.ok ? "success" : "error");
   } catch (e) { toast(e.message, "error"); }
   finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Verify"; } }
 }
 
-async function removeKey(btn) {
+async function removeKey(btn, provider) {
   btn.disabled = true;
   try {
-    await api(`/api/engine/key/${S.engine.provider}`, { method: "DELETE" });
+    await api(`/api/engine/key/${provider}`, { method: "DELETE" });
     toast("Key removed."); await loadEngine(); await reload();
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
@@ -887,6 +996,7 @@ async function setEngine(patch) {
 }
 
 let DRIVE = null;
+let showDriveRecovery = false;
 
 async function loadDrive() {
   try { DRIVE = await api("/api/drive/status"); if (route === "connect") render(); }
@@ -908,8 +1018,8 @@ function viewConnect() {
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         ${next === "ready" ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
       </svg>
-      <div><b>${next === "ready" ? "Connected" : next === "connect" ? "Credentials found, not authorised yet" : "Not configured"}</b>
-        <p style="white-space:pre-wrap">${esc(d.reason || "")}</p></div>
+       <div><b>${next === "ready" ? "Connected" : next === "connect" ? "Credentials found, not authorised yet" : "Not configured"}</b>
+         ${next !== "ready" && d.reason ? `<p style="white-space:pre-wrap">${esc(d.reason)}</p>` : ""}</div>
     </div>
 
     ${next === "configure" ? `<div class="card">
@@ -944,27 +1054,37 @@ function viewConnect() {
         <code>https://www.googleapis.com/auth/drive.file</code> and restart. Browsing stops working and you
         paste folder links instead.</p></div></div>` : ""}
 
+    <div class="card">
+      <b>Upload planning material instead</b>
+      <p class="sub" style="margin:6px 0 10px">Use this for a plan, timeline, character sheet, outline or notes on this computer. Files are copied into this book's private workspace.</p>
+      <input id="local-sources" type="file" multiple accept=".txt,.md,.markdown,.rtf,.html,.csv,.json" />
+      <div class="row" style="margin-top:10px"><button class="ghost" onclick="uploadSources(this)">Upload files</button></div>
+    </div>
+
     ${next === "ready" ? `<div class="card"><b>Select sources</b>
        <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
        notes, timelines and references.</p>
       <button onclick="go('sources')">Select sources</button></div>
 
-    <div class="card">
-      <b>Reconnect</b>
-      <p class="sub" style="margin:6px 0 10px">Sign in again to use a different Google account, or to
-      re-grant access if something stops working. Your selections and indexed documents are kept.</p>
-      <div class="row"><button class="ghost" onclick="connectDrive(this)">Reconnect Google Drive</button>
-        <button class="ghost" onclick="checkDrive(this)">Check again</button></div>
-      <div id="authlink" class="hint" style="margin-top:10px"></div>
-    </div>` : ""}
+     <div class="hint" style="margin:10px 0 0">Can't connect? <button class="text-link" onclick="showDriveRecovery = true; render()">Reconnect</button></div>
+     ${showDriveRecovery ? `<div class="card" style="margin-top:10px">
+       <b>Reconnect Google Drive</b>
+       <p class="sub" style="margin:6px 0 10px">Use this if the stored connection no longer works or you want a different Google account.</p>
+       <div class="row"><button class="ghost" onclick="connectDrive(this)">Reconnect Google Drive</button>
+         <button class="ghost" onclick="checkDrive(this)">Check again</button>
+         <button class="text-link" onclick="showDriveRecovery = false; render()">Hide</button></div>
+       <div id="authlink" class="hint" style="margin-top:10px"></div>
+     </div>` : ""}` : ""}
   `}`;
 }
 
 async function connectDrive(btn) {
+  const originalLabel = btn.textContent || "Connect Google Drive";
+  const popup = window.open("about:blank", "_blank", "noopener");
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Opening Google…';
   try {
     const { url } = await api("/api/drive/connect", { method: "POST" });
-    window.open(url, "_blank", "noopener");
+    if (popup) popup.location.href = url;
     const link = document.getElementById("authlink");
     if (link) link.innerHTML = `If the window did not open, <a href="${esc(url)}" target="_blank" rel="noopener">authorise here</a>. This page updates once you approve.`;
     // The exchange finishes server-side; poll until the token lands.
@@ -973,23 +1093,49 @@ async function connectDrive(btn) {
       const status = await api("/api/drive/status");
       if (status.connected) {
         DRIVE = status;
+        showDriveRecovery = false;
         // The previous listing was fetched under the old grant; drop it.
         browse.entries = []; browse.folderId = "root"; browse.crumbs = [{ id: "root", name: "My Drive" }];
         toast("Drive connected."); await reload(); render(); return;
       }
     }
     toast("Still waiting for authorisation. Press Check again once you have approved.", "warn");
-  } catch (e) { toast(e.message, "error"); }
-  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Connect Google Drive"; } }
+  } catch (e) {
+    if (popup) popup.close();
+    toast(e.message, "error");
+  }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = originalLabel; } }
 }
 
 async function checkDrive(btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking'; }
-  try { DRIVE = await api("/api/drive/status"); await reload(); render(); }
+  try {
+    DRIVE = await api("/api/drive/status");
+    if (DRIVE.connected) showDriveRecovery = false;
+    await reload(); render();
+  }
   catch (e) { toast(e.message, "error"); if (btn) { btn.disabled = false; btn.textContent = "Check again"; } }
 }
 
+async function uploadSources(btn) {
+  const input = document.getElementById("local-sources");
+  const files = [...(input?.files || [])];
+  if (!files.length) { toast("Choose at least one text file.", "warn"); return; }
+  btn.disabled = true;
+  try {
+    const payload = await Promise.all(files.map(async (file) => ({ name: file.name, mimeType: file.type, text: await file.text() })));
+    S = await api("/api/sources/upload", { method: "POST", body: { files: payload } });
+    route = "sources";
+    await reload();
+    render();
+    toast(`${payload.length} file${payload.length === 1 ? "" : "s"} uploaded.`);
+  } catch (e) { toast(e.message, "error"); }
+  finally { if (btn.isConnected) btn.disabled = false; }
+}
+
 function viewSources() {
+  const localSources = (S.sources || []).filter((source) => source.driveId.startsWith("local-"));
+  const hasDrive = Boolean(S.drive.connected);
   const rows = browse.entries.map((e) => {
     const safe = esc(e.name).replace(/'/g, "\\'");
     const isRef = picked.has(e.id);
@@ -1018,11 +1164,22 @@ function viewSources() {
 
   return `
   <h1>Select sources</h1>
-  <p class="sub">Browse your Drive and mark what Canon Quill should read. Folders and individual files
-  both work. Include your past books in the series: they become the style corpus the drafting model
-  writes against.</p>
+  <p class="sub">Choose the material Canon Quill should read. You can combine uploaded planning files with
+  Drive references and your past books.</p>
+  ${indexError ? `<div class="info warn" style="margin-bottom:12px">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
+    <div><b>Source analysis failed</b><p>${esc(indexError)}</p><p style="margin-top:6px">Correct the selection or try Analyse again.</p></div>
+  </div>` : ""}
 
-  <div class="card">
+  ${localSources.length ? `<div class="card">
+    <label>Uploaded files</label>
+    <div class="hint" style="margin-bottom:8px">These files are already in this book's workspace and will be included in analysis.</div>
+    ${localSources.map((source) => `<div class="item"><span class="name">${esc(source.name)}</span><span class="pill">${source.wordCount?.toLocaleString() || 0} words</span></div>`).join("")}
+    <div class="row" style="margin-top:12px"><button onclick="reviewUploadedSources(this)">Review uploaded files</button></div>
+  </div>` : ""}
+
+  ${hasDrive ? `<div class="card">
     <div class="spread" style="margin-bottom:10px">
       <div class="crumbs" style="margin:0">${browse.crumbs.map((c, i) =>
         `<button onclick="jump(${i})">${esc(c.name)}</button>${i < browse.crumbs.length - 1 ? "<span style='color:var(--faint)'>/</span>" : ""}`).join("")}</div>
@@ -1040,9 +1197,9 @@ function viewSources() {
               <b style="color:var(--text)">Nothing listed here</b>
               <p style="margin:6px 0 0">If you just reconnected Google Drive, press <b>Refresh</b> above.</p></div>`
           : '<div class="empty">This folder is empty</div>'))}</div>
-  </div>
+  </div>` : localSources.length ? "" : `<div class="card"><b>No source method selected</b><p class="sub">Connect Drive or go back to upload planning material.</p><button onclick="go('connect')">Choose source method</button></div>`}
 
-  <div class="card">
+  ${hasDrive ? `<div class="card">
     <label>Reference material</label>
     <div class="hint" style="margin-bottom:6px">Read for canon and style. Include your past books.</div>
     <div class="row">${chosen || '<span class="hint">Nothing yet. Press <b>Reference</b> on a folder or file above.</span>'}</div>
@@ -1071,7 +1228,7 @@ function viewSources() {
     })()}
     <div class="hint" style="margin-top:8px">Reads every document and sorts it into groups. This can take a
     few minutes for a large folder.</div>
-  </div>`;
+  </div>` : ""}`;
 }
 
 async function loadBrowse(folderId) {
@@ -1125,10 +1282,20 @@ function analyseSources(btn) {
 
 async function runAnalysis(btn) {
   if (btn) btn.disabled = true;
+  indexError = null;
   indexing = true;
   route = "analyze";
   render();
   try {
+    if (!S.drive.connected && (S.sources || []).some((source) => source.driveId.startsWith("local-"))) {
+      S = await api("/api/sources/reviewed", { method: "POST" });
+      indexing = false;
+      route = "analyze";
+      await loadCheck();
+      toast("Uploaded files are ready to review.");
+      render();
+      return;
+    }
     await saveSourceSelections();
     S = await api("/api/sources/index", { method: "POST" });
     indexing = false;
@@ -1137,9 +1304,20 @@ async function runAnalysis(btn) {
   } catch (e) {
     indexing = false;
     indexError = e.message;
+    route = "sources";
     toast(e.message, "error");
   }
   render();
+}
+
+async function reviewUploadedSources(btn) {
+  btn.disabled = true;
+  try {
+    S = await api("/api/sources/reviewed", { method: "POST" });
+    route = "analyze";
+    await loadCheck();
+    render();
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 function viewAnalyze() {
@@ -1324,27 +1502,6 @@ function viewIntake() {
   <h1>Project shape</h1>
   <p class="sub">Two decisions drive everything downstream. Both can be changed later.</p>
 
-  <h2>Is this a standalone or part of a series?</h2>
-  <div class="choices">
-    <div class="choice ${shape === "standalone" ? "on" : ""}" onclick="setProject({shape:'standalone'})">
-      <b>Standalone</b><p>Self-contained. Canon starts empty and is built from this book alone.</p></div>
-    <div class="choice ${shape === "series" ? "on" : ""}" onclick="setProject({shape:'series'})">
-      <b>Series</b><p>Inherits canon from your earlier books. Prior events, character knowledge and
-      unresolved threads carry forward and are enforced.</p></div>
-  </div>
-
-  <h2>How should Canon Quill write it?</h2>
-  <div class="choices">
-    <div class="choice ${mode === "chapter_by_chapter" ? "on" : ""}" onclick="setProject({draftingMode:'chapter_by_chapter'})">
-      <b>Chapter by chapter</b>
-      <p>Drafts one chapter, edits and validates it, then <b>stops for your approval</b> before
-      continuing. Your notes shape every following chapter. Slower, far more control.</p></div>
-    <div class="choice ${mode === "whole_book" ? "on" : ""}" onclick="setProject({draftingMode:'whole_book'})">
-      <b>Whole book</b>
-      <p>Drafts, edits and validates <b>every chapter without stopping</b>, then hands you the
-      complete manuscript once. Continuity is still enforced between chapters.</p></div>
-  </div>
-
   <h2>Details</h2>
   <div class="card">
     <div style="margin-bottom:16px"><label>Book title</label>
@@ -1377,14 +1534,35 @@ function viewIntake() {
       <div class="hint" style="margin-bottom:4px">Pick every one that applies. The highest sets the ceiling.</div>
       ${multi("spice", INTIMACY)}
       <div style="margin-top:10px"><label style="font-weight:500">Notes on intimacy</label>
-        <textarea rows="2" placeholder="Explicit between the leads, fade to black elsewhere. Nothing on the page involving Iselle."
+        <textarea rows="2" placeholder="Explicit between the leads, fade to black elsewhere. Keep this boundary away from a specified character."
           onchange="setProject({intake:{spiceNotes:this.value}})">${esc(intake.spiceNotes || "")}</textarea>
         <div class="hint">Anything the labels above do not capture: exceptions, characters to keep out
         of it, how far is too far.</div></div></div>
   </div>
 
+  <h2>Is this a standalone or part of a series?</h2>
+  <div class="choices">
+    <div class="choice ${shape === "standalone" ? "on" : ""}" onclick="setProject({shape:'standalone'})">
+      <b>Standalone</b><p>Self-contained. Canon starts empty and is built from this book alone.</p></div>
+    <div class="choice ${shape === "series" ? "on" : ""}" onclick="setProject({shape:'series'})">
+      <b>Series</b><p>Inherits canon from your earlier books. Prior events, character knowledge and
+      unresolved threads carry forward and are enforced.</p></div>
+  </div>
+
+  <h2>How should Canon Quill write it?</h2>
+  <div class="choices">
+    <div class="choice ${mode === "chapter_by_chapter" ? "on" : ""}" onclick="setProject({draftingMode:'chapter_by_chapter'})">
+      <b>Chapter by chapter</b>
+      <p>Drafts one chapter, edits and validates it, then <b>stops for your approval</b> before
+      continuing. Your notes shape every following chapter. Slower, far more control.</p></div>
+    <div class="choice ${mode === "whole_book" ? "on" : ""}" onclick="setProject({draftingMode:'whole_book'})">
+      <b>Whole book</b>
+      <p>Drafts, edits and validates <b>every chapter without stopping</b>, then hands you the
+      complete manuscript once. Continuity is still enforced between chapters.</p></div>
+  </div>
+
   <div class="row">
-    <button ${shape && mode ? "" : "disabled"} onclick="go('draft')">Continue</button>
+    <button ${shape && mode ? "" : "disabled"} onclick="continueProjectShape(this)">Continue</button>
     ${!(shape && mode) ? '<span class="hint" style="color:var(--warn)">Choose the book shape and drafting mode to continue.</span>' : ""}
   </div>`;
 }
@@ -1430,6 +1608,12 @@ async function toggleMulti(field, value) {
 async function setProject(patch) {
   try { S = await api("/api/project", { method: "PATCH", body: patch }); render(); }
   catch (e) { toast(e.message, "error"); }
+}
+
+async function continueProjectShape(btn) {
+  btn.disabled = true;
+  try { S = await api("/api/project/continue", { method: "POST" }); go("draft"); }
+  catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 function draftSection() {
@@ -1557,7 +1741,7 @@ async function continueDraft(btn) {
   const notes = document.getElementById("manuscript-notes")?.value || "";
   btn.disabled = true;
   try {
-    S = await api("/api/manuscript", { method: "PATCH", body: { notes } });
+    S = await api("/api/manuscript", { method: "PATCH", body: { notes, continue: true } });
     route = "style";
     render();
   } catch (e) {
@@ -1769,6 +1953,7 @@ function viewQuestions() {
   const open = qs.filter((q) => q.answer === undefined);
   const done = qs.filter((q) => q.answer !== undefined);
   const started = Boolean(S.conversationStartedAt || qs.length || conversation.length);
+  const readyToStart = started && !open.length;
   const card = (q) => `<div class="card q ${q.answer !== undefined ? "answered" : ""}">
     <div class="meta">${esc(q.askedBy)} · ${esc(q.phase)}${q.blocking ? ' · <span style="color:var(--bad)">blocking</span>' : ""}</div>
     <div class="text">${esc(q.question)}</div>
@@ -1791,8 +1976,12 @@ function viewQuestions() {
     <p class="sub" style="margin:6px 0 12px">Click when you are ready. The first question is prepared from the analysis, and the next one will not appear until you answer it.</p>
     <button onclick="beginIntake(this)">Begin intake</button>
   </div>` : `${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}` : ""}
-    ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}
-    ${!open.length && !done.length ? intakeWaitingCard() : ""}`}
+     ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}
+     ${readyToStart ? `<div class="card" style="margin-top:18px;border-color:var(--accent)">
+       <b>Preparation questions complete</b>
+       <p class="sub" style="margin:6px 0 12px">Review the decisions above. When you are satisfied that the project is ready, start the writing phase.</p>
+       <button onclick="requestWritingStart()">Start writing</button>
+     </div>` : ""}`}
   `;
 }
 
@@ -1825,7 +2014,7 @@ async function loadQuestions() {
     if (S) S.questions = r.questions || [];
     if (S) S.conversation = r.conversation || S.conversation || [];
     if (S) S.conversationStartedAt = r.conversationStartedAt || S.conversationStartedAt || null;
-    if (route === "questions" && S.questions.length > 0 && !S.questions.some((question) => question.answer === undefined)) {
+    if (route === "questions" && S.writingConfirmed) {
       stopQuestionPolling();
       route = "chapters";
     }
@@ -1838,8 +2027,8 @@ async function beginIntake(btn) {
   try {
     S = await api("/api/conversation/start", { method: "POST" });
     if (S.questions.length === 0) {
-      route = "chapters";
-      toast("No author decisions remain. Moving to chapters.");
+      route = "questions";
+      toast("No author decisions remain. Review the preparation and start writing when ready.");
       render();
       return;
     }
@@ -1865,7 +2054,7 @@ function stopQuestionPolling() {
 async function answer(id, text) {
   if (!text || !String(text).trim()) return;
   try { S = await api(`/api/questions/${id}/answer`, { method: "POST", body: { answer: String(text) } });
-    if (S.questions.length > 0 && !S.questions.some((question) => question.answer === undefined)) {
+    if (S.writingConfirmed) {
       stopQuestionPolling();
       route = "chapters";
       toast("Intake complete. Moving to chapters.");
@@ -1874,6 +2063,27 @@ async function answer(id, text) {
     }
     render(); }
   catch (e) { toast(e.message, "error"); }
+}
+
+function requestWritingStart() {
+  showModal({
+    title: "Ready to begin writing?",
+    body: `<p class="hint" style="margin:0">This closes the preparation gate. Canon Quill will use the approved project shape, analysis, questions, style material and chapter instructions as the writing contract.</p>`,
+    actions: `<button onclick="confirmWriting(this)">Yes, start writing</button>
+      <button class="ghost" onclick="closeModal()">Not yet</button>`
+  });
+}
+
+async function confirmWriting(btn) {
+  btn.disabled = true;
+  try {
+    S = await api("/api/writing/confirm", { method: "POST" });
+    closeModal();
+    collapsedGroups["Set up"] = true;
+    collapsedGroups.Prepare = true;
+    route = "chapters";
+    render();
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 function viewChapters() {
@@ -1946,14 +2156,50 @@ function viewChapters() {
       <div class="row">
         ${c.styleFidelity !== undefined
           ? `<span class="pill ${fidelityClass(c.styleFidelity)}">style ${c.styleFidelity}</span>` : ""}
-        ${c.flowVerdict ? `<span class="pill ${c.flowVerdict === "pass" ? "good" : c.flowVerdict === "revise" ? "warn" : "bad"}">flow ${esc(c.flowVerdict)}</span>` : ""}
-        <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
-        ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
-      </div>
+         ${c.flowVerdict ? `<span class="pill ${c.flowVerdict === "pass" ? "good" : c.flowVerdict === "revise" ? "warn" : "bad"}">flow ${esc(c.flowVerdict)}</span>` : ""}
+         <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
+         ${mode === "chapter_by_chapter" ? `<button class="ghost sm" onclick="openChapterChat(${c.number})">Chapter chat</button>` : ""}
+         ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
+         ${c.status === "approved" ? `<button class="ghost sm" onclick="setStatus(${c.number},'needs_work')">Edit again</button>` : ""}
+       </div>
     </div>`).join("")}
   </div>
 
+  ${chapterChat ? chapterChatCard(chapterChat) : ""}
   ${directionsCard(pending, dirs)}`;
+}
+
+function chapterChatCard(chat) {
+  return `<div class="card" style="margin-top:14px;border-color:var(--accent)">
+    <div class="spread"><div><b>Chapter ${chat.number} planning chat</b><div class="hint">Tell the drafting agent what must happen, what matters, which dialogue or emotional turns to protect, and what to avoid.</div></div>
+      <button class="ghost sm" onclick="chapterChat=null;render()">Close</button></div>
+    <div class="chatlog" style="margin-top:12px;max-height:300px;overflow:auto">
+      ${chat.messages.length ? chat.messages.map((message) => `<div class="chat ${message.role === "author" ? "author" : "agent"}"><b>${message.role === "author" ? "You" : "Agent"}</b><div>${esc(message.text)}</div></div>`).join("") : '<div class="hint">No chapter guidance yet.</div>'}
+    </div>
+    <div class="row" style="margin-top:10px"><textarea id="chapter-chat-input" rows="3" placeholder="The chapter must... Include this dialogue beat... Do not reveal..."></textarea>
+      <button onclick="sendChapterChat(this,${chat.number})">Send</button></div>
+  </div>`;
+}
+
+async function openChapterChat(number) {
+  chapterChat = { number, messages: [] };
+  render();
+  try {
+    chapterChat.messages = (await api(`/api/chapters/${number}/chat`)).messages || [];
+    render();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function sendChapterChat(btn, number) {
+  const input = document.getElementById("chapter-chat-input");
+  const text = input?.value?.trim();
+  if (!text) { toast("Write the chapter guidance first.", "warn"); return; }
+  btn.disabled = true;
+  try {
+    const result = await api(`/api/chapters/${number}/chat`, { method: "POST", body: { text } });
+    chapterChat = { number, messages: result.messages || [] };
+    render();
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 /** The author's channel to the drafting agent. */
@@ -1965,7 +2211,7 @@ function directionsCard(pending, all) {
     <div class="hint" style="margin-bottom:8px">Anything you want taken into account from here on: a
     change of direction, a note about a character, something to stop doing. The drafting agent reads these
     before each chapter and marks them applied.</div>
-    <textarea id="direction" rows="3" placeholder="Keep Mara's chapters colder. Stop explaining the seal in dialogue."></textarea>
+    <textarea id="direction" rows="3" placeholder="Keep the protagonist's chapters colder. Stop explaining the central mystery in dialogue."></textarea>
     <div class="row" style="margin-top:8px">
       <button onclick="addDirection(this)">Add instruction</button>
       <select id="dirscope" style="width:auto">
@@ -2044,7 +2290,7 @@ async function setStatus(number, status) {
       review: "chapters", export: "chapters", complete: "chapters" }[S.phase] || S.phase;
     route = PHASES.some((p) => p.id === persistedRoute) ? persistedRoute : "connect";
     render();
-    if (route === "sources") loadBrowse("root");
+    if (route === "sources" && (S.drive.connected || !(S.sources || []).some((source) => source.driveId.startsWith("local-")))) loadBrowse("root");
     if (route === "engine") loadEngine();
     if (route === "connect") loadDrive();
     if (route === "draft" && S.manuscript) loadDraftAnalysis();

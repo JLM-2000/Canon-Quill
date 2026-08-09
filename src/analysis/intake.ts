@@ -1,5 +1,6 @@
 import { analyseWriting, type WritingProfile } from "../style/profile.js";
-import { words } from "../style/text.js";
+import { analyseManuscript } from "./manuscript.js";
+import { splitParagraphs, words } from "../style/text.js";
 
 export interface IntakeDocument {
   name: string;
@@ -81,7 +82,7 @@ const signals: GenreSignal[] = [
   { genre: "Science fiction", pattern: /\b(?:spaceship|spacecraft|planet|galaxy|robot|android|cyborg|station|alien|mars|future|colony|quantum|technology|starship)\b/gi, evidence: "science-fiction setting vocabulary" },
   { genre: "Horror", pattern: /\b(?:haunted|ghost|horror|terrified|nightmare|demon|monster|possessed|darkness|blood|corpse|graveyard|creature)\b/gi, evidence: "horror and fear vocabulary" },
   { genre: "Historical", pattern: /\b(?:victorian|regency|medieval|empire|war|colonial|wwi|wwii|nineteenth century|eighteenth century|historical|heirloom)\b/gi, evidence: "historical setting vocabulary" },
-  { genre: "Contemporary", pattern: /\b(?:apartment|office|subway|instagram|texted|phone|college|university|modern|coffee shop|city life)\b/gi, evidence: "contemporary-life vocabulary" }
+  { genre: "Contemporary", pattern: /\b(?:apartment|office|subway|instagram|texted|phone|modern|coffee shop|city life)\b/gi, evidence: "contemporary-life vocabulary" }
 ];
 
 export function analyseProjectMaterial(documents: IntakeDocument[], context: IntakeContext = {}): ProjectAnalysis {
@@ -251,15 +252,6 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
     });
   }
 
-  if (!intake.hardAvoids) {
-    add({
-      key: "hardAvoids",
-      question: `Before the preparation agent turns this analysis into canon, what must it avoid in ${genreLabel}: tropes, plot turns, language, content, AI-isms, or tonal choices?`,
-      rationale: "The books can reveal what exists, but they cannot safely invent the boundaries of what you do not want.",
-      blocking: true
-    });
-  }
-
   if (context.shape === "series" && !intake.seriesPosition && !findings.structure) {
     add({
       key: "seriesPosition",
@@ -283,7 +275,7 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
     });
   }
 
-  return plan.slice(0, 9);
+  return plan;
 }
 
 function rankGenres(text: string): RankedSignal[] {
@@ -312,7 +304,6 @@ function findUnknowns(input: {
   if (genre === "Romance" && !context.intake?.spice) unknowns.push("intimacy boundary");
   if ((genre === "Mystery" || genre === "Thriller") && !context.intake?.revealPolicy) unknowns.push("reveal policy");
   if (context.shape === "series" && !findings.structure) unknowns.push("series position and inherited threads");
-  unknowns.push("hard avoids and content boundaries");
   return [...new Set(unknowns)];
 }
 
@@ -344,11 +335,12 @@ function findProtagonist(documents: IntakeDocument[], names: string[]): IntakeFi
 function findRelationships(documents: IntakeDocument[], names: string[], genre: string | null): IntakeFinding | null {
   const labeled = findLabeledSnippet(documents, /(?:relationship|romance|couple|dynamic|relationship arc|love story)\s*[:\-]\s*(.{16,280})/i);
   if (labeled) return labeled;
-  if (genre === "Romance" && names.length >= 2) {
+  const pair = rankRelationshipPair(documents, names);
+  if (genre === "Romance" && pair) {
     return {
-      value: `${names[0]} and ${names[1]}`,
-      confidence: 0.48,
-      evidence: [`Romance signals and named characters identify ${names[0]} and ${names[1]}.`]
+      value: `${pair.names[0]} and ${pair.names[1]}`,
+      confidence: 0.72,
+      evidence: [`${pair.sharedScenes} shared narrative sections, including ${pair.romanceScenes} with relationship signals.`]
     };
   }
   return null;
@@ -437,32 +429,100 @@ function summariseDocument(document: IntakeDocument): IntakeSourceSummary {
 }
 
 function extractNames(documents: IntakeDocument[]): string[] {
-  const counts = new Map<string, number>();
-  const add = (candidate: string) => {
+  const candidates = new Map<string, { score: number; mentions: number }>();
+  const add = (candidate: string, score: number, mentions = 1) => {
     const normalized = candidate.trim().replace(/\s+/g, " ");
     if (!normalized) return;
     if (!/^[A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3}$/.test(normalized)) return;
-    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    const current = candidates.get(normalized) ?? { score: 0, mentions: 0 };
+    current.score += score;
+    current.mentions += mentions;
+    candidates.set(normalized, current);
   };
 
   for (const document of documents) {
-    for (const match of document.text.matchAll(/(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/gi)) add(match[1]);
-    for (const match of document.text.matchAll(/\b(?:called|named)\s+([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})\b/g)) add(match[1]);
+    for (const match of document.text.matchAll(/(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/g)) add(match[1], 4);
+    for (const match of document.text.matchAll(/\b(?:called|named)\s+([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})\b/g)) add(match[1], 3);
+
+    if (!isNarrativeDocument(document)) continue;
+    const narrative = narrativeText(document);
+    const seen = new Map<string, { mentions: number; nonSentence: number }>();
+    for (const match of narrative.matchAll(/\b([A-Z][a-zÀ-ɏ]{2,}(?:\s+[A-Z][a-zÀ-ɏ]{2,}){0,2})\b/g)) {
+      const candidate = match[1];
+      const before = narrative.slice(0, match.index).trimEnd();
+      const previous = before.at(-1) ?? "";
+      const sentenceStart = !previous || /[.!?]/.test(previous);
+      const current = seen.get(candidate) ?? { mentions: 0, nonSentence: 0 };
+      current.mentions += 1;
+      if (!sentenceStart || insideQuotes(narrative, match.index)) current.nonSentence += 1;
+      seen.set(candidate, current);
+    }
+    for (const [candidate, evidence] of seen) {
+      if (evidence.mentions < 2 || evidence.nonSentence < 1) continue;
+      add(candidate, evidence.mentions * 2 + evidence.nonSentence, evidence.mentions);
+    }
   }
 
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return [...candidates.entries()]
+    .sort((a, b) => b[1].score - a[1].score || b[1].mentions - a[1].mentions || a[0].localeCompare(b[0]))
     .slice(0, 8)
     .map(([name]) => name);
 }
 
+function rankRelationshipPair(documents: IntakeDocument[], names: string[]): { names: [string, string]; sharedScenes: number; romanceScenes: number } | null {
+  if (names.length < 2) return null;
+  const romancePattern = signals.find((signal) => signal.genre === "Romance")?.pattern;
+  const scores: Array<{ names: [string, string]; sharedScenes: number; romanceScenes: number; score: number }> = [];
+  const prose = documents.filter(isNarrativeDocument).map(narrativeText).join("\n\n");
+  const paragraphs = splitParagraphs(prose).map((paragraph) => paragraph.text);
+  for (let i = 0; i < names.length; i += 1) {
+    for (let j = i + 1; j < names.length; j += 1) {
+      const pair: [string, string] = [names[i], names[j]];
+      const occurrences = paragraphs.filter((paragraph) => pair.every((name) => namePattern(name).test(paragraph)));
+      const romanceScenes = occurrences.filter((paragraph) => romancePattern ? count(paragraph, romancePattern) > 0 : false).length;
+      if (occurrences.length >= 2) scores.push({ names: pair, sharedScenes: occurrences.length, romanceScenes, score: occurrences.length + romanceScenes * 2 });
+    }
+  }
+  return scores.sort((a, b) => b.score - a.score || b.sharedScenes - a.sharedScenes)[0] ?? null;
+}
+
+function isNarrativeDocument(document: IntakeDocument): boolean {
+  const kinds = document.kinds ?? [];
+  return kinds.length === 0 || kinds.includes("past_book") || kinds.includes("reference_book");
+}
+
+function narrativeText(document: IntakeDocument): string {
+  if (!isNarrativeDocument(document)) return document.text;
+  const analysis = analyseManuscript(document.text);
+  const start = analysis.chapters[0]?.offset ?? 0;
+  return document.text.slice(start, analysis.storyEndOffset || document.text.length);
+}
+
+function insideQuotes(text: string, offset: number): boolean {
+  const before = text.slice(0, offset);
+  const straight = (before.match(/"/g) ?? []).length;
+  const curly = (before.match(/[“”]/g) ?? []).length;
+  return straight % 2 === 1 || curly % 2 === 1;
+}
+
+function namePattern(name: string): RegExp {
+  return new RegExp(`\\b${name.split(/\s+/).map(escapeRegExp).join("\\s+")}\\b`, "i");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function findLabeledSnippet(documents: IntakeDocument[], pattern: RegExp): IntakeFinding | null {
   for (const document of documents) {
-    const match = pattern.exec(document.text.replace(/\r/g, ""));
-    if (!match?.[1]) continue;
-    const value = cleanSnippet(match[1]);
-    if (value.length < 12) continue;
-    return { value, confidence: 0.86, evidence: [`Explicit planning label found in ${document.name}.`] };
+    const lines = document.text.replace(/\r/g, "").split("\n");
+    for (const line of lines) {
+      const match = pattern.exec(line);
+      if (!match || match.index > 3 || !match[1]) continue;
+      const value = cleanSnippet(match[1]);
+      if (value.length < 12) continue;
+      return { value, confidence: 0.86, evidence: [`Explicit planning label found in ${document.name}.`] };
+    }
   }
   return null;
 }
@@ -492,8 +552,9 @@ function isPlanningDocument(document: IntakeDocument): boolean {
 }
 
 function inferSubgenre(genre: string, text: string): string | null {
+  const explicit = /\bsubgenre\s*[:\-]\s*([^\n]+)/i.exec(text)?.[1]?.trim();
+  if (explicit) return explicit;
   if (genre === "Romance") {
-    if (/\b(?:college|university|freshman|sophomore|new adult)\b/i.test(text)) return "New adult romance";
     if (/\b(?:magic|fae|kingdom|vampire|werewolf)\b/i.test(text)) return "Fantasy romance";
     if (/\b(?:historical|regency|victorian|duke|earl)\b/i.test(text)) return "Historical romance";
     if (/\b(?:contemporary|apartment|office|city|modern)\b/i.test(text)) return "Contemporary romance";

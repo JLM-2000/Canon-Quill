@@ -12,23 +12,23 @@ import { buildOpeningBrief, renderFlowReport, validateFlow } from "../src/contin
 function handoff(overrides: Partial<ChapterHandoff> = {}): ChapterHandoff {
   return {
     chapter: 1,
-    title: "The Fence",
-    endsAtLocation: "Marrow",
+    title: "Opening",
+    endsAtLocation: "North Station",
     timeline: { chapter: 1, endsAt: "Day 2, dusk", elapsed: "six hours", isFlashback: false },
     characters: [
       {
-        name: "Mara",
-        location: "Marrow",
-        knows: ["the letter is forged"],
-        condition: "a cut across her palm",
+        name: "Rowan",
+        location: "North Station",
+        knows: ["the record was altered"],
+        condition: "a cut across their palm",
         emotionalState: "cornered",
-        withCharacters: ["Iselle"],
+        withCharacters: ["Ellis"],
         lastSeenChapter: 1
       }
     ],
-    newFacts: ["The seal belongs to the harbour office"],
-    closingBeat: "She burns the letter.",
-    openQuestion: "Who forged the harbour seal?",
+    newFacts: ["The record belongs to the district office"],
+    closingBeat: "They hide the document.",
+    openQuestion: "Who altered the record?",
     ...overrides
   };
 }
@@ -41,7 +41,7 @@ describe("ledger", () => {
   it("records handoffs and advances progress", () => {
     const ledger = ledgerWith(handoff());
     expect(ledger.chaptersComplete).toBe(1);
-    expect(handoffFor(ledger, 1)?.title).toBe("The Fence");
+    expect(handoffFor(ledger, 1)?.title).toBe("Opening");
   });
 
   it("replaces a handoff for the same chapter rather than duplicating", () => {
@@ -57,9 +57,9 @@ describe("ledger", () => {
         chapter: 2,
         characters: [
           {
-            name: "Mara",
-            location: "Calder",
-            knows: ["the letter is forged", "Iselle lied"],
+            name: "Rowan",
+            location: "East Station",
+            knows: ["the record was altered", "Ellis lied"],
             condition: "",
             emotionalState: "set",
             withCharacters: [],
@@ -68,16 +68,16 @@ describe("ledger", () => {
         ]
       })
     );
-    expect(latestCharacterState(ledger, "mara")?.location).toBe("Calder");
+    expect(latestCharacterState(ledger, "rowan")?.location).toBe("East Station");
   });
 });
 
 describe("opening brief", () => {
   it("states the contract for the next chapter", () => {
     const brief = buildOpeningBrief(ledgerWith(handoff()), 2);
-    expect(brief).toContain("Marrow");
-    expect(brief).toContain("Who forged the harbour seal?");
-    expect(brief).toContain("a cut across her palm");
+    expect(brief).toContain("North Station");
+    expect(brief).toContain("Who altered the record?");
+    expect(brief).toContain("a cut across their palm");
     expect(brief).toContain("Rules for this chapter's opening");
   });
 
@@ -86,8 +86,8 @@ describe("opening brief", () => {
   });
 
   it("surfaces inherited canon for a series", () => {
-    const ledger = { ...emptyLedger("Test", 10, "series"), inheritedCanon: ["Iselle died in book two"] };
-    expect(buildOpeningBrief(ledger, 1)).toContain("Iselle died in book two");
+    const ledger = { ...emptyLedger("Test", 10, "series"), inheritedCanon: ["Ellis left in the previous volume"] };
+    expect(buildOpeningBrief(ledger, 1)).toContain("Ellis left in the previous volume");
   });
 
   it("flags threads going cold", () => {
@@ -105,16 +105,16 @@ describe("flow validation", () => {
 
   it("passes a chapter that honours the handoff", () => {
     const draft =
-      "Mara stayed in Marrow through the night, her palm still bandaged. The harbour seal was forged, and she meant to find out who had done it.";
+      "Rowan stayed in North Station through the night, their palm still bandaged. The record was altered, and they meant to find out who had done it.";
     const claimed = handoff({
       chapter: 2,
       timeline: { chapter: 2, endsAt: "Day 3, dawn", elapsed: "a night", isFlashback: false },
       characters: [
         {
-          name: "Mara",
-          location: "Marrow",
-          knows: ["the letter is forged"],
-          condition: "a cut across her palm",
+          name: "Rowan",
+          location: "North Station",
+          knows: ["the record was altered"],
+          condition: "a cut across their palm",
           emotionalState: "set",
           withCharacters: [],
           lastSeenChapter: 2
@@ -127,16 +127,16 @@ describe("flow validation", () => {
   });
 
   it("catches a character teleporting between chapters", () => {
-    const draft = "Mara woke in Calder with the sun already high. Who had forged the harbour seal still gnawed at her.";
+    const draft = "Rowan woke in East Station with the sun already high. Who had altered the record still gnawed at them.";
     const claimed = handoff({
       chapter: 2,
       timeline: { chapter: 2, endsAt: "Day 3, noon", elapsed: "a day", isFlashback: false },
       characters: [
         {
-          name: "Mara",
-          location: "Calder",
-          knows: ["the letter is forged"],
-          condition: "a cut across her palm",
+          name: "Rowan",
+          location: "East Station",
+          knows: ["the record was altered"],
+          condition: "a cut across their palm",
           emotionalState: "set",
           withCharacters: [],
           lastSeenChapter: 2
@@ -150,16 +150,16 @@ describe("flow validation", () => {
 
   it("accepts a relocation when travel is shown", () => {
     const draft =
-      "They rode out of Marrow before dawn and reached Calder by dusk. Mara's palm ached the whole way. Who forged the harbour seal was all she thought about.";
+      "They rode out of North Station before dawn and reached East Station by dusk. Rowan's palm ached the whole way. Who altered the record was all they thought about.";
     const claimed = handoff({
       chapter: 2,
       timeline: { chapter: 2, endsAt: "Day 3, dusk", elapsed: "a day", isFlashback: false },
       characters: [
         {
-          name: "Mara",
-          location: "Calder",
-          knows: ["the letter is forged"],
-          condition: "a cut across her palm",
+          name: "Rowan",
+          location: "East Station",
+          knows: ["the record was altered"],
+          condition: "a cut across their palm",
           emotionalState: "set",
           withCharacters: [],
           lastSeenChapter: 2
@@ -170,7 +170,7 @@ describe("flow validation", () => {
   });
 
   it("catches a timeline running backwards without a flashback marker", () => {
-    const draft = "Mara remained in Marrow. Who forged the harbour seal, she did not yet know.";
+    const draft = "Rowan remained in North Station. Who altered the record, they did not yet know.";
     const claimed = handoff({
       chapter: 2,
       timeline: { chapter: 2, endsAt: "Day 1, noon", elapsed: "a day", isFlashback: false }
@@ -180,7 +180,7 @@ describe("flow validation", () => {
   });
 
   it("allows a declared flashback to move backwards", () => {
-    const draft = "Mara remained in Marrow. Who forged the harbour seal, she did not yet know.";
+    const draft = "Rowan remained in North Station. Who altered the record, they did not yet know.";
     const claimed = handoff({
       chapter: 2,
       timeline: { chapter: 2, endsAt: "Day 1, noon", elapsed: "a day", isFlashback: true }
@@ -189,21 +189,21 @@ describe("flow validation", () => {
   });
 
   it("catches a dropped hook", () => {
-    const draft = "Mara stayed in Marrow and spent the morning mending nets by the water, thinking of nothing at all.";
+    const draft = "Rowan stayed in North Station and spent the morning sorting papers, thinking of nothing at all.";
     const report = validateFlow(base, 2, draft, handoff({ chapter: 2 }));
     expect(report.issues.some((issue) => issue.kind === "dropped-hook")).toBe(true);
   });
 
   it("catches a character acting on knowledge they never gained", () => {
-    const draft = "Mara stayed in Marrow. Who forged the harbour seal was still the question.";
+    const draft = "Rowan stayed in North Station. Who altered the record was still the question.";
     const claimed = handoff({
       chapter: 2,
       characters: [
         {
-          name: "Mara",
-          location: "Marrow",
-          knows: ["the letter is forged", "Iselle betrayed her"],
-          condition: "a cut across her palm",
+          name: "Rowan",
+          location: "North Station",
+          knows: ["the record was altered", "Ellis betrayed them"],
+          condition: "a cut across their palm",
           emotionalState: "set",
           withCharacters: [],
           lastSeenChapter: 2
@@ -220,7 +220,7 @@ describe("flow validation", () => {
         { id: "t1", question: "Where is the fleet?", openedChapter: 1, lastTouchedChapter: 1, status: "open", weight: "main", mustResolveBy: 3 }
       ]
     });
-    const report = validateFlow(ledger, 4, "Mara stayed in Marrow. Who forged the harbour seal?", handoff({ chapter: 4 }));
+    const report = validateFlow(ledger, 4, "Rowan stayed in North Station. Who altered the record?", handoff({ chapter: 4 }));
     expect(report.issues.some((issue) => issue.kind === "overdue-thread" && issue.severity === "blocker")).toBe(true);
   });
 
@@ -229,7 +229,7 @@ describe("flow validation", () => {
       plannedChapters: 10,
       promises: [{ id: "p1", setup: "the locked drawer", plantedChapter: 2 }]
     });
-    const report = validateFlow(ledger, 10, "Mara stayed in Marrow. Who forged the harbour seal?", handoff({ chapter: 10 }));
+    const report = validateFlow(ledger, 10, "Rowan stayed in North Station. Who altered the record?", handoff({ chapter: 10 }));
     expect(report.issues.some((issue) => issue.kind === "unpaid-promise")).toBe(true);
   });
 

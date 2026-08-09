@@ -90,7 +90,7 @@ describe("metrics", () => {
 describe("writing profile", () => {
   it("keeps audience and intimacy readings advisory and evidence-backed", () => {
     const profile = analyseWriting(
-      "At university, in her freshman year, she kissed him and closed the door. The next morning, blood darkened the sheet. " +
+      "At twenty-two, in their first year away from home, they kissed and closed the door. At twenty-two, the next morning, blood darkened the sheet. " +
       "He swore under his breath and wondered whether she would stay."
     );
     expect(profile.intimacy.value).toBe("Fade to black");
@@ -112,7 +112,7 @@ describe("beat classification", () => {
   });
 
   it("recognises ordinary domestic movement as action", () => {
-    expect(classifyBeat("Julian blinked at the doorway, then turned back to the stove. He stirred the coffee and reached for the pan.")).toBe("action");
+      expect(classifyBeat("Avery blinked at the doorway, then turned back to the stove. They stirred the coffee and reached for the pan.")).toBe("action");
   });
 
   it("detects interiority", () => {
@@ -138,7 +138,7 @@ He ran. The alley narrowed. He hit the fence, hauled himself over, and dropped h
 
 Behind him someone shouted. He did not look back. He pushed off the wall and kept going, lungs burning, the wet street sliding under his boots.
 
-"You're late," Mara said.
+"You're late," Rowan said.
 
 "I know."
 
@@ -164,7 +164,7 @@ describe("corpus", () => {
   });
 
   it("detects character names as speakers", () => {
-    expect(corpus.passages.some((passage) => passage.speakers.includes("Mara"))).toBe(true);
+     expect(corpus.passages.some((passage) => passage.speakers.includes("Rowan"))).toBe(true);
   });
 
   it("classifies at least one passage as dialogue", () => {
@@ -182,7 +182,7 @@ describe("corpus", () => {
 describe("retrieval", () => {
   const corpus = buildCorpus("Test Book", [
     { source: "book-one.md", text: sampleBook },
-    { source: "book-two.md", text: sampleBook.replace(/Mara/g, "Iselle") }
+    { source: "book-two.md", text: sampleBook.replace(/Rowan/g, "Ellis") }
   ]);
 
   it("prefers passages of the requested beat", () => {
@@ -193,8 +193,8 @@ describe("retrieval", () => {
   });
 
   it("boosts passages featuring the requested characters", () => {
-    const results = retrieveExemplars(corpus, { beat: "dialogue", characters: ["Iselle"] }, { limit: 2 });
-    expect(results[0].passage.text).toContain("Iselle");
+    const results = retrieveExemplars(corpus, { beat: "dialogue", characters: ["Ellis"] }, { limit: 2 });
+    expect(results[0].passage.text).toContain("Ellis");
   });
 
   it("respects the word budget", () => {

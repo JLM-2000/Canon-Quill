@@ -70,14 +70,29 @@ states:
   setup:
     agent: book-00-setup
     description: Verify Node, build, OpenSpec, Drive credentials, and Studio availability.
-    on_success: drive_selection
+    on_success: project_start
     on_failure: setup_repair
 
   setup_repair:
     agent: book-00-setup
     description: Repair missing prerequisites where possible, otherwise report exact blockers.
-    on_success: drive_selection
+    on_success: project_start
     on_failure: cancelled
+
+  project_start:
+    agent: book-01-intake
+    description: >
+      Ask whether the project starts from scratch with an author brief or with
+      existing planning material. The Studio must not request Drive access
+      before this decision. From-scratch projects may continue without source
+      files; material projects may upload local text files or select Drive. The
+      Studio inserts its writing-engine credential gate between this decision
+      and the selected source or intake branch.
+    requires_user_input: true
+    transitions:
+      from_scratch: intake
+      with_material: drive_selection
+    on_failure: project_start
 
   intake:
     agent: book-01-intake

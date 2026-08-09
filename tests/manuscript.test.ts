@@ -160,7 +160,7 @@ Scan the QR code below or click here to leave a quick review`;
   });
 
   it("finds closing copy when Drive removes blank paragraph separators", () => {
-    const text = `${chapter("Chapter One", "Julian blinked at the doorway, then turned back to the stove, face burning as his boyfriend's laugh echoed from the bedroom.\n\n\"Oh my God,\" he muttered to himself, trying very hard not to burn their breakfast.")}Thank you for reading!\nI hope you enjoyed reading this book as much as I enjoyed writing it. As an independent author, I rely heavily on readers like you to help my books find their audience.\nIf you have a quick minute, I would be incredibly grateful if you could leave an honest review. Even just a sentence or two makes a massive difference and helps other readers know what to expect!\nScan the QR code below or click here to leave a quick review`;
+    const text = `${chapter("Chapter One", "Avery blinked at the doorway, then turned back to the stove, face burning as their partner's laugh echoed from the next room.\n\n\"Oh no,\" they muttered to themself, trying very hard not to burn breakfast.")}Thank you for reading!\nI hope you enjoyed reading this book. As an independent author, I rely heavily on readers like you to help my books find their audience.\nIf you have a quick minute, I would be grateful if you could leave an honest review. Even just a sentence or two makes a massive difference and helps other readers know what to expect!\nScan the QR code below or click here to leave a quick review`;
     const a = analyseManuscript(text);
     expect(a.backMatter?.heading).toMatch(/Thank you for reading/i);
     expect(a.lastChapterComplete).toBe(true);
@@ -168,17 +168,17 @@ Scan the QR code below or click here to leave a quick review`;
 
   it("keeps CRLF offsets aligned when closing material follows the story", () => {
     const story = "Chapter One\r\n\r\n" +
-      "Julian blinked at the doorway, then turned back to the stove, face burning as his boyfriend's laugh echoed from the bedroom.\r\n\r\n" +
-      "\"Oh my God,\" he muttered to himself, trying very hard not to burn their breakfast.";
+      "Avery blinked at the doorway, then turned back to the stove, face burning as their partner's laugh echoed from the next room.\r\n\r\n" +
+      "\"Oh no,\" they muttered to themself, trying very hard not to burn breakfast.";
     const closing = "Thank you for reading!\r\n\r\nI hope you enjoyed reading this book as much as I enjoyed writing it. As an independent author, I rely heavily on readers like you to help my books find their audience.\r\n\r\nIf you have a quick minute, I would be incredibly grateful if you could leave an honest review.\r\n\r\nScan the QR code below or click here to leave a quick review";
     const a = analyseManuscript(`${story}\r\n\r\n${closing}`);
     expect(a.backMatter?.heading).toBe("Thank you for reading!");
     expect(a.lastChapterComplete).toBe(true);
-    expect(a.completenessReason).not.toMatch(/Julian blinked/);
+    expect(a.completenessReason).not.toMatch(/Avery blinked/);
   });
 
   it("ignores a trailing page-break rule when judging the ending", () => {
-    const text = `${chapter("Chapter One", "Julian blinked at the doorway, then turned back to the stove, face burning as his boyfriend's laugh echoed from the bedroom.\n\n\"Oh my God,\" he muttered to himself, trying very hard not to burn their breakfast.")}________________`;
+    const text = `${chapter("Chapter One", "Avery blinked at the doorway, then turned back to the stove, face burning as their partner's laugh echoed from the next room.\n\n\"Oh no,\" they muttered to themself, trying very hard not to burn breakfast.")}________________`;
     const a = analyseManuscript(text);
     expect(a.lastChapterComplete).toBe(true);
     expect(a.completenessReason).toContain("complete sentence");

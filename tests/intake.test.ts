@@ -5,7 +5,7 @@ describe("project intake analysis", () => {
   it("uses reference material before asking for genre", () => {
     const result = analyseProjectMaterial([{
       name: "Storyline",
-      text: "At university, the boyfriend she never expected to love kissed her in the rain. Their relationship changed everything."
+      text: "Subgenre: New adult romance\nThe partner she never expected to love kissed her in the rain. Their relationship changed everything."
     }]);
 
     expect(result.genre).toBe("Romance");
@@ -27,22 +27,22 @@ describe("project intake analysis", () => {
         name: "Book plan",
         kinds: ["plot"],
         text: [
-          "Premise: Mara must choose between the love she wants and the family secret that can destroy her.",
+          "Premise: Rowan must choose between the love they want and the family secret that can destroy them.",
           "Conflict: the secret threatens her relationship.",
-          "Setting: a contemporary university town.",
+          "Setting: a contemporary coastal town.",
           "Ending: the couple stays together."
         ].join("\n")
       },
       {
-        name: "Mara Profile",
+        name: "Lead Profile",
         kinds: ["characters"],
-        text: "Name: Mara. Want: freedom. Fear: disappointing her family."
+        text: "Name: Rowan. Want: freedom. Fear: disappointing their family."
       }
     ], { shape: "series" });
 
-    expect(result.findings.premise?.value).toMatch(/Mara/);
+    expect(result.findings.premise?.value).toMatch(/Rowan/);
     expect(result.findings.centralConflict?.value).toMatch(/secret/);
-    expect(result.findings.setting?.value).toMatch(/contemporary university town/);
+    expect(result.findings.setting?.value).toMatch(/contemporary coastal town/);
     expect(result.findings.structure?.value).toMatch(/couple stays together/);
     expect(result.questionPlan.map((question) => question.key)).not.toEqual(expect.arrayContaining([
       "storyPromise", "centralConflict", "settingRules", "endingAndStructure"
@@ -51,11 +51,11 @@ describe("project intake analysis", () => {
 
   it("does not turn document titles or headings into characters", () => {
     const result = analyseProjectMaterial([
-      { name: "Ashford Hall", kinds: ["characters"], text: "Setting: a university hall. New Year events occur here." },
-      { name: "Quantum Mechanics", kinds: ["notes"], text: "Then Cas leaves. Thank God the scene ends." }
+      { name: "Location Notes", kinds: ["characters"], text: "Setting: a public hall. Seasonal events occur here." },
+      { name: "Technical Notes", kinds: ["notes"], text: "Then the lead leaves. The scene ends." }
     ]);
 
     expect(result.findings.protagonist).toBeNull();
-    expect(result.questionPlan.find((question) => question.key === "protagonistArc")?.question).not.toMatch(/Ashford|Quantum|New Year|Thank God/);
+    expect(result.questionPlan.find((question) => question.key === "protagonistArc")?.question).not.toMatch(/Location Notes|Technical Notes|Seasonal events/);
   });
 });

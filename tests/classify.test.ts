@@ -6,7 +6,7 @@ Chapter One
 
 He ran. The alley narrowed and the fence came up fast, and he was over it before he had decided to be.
 
-"You're late," Mara said from the dark.
+"You're late," Rowan said from the dark.
 
 "I know."
 
@@ -16,9 +16,9 @@ He wiped the rain off his face and did not answer. The room behind her smelled o
 
 Chapter Two
 
-The harbour office opened at six. By five he was already across the street, watching the door and counting the men who went in.
+    The district office opened at six. By five he was already across the street, watching the door and counting the men who went in.
 
-"Anything?" Mara asked.
+"Anything?" Rowan asked.
 
 "Not yet."
 
@@ -32,12 +32,12 @@ describe("classification", () => {
     const result = classifySource({
       name: "cast-and-characters.md",
       text: [
-        "Name: Mara Vane",
+        "Name: Rowan Vale",
         "Age: 34",
         "Appearance: tall, a scar across the left palm",
         "Personality: guarded, dry, loyal past reason",
-        "Motivation: find who forged the seal",
-        "Backstory: raised in the harbour district",
+        "Motivation: find who altered the record",
+        "Backstory: raised in the river district",
         "Arc: from vengeance to responsibility"
       ].join("\n")
     });
@@ -49,10 +49,10 @@ describe("classification", () => {
     const result = classifySource({
       name: "chronology.md",
       text: [
-        "Year 1203: the harbour burns",
-        "Year 1204: Mara is born",
-        "Year 1228: the fleet sails, and after that nothing is the same",
-        "Year 1230: the seal is forged",
+        "Year 1203: the river district burns",
+        "Year 1204: Rowan is born",
+        "Year 1228: the expedition sails, and after that nothing is the same",
+        "Year 1230: the record is altered",
         "Year 1231: present day, before the events of book one"
       ].join("\n")
     });
@@ -80,10 +80,10 @@ describe("classification", () => {
     const result = classifySource({
       name: "outline-draft.md",
       text: [
-        "- Act one: the inciting incident is the forged seal",
-        "- Midpoint: Mara learns the truth",
-        "- Act two: the subplot with the fleet closes",
-        "- Climax: the harbour office burns",
+        "- Act one: the inciting incident is the altered record",
+        "- Midpoint: Rowan learns the truth",
+        "- Act two: the subplot with the expedition closes",
+        "- Climax: the district office burns",
         "- Resolution: she leaves"
       ].join("\n")
     });
@@ -98,9 +98,9 @@ describe("classification", () => {
 
   it("files another author's novel as a reference book, not canon", () => {
     const result = classifySource({
-      name: "the-tide-house.md",
+      name: "reference-novel.md",
       path: "/Reference/Comps",
-      text: `The Tide House\n\nby Eleanor Finch\n\n${prose}`
+      text: `Reference Novel\n\nby Example Author\n\n${prose}`
     });
     expect(result.kind).toBe("reference_book");
   });
@@ -125,7 +125,7 @@ describe("classification", () => {
 describe("grouping", () => {
   it("groups a batch and flags low-confidence files for review", () => {
     const { groups, needsReview } = groupSources([
-      { name: "characters.md", text: "Name: Mara\nAge: 34\nAppearance: tall\nMotivation: revenge\nBackstory: harbour" },
+      { name: "characters.md", text: "Name: Rowan\nAge: 34\nAppearance: tall\nMotivation: justice\nBackstory: river district" },
       { name: "book-1.md", path: "/Series", text: prose },
       { name: "scratch.txt", text: "misc" }
     ]);

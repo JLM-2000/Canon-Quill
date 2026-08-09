@@ -7,8 +7,13 @@ import { workspacePaths } from "../workspace/paths.js";
 
 export type ProjectShape = "standalone" | "series";
 export type DraftingMode = "chapter_by_chapter" | "whole_book";
+export type ProjectStart = "from_scratch" | "with_material";
+export type ProviderId = "anthropic" | "openai";
+export type AuthMethod = "subscription" | "api_key";
+export type EngineRouting = "single" | "split";
 
 export type PhaseId =
+  | "start"
   | "engine"
   | "connect"
   | "sources"
@@ -67,6 +72,13 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export interface ChapterChatMessage {
+  id: string;
+  role: "author" | "agent";
+  text: string;
+  createdAt: string;
+}
+
 export interface ProjectAnalysisState extends Omit<ProjectAnalysis, "analysedAt"> {
   completed: boolean;
   analysedAt: string | null;
@@ -90,8 +102,14 @@ export interface ChapterRecord {
  * The credential itself is never stored here, only the choice.
  */
 export interface EngineChoice {
-  provider: "anthropic" | "openai" | null;
-  authMethod: "subscription" | "api_key" | null;
+  /** Legacy aliases retained for agents and older state files. */
+  provider: ProviderId | null;
+  authMethod: AuthMethod | null;
+  analysisProvider: ProviderId | null;
+  analysisAuthMethod: AuthMethod | null;
+  draftingProvider: ProviderId | null;
+  draftingAuthMethod: AuthMethod | null;
+  routing: EngineRouting;
   /** Per-role model overrides. Empty means use the catalog defaults. */
   models: Record<string, string>;
 }
@@ -152,9 +170,14 @@ export interface StudioState {
   slug: string;
   projectName: string;
   phase: PhaseId;
+  /** Whether the project begins with a detailed brief or selected material. */
+  projectStart: ProjectStart | null;
+  startingBrief: string;
   engine: EngineChoice;
   shape: ProjectShape | null;
   draftingMode: DraftingMode | null;
+  /** True after the author continues past the project-shape screen. */
+  projectShapeReviewed: boolean;
   intake: Record<string, string>;
   drive: {
     connected: boolean;
@@ -171,12 +194,15 @@ export interface StudioState {
   conversation: ConversationMessage[];
   /** Set when the author opens the intake gate for the agent. */
   conversationStartedAt: string | null;
+  chapterChats: Record<string, ChapterChatMessage[]>;
   projectAnalysis: ProjectAnalysisState;
   chapters: ChapterRecord[];
   /** Null when starting from scratch. */
   manuscript: ExistingManuscript | null;
   /** True after the author chooses a draft or explicitly starts fresh. */
   manuscriptReviewed: boolean;
+  /** Explicit author confirmation that preparation is complete. */
+  writingConfirmed: boolean;
   directions: Direction[];
   run: RunState;
   ledger: ContinuityLedger;
@@ -202,9 +228,21 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     slug,
     projectName,
     phase: "engine",
-    engine: { provider: null, authMethod: null, models: {} },
+    projectStart: null,
+    startingBrief: "",
+    engine: {
+      provider: null,
+      authMethod: null,
+      analysisProvider: null,
+      analysisAuthMethod: null,
+      draftingProvider: null,
+      draftingAuthMethod: null,
+      routing: "single",
+      models: {}
+    },
     shape: null,
-    draftingMode: null,
+    draftingMode: "chapter_by_chapter",
+    projectShapeReviewed: false,
     intake: {},
     drive: {
       connected: false,
@@ -219,6 +257,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     questions: [],
     conversation: [],
     conversationStartedAt: null,
+    chapterChats: {},
     projectAnalysis: {
       completed: false,
       documentsRead: 0,
@@ -248,6 +287,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     chapters: [],
     manuscript: null,
     manuscriptReviewed: false,
+    writingConfirmed: false,
     directions: [],
     run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),
@@ -267,10 +307,26 @@ export async function loadState(slug: string): Promise<StudioState> {
       ...parsed,
       slug,
       version: 7 as const,
+      projectStart: parsed.projectStart ?? null,
+      startingBrief: parsed.startingBrief ?? "",
+      draftingMode: parsed.draftingMode ?? base.draftingMode,
+      projectShapeReviewed: parsed.projectShapeReviewed ?? false,
+      engine: {
+        ...base.engine,
+        ...(parsed.engine ?? {}),
+        analysisProvider: parsed.engine?.analysisProvider ?? parsed.engine?.provider ?? null,
+        analysisAuthMethod: parsed.engine?.analysisAuthMethod ?? parsed.engine?.authMethod ?? null,
+        draftingProvider: parsed.engine?.draftingProvider ?? parsed.engine?.provider ?? null,
+        draftingAuthMethod: parsed.engine?.draftingAuthMethod ?? parsed.engine?.authMethod ?? null,
+        routing: parsed.engine?.routing === "split" ? ("split" as const) : ("single" as const),
+        models: { ...base.engine.models, ...(parsed.engine?.models ?? {}) }
+      },
       intake,
       drive: { ...base.drive, ...(parsed.drive ?? {}) },
       projectAnalysis: { ...base.projectAnalysis, ...(parsed.projectAnalysis ?? {}) },
+      chapterChats: parsed.chapterChats ?? {},
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
+      writingConfirmed: parsed.writingConfirmed ?? Boolean(parsed.chapters?.length),
       styleCorpus: { ...base.styleCorpus, ...(parsed.styleCorpus ?? {}) }
     };
     return { ...merged, sources: migrateSources(merged.sources) };
@@ -326,22 +382,33 @@ export async function updateState(
 
 /** Derive the phase from persisted work. */
 export function derivePhase(state: StudioState): PhaseId {
+  if (state.chapters.length > 0 && !state.writingConfirmed) return "preflight";
   if (state.chapters.length > 0 && state.chapters.every((chapter) => chapter.status === "approved")) {
     return "export";
   }
   if (state.chapters.length > 0) return "writing";
-  if (!state.engine.provider || !state.engine.authMethod) return "engine";
-  if (!state.drive.connected) return "connect";
-  if (state.drive.referenceRoots.length === 0) return "sources";
-  if (state.sources.length === 0) return "sources";
-  if (!state.sourcesReviewed) return "analyze";
+  if (!state.projectStart) return "start";
+  const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
+  const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
+  const analysisProvider = state.engine.analysisProvider ?? draftingProvider;
+  const analysisAuth = state.engine.analysisAuthMethod ?? draftingAuth;
+  if (!draftingProvider || !draftingAuth || !analysisProvider || !analysisAuth) return "engine";
+  if (state.projectStart === "with_material") {
+    const hasLocalSources = state.sources.some((source) => source.driveId.startsWith("local-"));
+    if (!state.drive.connected && !hasLocalSources) return "connect";
+    if (state.drive.referenceRoots.length === 0 && !hasLocalSources) return "sources";
+    if (state.sources.length === 0) return "sources";
+    if (!state.sourcesReviewed) return "analyze";
+  }
   if (blockingQuestions(state).length > 0) return "preflight";
-  if (state.shape === null || state.draftingMode === null) return "intake";
+  if (state.shape === null || state.draftingMode === null || !state.projectShapeReviewed) return "intake";
   if (!state.manuscriptReviewed) return "draft";
-  if (!state.styleCorpus.built) return "preparation";
-  if (!state.styleCorpus.continuedAt) return "preparation";
+  const hasOwnStyle = state.sources.some((source) => source.kinds.includes("past_book"));
+  if (hasOwnStyle && !state.styleCorpus.built) return "preparation";
+  if (hasOwnStyle && !state.styleCorpus.continuedAt) return "preparation";
   if (!state.projectAnalysis.completed) return "intake_analysis";
   if (!state.conversationStartedAt && state.questions.length === 0) return "preflight";
+  if (!state.writingConfirmed) return "preflight";
   return "writing";
 }
 

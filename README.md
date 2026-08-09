@@ -42,7 +42,7 @@ Each chapter ends by recording where it left things: where every character physi
 
 The next chapter is checked against that record before it can pass:
 
-- A character who was in Marrow opening the next chapter in Calder, with no journey shown, fails.
+- A character who was in one location opens the next chapter in another, with no journey shown, fails.
 - Someone acting on a secret the book never showed them learning fails.
 - Time running backwards without a declared flashback fails.
 - A thread you said would resolve by chapter 9 still open at chapter 10 fails.

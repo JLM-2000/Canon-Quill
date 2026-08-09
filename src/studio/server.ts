@@ -28,6 +28,7 @@ import {
   updateState,
   type OpenQuestion,
   type SelectedSource,
+  type ChapterChatMessage,
   type StudioState
 } from "./state.js";
 import {
@@ -108,7 +109,8 @@ export function createStudioApp() {
         notes,
         analysedAt: new Date().toISOString()
       };
-      current.manuscriptReviewed = true;
+      current.manuscriptReviewed = false;
+      current.writingConfirmed = false;
     });
 
     return { analysis, state: withDerived(state) };
@@ -120,6 +122,14 @@ export function createStudioApp() {
     for (const source of state.sources) {
       const text = await readCached(slug, source.driveId);
       if (text) documents.push({ name: source.name, path: source.path, kinds: source.kinds, text });
+    }
+    if (!documents.length && state.projectStart === "from_scratch" && state.startingBrief.trim()) {
+      documents.push({
+        name: "Author starting brief",
+        path: "/author-starting-brief",
+        kinds: ["notes"],
+        text: `Premise: ${state.startingBrief.trim()}`
+      });
     }
     const intake = { ...state.intake };
     const context = {
@@ -240,6 +250,44 @@ export function createStudioApp() {
     res.json({ projects: await listProjects() });
   }));
 
+  app.post("/api/project/start", route(async (req, res) => {
+    const slug = await requireSlug();
+    const projectStart = req.body?.projectStart;
+    const brief = typeof req.body?.startingBrief === "string" ? req.body.startingBrief.trim() : "";
+    if (projectStart !== "from_scratch" && projectStart !== "with_material") {
+      throw new HttpError(400, "Choose whether the book starts from scratch or with existing material.");
+    }
+    if (projectStart === "from_scratch" && brief.length < 40) {
+      throw new HttpError(400, "Describe what the book is about in at least a few detailed sentences first.");
+    }
+    const state = await updateState(slug, (current) => {
+      const changed = current.projectStart !== projectStart;
+      current.projectStart = projectStart;
+      current.startingBrief = projectStart === "from_scratch" ? brief.slice(0, 12000) : "";
+      if (!changed) return;
+      current.writingConfirmed = false;
+      current.shape = null;
+      current.projectShapeReviewed = false;
+      current.manuscript = null;
+      current.manuscriptReviewed = false;
+      current.sources = [];
+      current.sourcesReviewed = false;
+      current.questions = [];
+      current.conversation = [];
+      current.conversationStartedAt = null;
+      current.chapterChats = {};
+      current.styleCorpus = { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null };
+      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+      if (projectStart === "from_scratch") {
+        current.drive.referenceRoots = [];
+        current.drive.referenceRootNames = {};
+        current.drive.targetFolderId = null;
+        current.drive.targetFolderName = null;
+      }
+    });
+    res.json(withDerived(state));
+  }));
+
   app.delete("/api/projects/:slug", route(async (req, res) => {
     await deleteProject(req.params.slug);
     res.json({ projects: await listProjects(), activeSlug: await activeSlug() });
@@ -268,17 +316,32 @@ export function createStudioApp() {
   app.patch("/api/project", route(async (req, res) => {
     const slug = await requireSlug();
     const { projectName, shape, draftingMode, intake } = req.body ?? {};
-    const state = await updateState(slug, (current) => ({
-      ...current,
-      projectName: typeof projectName === "string" && projectName.trim() ? projectName.trim() : current.projectName,
-      shape: shape === "standalone" || shape === "series" ? shape : current.shape,
-      draftingMode:
-        draftingMode === "chapter_by_chapter" || draftingMode === "whole_book" ? draftingMode : current.draftingMode,
-      intake: intake && typeof intake === "object" ? { ...current.intake, ...intake } : current.intake
-    }));
+    const state = await updateState(slug, (current) => {
+      const nextShape = shape === "standalone" || shape === "series" ? shape : current.shape;
+      const nextMode = draftingMode === "chapter_by_chapter" || draftingMode === "whole_book"
+        ? draftingMode
+        : current.draftingMode;
+      if (nextShape !== current.shape || nextMode !== current.draftingMode) {
+        current.projectShapeReviewed = false;
+        current.writingConfirmed = false;
+      }
+      current.projectName = typeof projectName === "string" && projectName.trim() ? projectName.trim() : current.projectName;
+      current.shape = nextShape;
+      current.draftingMode = nextMode;
+      current.intake = intake && typeof intake === "object" ? { ...current.intake, ...intake } : current.intake;
+    });
     if (typeof projectName === "string" && projectName.trim()) {
       await touchProject(slug, { title: projectName.trim() });
     }
+    res.json(withDerived(state));
+  }));
+
+  app.post("/api/project/continue", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      if (!current.shape || !current.draftingMode) throw new HttpError(400, "Choose a book shape and drafting mode first.");
+      current.projectShapeReviewed = true;
+    });
     res.json(withDerived(state));
   }));
 
@@ -287,35 +350,47 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const state = await loadState(slug);
     const catalog = await loadCatalog();
-    const provider = state.engine.provider;
+    const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
+    const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
+    const analysisProvider = state.engine.analysisProvider ?? draftingProvider;
+    const analysisAuth = state.engine.analysisAuthMethod ?? draftingAuth;
 
-    const storedKey = provider ? await readApiKey(provider) : undefined;
+    const storedKey = draftingProvider ? await readApiKey(draftingProvider) : undefined;
+    const storedKeys = {
+      anthropic: await readApiKey("anthropic"),
+      openai: await readApiKey("openai")
+    };
 
     res.json({
       choice: state.engine,
       catalog,
-      resolvedModels: provider
-        ? { ...defaultModels(catalog, provider), ...state.engine.models }
-        : {},
-      credentials:
-        provider && state.engine.authMethod
-          ? await checkCredentials(provider, state.engine.authMethod)
-          : null,
+      resolvedModels: resolveModels(catalog, state.engine),
+      credentials: draftingProvider && draftingAuth ? await checkCredentials(draftingProvider, draftingAuth) : null,
+      credentialsByRole: {
+        analysis: analysisProvider && analysisAuth ? await checkCredentials(analysisProvider, analysisAuth) : null,
+        drafting: draftingProvider && draftingAuth ? await checkCredentials(draftingProvider, draftingAuth) : null
+      },
       // A mask only. The key never leaves the server.
-      storedKey: storedKey ? maskKey(storedKey) : null
+      storedKey: storedKey ? maskKey(storedKey) : null,
+      storedKeys: Object.fromEntries(Object.entries(storedKeys).map(([id, key]) => [id, key ? maskKey(key) : null]))
     });
   }));
 
   app.patch("/api/engine", route(async (req, res) => {
     const slug = await requireSlug();
-    const { provider, authMethod, models } = req.body ?? {};
+    const { provider, authMethod, analysisProvider, analysisAuthMethod, draftingProvider, draftingAuthMethod, routing, models } = req.body ?? {};
 
-    if (provider !== undefined && provider !== "anthropic" && provider !== "openai") {
-      throw new HttpError(400, "Provider must be anthropic or openai.");
+    for (const value of [provider, analysisProvider, draftingProvider]) {
+      if (value !== undefined && value !== "anthropic" && value !== "openai") {
+        throw new HttpError(400, "Provider must be anthropic or openai.");
+      }
     }
-    if (authMethod !== undefined && authMethod !== "subscription" && authMethod !== "api_key") {
-      throw new HttpError(400, "Auth method must be subscription or api_key.");
+    for (const value of [authMethod, analysisAuthMethod, draftingAuthMethod]) {
+      if (value !== undefined && value !== "subscription" && value !== "api_key") {
+        throw new HttpError(400, "Auth method must be subscription or api_key.");
+      }
     }
+    if (routing !== undefined && routing !== "single" && routing !== "split") throw new HttpError(400, "Routing must be single or split.");
     // Keys go to /api/engine/key, which stores them outside the project state.
     for (const key of Object.keys(req.body ?? {})) {
       if (/key|token|secret|password/i.test(key) && key !== "authMethod") {
@@ -326,25 +401,53 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       if (provider !== undefined) {
         current.engine.provider = provider;
+        current.engine.draftingProvider = provider;
+        current.engine.analysisProvider = provider;
         // Model overrides belong to a provider; drop them when it changes.
         current.engine.models = {};
       }
       if (authMethod !== undefined) current.engine.authMethod = authMethod;
+      if (provider !== undefined && authMethod !== undefined) {
+        current.engine.draftingAuthMethod = authMethod;
+        current.engine.analysisAuthMethod = authMethod;
+      }
+      if (analysisProvider !== undefined) current.engine.analysisProvider = analysisProvider;
+      if (analysisAuthMethod !== undefined) current.engine.analysisAuthMethod = analysisAuthMethod;
+      if (draftingProvider !== undefined) current.engine.draftingProvider = draftingProvider;
+      if (draftingAuthMethod !== undefined) current.engine.draftingAuthMethod = draftingAuthMethod;
+      if (routing !== undefined) {
+        current.engine.routing = routing;
+        if (routing === "single") {
+          const selectedProvider = current.engine.draftingProvider ?? current.engine.analysisProvider;
+          const selectedAuth = current.engine.draftingAuthMethod ?? current.engine.analysisAuthMethod;
+          current.engine.provider = selectedProvider ?? current.engine.provider;
+          current.engine.authMethod = selectedAuth ?? current.engine.authMethod;
+          current.engine.analysisProvider = current.engine.provider;
+          current.engine.draftingProvider = current.engine.provider;
+          current.engine.analysisAuthMethod = current.engine.authMethod;
+          current.engine.draftingAuthMethod = current.engine.authMethod;
+        }
+      }
       if (models && typeof models === "object") {
         current.engine.models = { ...current.engine.models, ...models };
       }
     });
 
     const catalog = await loadCatalog();
+    const nextDraftingProvider = state.engine.draftingProvider ?? state.engine.provider;
+    const nextDraftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
     res.json({
       choice: state.engine,
-      resolvedModels: state.engine.provider
-        ? { ...defaultModels(catalog, state.engine.provider), ...state.engine.models }
-        : {},
-      credentials:
-        state.engine.provider && state.engine.authMethod
-          ? await checkCredentials(state.engine.provider, state.engine.authMethod)
+      resolvedModels: resolveModels(catalog, state.engine),
+      credentials: nextDraftingProvider && nextDraftingAuth ? await checkCredentials(nextDraftingProvider, nextDraftingAuth) : null,
+      credentialsByRole: {
+        analysis: state.engine.analysisProvider && state.engine.analysisAuthMethod
+          ? await checkCredentials(state.engine.analysisProvider, state.engine.analysisAuthMethod)
+          : null,
+        drafting: nextDraftingProvider && nextDraftingAuth
+          ? await checkCredentials(nextDraftingProvider, nextDraftingAuth)
           : null
+      }
     });
   }));
 
@@ -447,6 +550,66 @@ export function createStudioApp() {
       );
       current.drive.targetFolderId = target;
       current.drive.targetFolderName = target ? targetName || current.drive.targetFolderName || target : null;
+    });
+    res.json(withDerived(state));
+  }));
+
+  app.post("/api/sources/upload", route(async (req, res) => {
+    const slug = await requireSlug();
+    const files = Array.isArray(req.body?.files) ? req.body.files : [];
+    if (!files.length) throw new HttpError(400, "Choose at least one text file.");
+    if (files.length > 100) throw new HttpError(400, "Upload no more than 100 files at once.");
+
+    const cache = workspacePaths(slug).driveCache;
+    await mkdir(cache, { recursive: true });
+    const uploaded: SelectedSource[] = [];
+    const pendingCache: Array<{ id: string; text: string }> = [];
+    let totalChars = 0;
+    const allowedExtensions = new Set([".txt", ".md", ".markdown", ".rtf", ".html", ".htm", ".csv", ".json"]);
+    const allowedMimeTypes = new Set(["", "text/plain", "text/markdown", "text/html", "text/csv", "application/rtf", "application/json"]);
+    for (const file of files) {
+      const name = typeof file?.name === "string" ? file.name.trim() : "";
+      const text = typeof file?.text === "string" ? file.text : "";
+      if (!name || !text.trim()) continue;
+      const extension = path.extname(name).toLowerCase();
+      const mimeType = typeof file.mimeType === "string" ? file.mimeType : "";
+      if (name.length > 240 || !allowedExtensions.has(extension) || !allowedMimeTypes.has(mimeType)) {
+        throw new HttpError(400, `${name} is not an accepted text file.`);
+      }
+      if (text.length > 5_000_000) throw new HttpError(400, `${name} is too large for a browser upload.`);
+      totalChars += text.length;
+      if (totalChars > 7_000_000) throw new HttpError(400, "The upload is too large. Keep the batch under 7 MB of text.");
+      const id = `local-${randomUUID()}`;
+      const classification = classifySource({ name, path: `/${name}`, text });
+      const source: SelectedSource = {
+        driveId: id,
+        name,
+        path: `/${name}`,
+        mimeType: mimeType || "text/plain",
+        isFolder: false,
+        kinds: classification.kind === "past_book"
+          ? ["past_book", "reference_book"]
+          : [String(classification.kind) === "unclassified" ? "notes" : classification.kind],
+        wordCount: computeMetrics(text).wordCount,
+        classification
+      };
+      pendingCache.push({ id, text });
+      uploaded.push(source);
+    }
+    if (!uploaded.length) throw new HttpError(400, "The selected files contained no readable text.");
+    try {
+      await Promise.all(pendingCache.map(({ id, text }) => writeFile(path.join(cache, `${id}.json`), JSON.stringify({ text }), "utf8")));
+    } catch (error) {
+      await Promise.all(pendingCache.map(({ id }) => unlink(path.join(cache, `${id}.json`)).catch(() => undefined)));
+      throw error;
+    }
+
+    const state = await updateState(slug, (current) => {
+      current.sources = [...current.sources.filter((source) => !source.driveId.startsWith("local-")), ...uploaded];
+      current.sourcesReviewed = false;
+      current.styleCorpus.built = false;
+      current.styleCorpus.continuedAt = null;
+      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
     });
     res.json(withDerived(state));
   }));
@@ -713,6 +876,7 @@ export function createStudioApp() {
       current.questions = [];
       current.conversation = [];
       current.conversationStartedAt = null;
+      current.writingConfirmed = false;
       current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
     });
     try {
@@ -811,6 +975,24 @@ export function createStudioApp() {
     res.status(201).json(withDerived(state));
   }));
 
+  app.post("/api/writing/confirm", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const current = await loadState(slug);
+    const hasOwnStyle = current.sources.some((source) => source.kinds.includes("past_book"));
+    if (!current.projectStart) throw new HttpError(400, "Choose how the book starts first.");
+    if (!current.shape || !current.draftingMode || !current.projectShapeReviewed) throw new HttpError(400, "Finish project shape first.");
+    if (current.projectStart === "with_material" && !current.sourcesReviewed) throw new HttpError(400, "Review the selected material first.");
+    if (!current.manuscriptReviewed) throw new HttpError(400, "Choose whether to continue an existing draft or start fresh first.");
+    if (hasOwnStyle && (!current.styleCorpus.built || !current.styleCorpus.continuedAt)) throw new HttpError(400, "Finish the style corpus first.");
+    if (!current.projectAnalysis.completed) throw new HttpError(400, "Finish project analysis first.");
+    if (!current.conversationStartedAt) throw new HttpError(400, "Open the preparation questions first.");
+    const state = await updateState(slug, (current) => {
+      if (blockingQuestions(current).length > 0) throw new HttpError(400, "Answer the blocking preparation questions first.");
+      current.writingConfirmed = true;
+    });
+    res.json(withDerived(state));
+  }));
+
   // --- Chapters -------------------------------------------------------------
   app.put("/api/chapters", route(async (req, res) => {
     const slug = await requireSlug();
@@ -831,6 +1013,7 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       current.chapters = chapters;
       current.ledger.plannedChapters = chapters.length;
+      current.writingConfirmed = false;
     });
     res.json(withDerived(state));
   }));
@@ -838,6 +1021,34 @@ export function createStudioApp() {
   app.get("/api/chapters/:number/brief", route(async (req, res) => {
     const state = await loadState(await requireSlug());
     res.type("text/markdown").send(buildOpeningBrief(state.ledger, Number(req.params.number)));
+  }));
+
+  app.get("/api/chapters/:number/chat", route(async (req, res) => {
+    const state = await loadState(await requireSlug());
+    const chapter = Number(req.params.number);
+    if (state.draftingMode !== "chapter_by_chapter" || !state.chapters.some((entry) => entry.number === chapter)) {
+      throw new HttpError(400, "Chapter chat is available only for planned chapters in chapter-by-chapter mode.");
+    }
+    res.json({ chapter, messages: state.chapterChats[String(chapter)] ?? [] });
+  }));
+
+  app.post("/api/chapters/:number/chat", route(async (req, res) => {
+    const slug = await requireSlug();
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) throw new HttpError(400, "Write a chapter instruction first.");
+    if (text.length > 8000) throw new HttpError(400, "Keep the chapter note under 8,000 characters.");
+    const chapter = Number(req.params.number);
+    if (!Number.isInteger(chapter) || chapter < 1) throw new HttpError(400, "Unknown chapter number.");
+    const current = await loadState(slug);
+    if (current.draftingMode !== "chapter_by_chapter" || !current.chapters.some((entry) => entry.number === chapter)) {
+      throw new HttpError(400, "Chapter chat is available only for planned chapters in chapter-by-chapter mode.");
+    }
+    const message: ChapterChatMessage = { id: randomUUID(), role: "author", text, createdAt: new Date().toISOString() };
+    const state = await updateState(slug, (current) => {
+      const key = String(chapter);
+      current.chapterChats[key] = [...(current.chapterChats[key] ?? []), message];
+    });
+    res.status(201).json({ chapter, message, messages: state.chapterChats[String(chapter)] ?? [], state: withDerived(state) });
   }));
 
   app.post("/api/chapters/:number/validate", route(async (req, res) => {
@@ -952,7 +1163,8 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const target = req.body?.target;
     const notes = req.body?.notes;
-    if (target === undefined && typeof notes !== "string") {
+    const proceed = req.body?.continue === true;
+    if (target === undefined && typeof notes !== "string" && !proceed) {
       throw new HttpError(400, "Provide a continuation target or notes.");
     }
     if (target !== undefined && target !== "continue" && target !== "separate") {
@@ -962,6 +1174,10 @@ export function createStudioApp() {
       if (current.manuscript) {
         if (target !== undefined) current.manuscript.target = target;
         if (typeof notes === "string") current.manuscript.notes = notes.trim().slice(0, 8000);
+        if (proceed) {
+          current.manuscriptReviewed = true;
+          current.writingConfirmed = false;
+        }
       }
     });
     if (state.manuscript && typeof notes === "string") {
@@ -985,6 +1201,7 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       current.manuscript = null;
       current.manuscriptReviewed = true;
+      current.writingConfirmed = false;
     });
     res.json(withDerived(state));
   }));
@@ -994,6 +1211,7 @@ export function createStudioApp() {
     res.json(withDerived(await updateState(slug, (current) => {
       current.manuscript = null;
       current.manuscriptReviewed = false;
+      current.writingConfirmed = false;
     })));
   }));
 
@@ -1065,13 +1283,14 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const reasons = ["no_credit", "rate_limited", "invalid_credentials", "provider_error", "cancelled", "other"];
     const reason = reasons.includes(req.body?.reason) ? req.body.reason : "other";
+    const detail = typeof req.body?.detail === "string" ? redactSensitiveText(req.body.detail).slice(0, 2000) : null;
 
     const state = await updateState(slug, (current) => {
       current.run = {
         status: "halted",
         chapter: Number(req.body?.chapter) || current.run?.chapter || null,
         reason,
-        detail: typeof req.body?.detail === "string" ? req.body.detail.slice(0, 2000) : null,
+        detail,
         haltedAt: new Date().toISOString(),
         startedAt: current.run?.startedAt ?? null
       };
@@ -1083,7 +1302,7 @@ export function createStudioApp() {
       stageName: "Drafting",
       agent: "runtime",
       event: "run_halted",
-      errorMessage: `${reason}: ${req.body?.detail ?? "no detail"}`,
+      errorMessage: `${reason}: ${detail ?? "no detail"}`,
       data: { chapter: state.run.chapter }
     });
 
@@ -1092,6 +1311,8 @@ export function createStudioApp() {
 
   app.post("/api/run/start", route(async (req, res) => {
     const slug = await requireSlug();
+    const current = await loadState(slug);
+    requireWritingPhase(current);
     const state = await updateState(slug, (current) => {
       current.run = {
         status: "running",
@@ -1109,12 +1330,15 @@ export function createStudioApp() {
   app.post("/api/run/resume", route(async (_req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
+    requireWritingPhase(state);
 
-    if (state.engine.provider && state.engine.authMethod === "api_key") {
-      const key = (await readApiKey(state.engine.provider))
-        ?? process.env[state.engine.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"];
+    const draftingProvider = state.engine.draftingProvider ?? state.engine.provider;
+    const draftingAuth = state.engine.draftingAuthMethod ?? state.engine.authMethod;
+    if (draftingProvider && draftingAuth === "api_key") {
+      const key = (await readApiKey(draftingProvider))
+        ?? process.env[draftingProvider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"];
       if (key) {
-        const check = await verifyApiKey(state.engine.provider, key);
+        const check = await verifyApiKey(draftingProvider, key);
         if (!check.ok) {
           res.status(409).json({ resumed: false, blockedBy: check });
           return;
@@ -1146,10 +1370,13 @@ export function createStudioApp() {
 
     const state = await updateState(slug, (current) => {
       const chapter = current.chapters.find((entry) => entry.number === Number(req.params.number));
-      if (chapter) {
-        chapter.status = status;
-        chapter.updatedAt = new Date().toISOString();
+      if (!chapter) throw new HttpError(404, "Chapter not found.");
+      if (status === "approved") {
+        requireWritingPhase(current);
+        if (chapter.status !== "validated") throw new HttpError(409, "Only a validated chapter can be approved.");
       }
+      chapter.status = status;
+      chapter.updatedAt = new Date().toISOString();
     });
     res.json(withDerived(state));
   }));
@@ -1257,6 +1484,8 @@ export interface SourcesCheck {
 export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
   const own = sources.filter((source) => source.kinds?.includes("past_book"));
   const references = sources.filter((source) => source.kinds?.includes("reference_book"));
+  const planning = sources.filter((source) => source.kinds?.some((kind) => ["characters", "timeline", "world", "plot", "notes"].includes(kind)));
+  const referenceMaterial = references.length > 0 ? references : planning;
   const styleSources = own.length > 0 ? own : references;
   const fromReference = own.length === 0 && references.length > 0;
 
@@ -1267,24 +1496,24 @@ export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
     documents: styleSources.length,
     words: styleWords,
     minWords: minimumStyleWords,
-    ok: styleSources.length > 0 && styleWords >= minimumStyleWords,
+    ok: own.length === 0 || styleWords >= minimumStyleWords,
       reason:
-        styleSources.length === 0
-        ? "No prose source is available yet. Reference material is required, and series books are optional."
+        own.length === 0
+        ? "No past book is marked as the author's style source. Drafting can continue without a measured style corpus."
         : styleWords < minimumStyleWords
           ? `Only ${styleWords.toLocaleString()} words to learn the voice from. Below about ${minimumStyleWords.toLocaleString()} the measurements are too noisy to steer by.`
           : ""
   };
 
-  const referenceWords = words(references);
+  const referenceWords = words(referenceMaterial);
   const referenceRequirement: SourceRequirement = {
-    documents: references.length,
+    documents: referenceMaterial.length,
     words: referenceWords,
-    minWords: minimumReferenceWords,
-    ok: references.length > 0 && referenceWords >= minimumReferenceWords,
+    minWords: references.length > 0 ? minimumReferenceWords : 1,
+    ok: referenceMaterial.length > 0 && (references.length === 0 || referenceWords >= minimumReferenceWords),
     reason:
-      references.length === 0
-        ? "Nothing is marked as a Reference. The book needs material to draw on, not just a voice to write in. Series books count here too and are marked as references automatically."
+      referenceMaterial.length === 0
+        ? "No plan, timeline, character, world, note, or reference-book material has been selected yet."
         : referenceWords < minimumReferenceWords
           ? `Only ${referenceWords.toLocaleString()} words of reference material. Below about ${minimumReferenceWords.toLocaleString()} there is little for the book to draw on.`
           : ""
@@ -1427,6 +1656,34 @@ function appendNextPlannedQuestion(state: StudioState, askedAt: string): void {
     phase: question.phase,
     createdAt: askedAt
   });
+}
+
+function resolveModels(catalog: Awaited<ReturnType<typeof loadCatalog>>, engine: StudioState["engine"]): Record<string, string> {
+  const draftingProvider = engine.draftingProvider ?? engine.provider;
+  const analysisProvider = engine.analysisProvider ?? draftingProvider;
+  if (!draftingProvider && !analysisProvider) return {};
+  const resolved: Record<string, string> = {};
+  for (const [role, entry] of Object.entries(catalog.roles)) {
+    const provider = ["drafting", "editing"].includes(role) ? draftingProvider : analysisProvider;
+    if (provider) resolved[role] = entry[provider];
+  }
+  return { ...resolved, ...engine.models };
+}
+
+function requireWritingPhase(state: StudioState): void {
+  if (!state.writingConfirmed || derivePhase(state) !== "writing") {
+    throw new HttpError(409, "The writing phase has not been explicitly confirmed.");
+  }
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|sk-ant)-[A-Za-z0-9_-]{12,}\b/g, "[redacted key]")
+    .replace(/\b(?:ya29\.[A-Za-z0-9._-]+|AIza[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})\b/g, "[redacted token]")
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted private key]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted token]")
+    .replace(/\b(api[_ -]?key|token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]");
 }
 
 function message(error: unknown): string {

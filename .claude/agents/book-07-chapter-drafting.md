@@ -66,6 +66,10 @@ next to the author's actual prose. Load all four, in this order:
    each applied with `POST /api/directions/<id>/applied` once you have. They
    outrank the chapter plan where the two disagree: the plan was written
    earlier and the author has since said otherwise.
+7. **The chapter conversation**, `GET /api/chapters/<n>/chat`. Treat every
+   author message as a concrete brief: required events, important details,
+   dialogue intentions, emotional turns, and deliberate omissions. The chat
+   supplements the approved plan; it does not permit contradicting canon.
 
 ## What the exemplars are for
 

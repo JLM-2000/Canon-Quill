@@ -162,7 +162,7 @@ function detectIntimacy(text: string): WritingProfile["intimacy"] {
 
 function detectAudience(text: string, total: number): WritingProfile["audience"] {
   const candidates: Array<{ value: string; count: number; evidence: string }> = [
-    { value: "New adult", count: count(text, /\b(?:college|university|freshman|sophomore|twenty[- ]one|twenty[- ]two|twenty[- ]three)\b/gi), evidence: "college or early-adult markers" },
+    { value: "New adult", count: count(text, /\b(?:freshman|sophomore|twenty[- ]one|twenty[- ]two|twenty[- ]three)\b/gi), evidence: "early-adult markers" },
     { value: "Young adult", count: count(text, /\b(?:teenager|sixteen|seventeen|eighteen|high school|coming of age)\b/gi), evidence: "teen or coming-of-age markers" },
     { value: "Middle grade", count: count(text, /\b(?:middle school|ten-year-old|eleven-year-old|twelve-year-old)\b/gi), evidence: "middle-grade age markers" },
     { value: "Children", count: count(text, /\b(?:picture book|kindergarten|nursery|bedtime story)\b/gi), evidence: "children's-format markers" },

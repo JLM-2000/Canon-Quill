@@ -42,18 +42,20 @@ afterAll(async () => {
 });
 
 describe("phase derivation", () => {
-  it("starts at connect on a fresh project", () => {
-    expect(derivePhase(emptyState("x"))).toBe("engine");
+  it("starts by asking how the book begins", () => {
+    expect(derivePhase(emptyState("x"))).toBe("start");
   });
 
   it("asks for a provider before anything else", () => {
     const state = emptyState("x");
+    state.projectStart = "with_material";
     state.drive.connected = true;
     expect(derivePhase(state)).toBe("engine");
   });
 
   it("asks for sources once the engine and Drive are set", () => {
     const state = emptyState("x");
+    state.projectStart = "with_material";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.drive.connected = true;
     expect(derivePhase(state)).toBe("sources");
@@ -61,6 +63,7 @@ describe("phase derivation", () => {
 
   it("asks for intake once sources are confirmed", () => {
     const state = emptyState("x");
+    state.projectStart = "with_material";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
@@ -72,11 +75,13 @@ describe("phase derivation", () => {
     ];
     expect(derivePhase(state)).toBe("analyze");
     state.sourcesReviewed = true;
+    state.projectStart = "with_material";
     expect(derivePhase(state)).toBe("intake");
   });
 
   it("holds at the existing-draft step until it is answered", () => {
     const state = emptyState("x");
+    state.projectStart = "with_material";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
@@ -84,6 +89,7 @@ describe("phase derivation", () => {
     state.sourcesReviewed = true;
     state.shape = "standalone";
     state.draftingMode = "chapter_by_chapter";
+    state.projectShapeReviewed = true;
     expect(derivePhase(state)).toBe("draft");
     state.manuscriptReviewed = true;
     expect(derivePhase(state)).toBe("preparation");
@@ -95,12 +101,14 @@ describe("phase derivation", () => {
 
   it("moves to writing once chapters exist", () => {
     const state = emptyState("x");
+    state.writingConfirmed = true;
     state.chapters = [{ number: 1, title: "One", synopsis: "", status: "planned", issues: [] }];
     expect(derivePhase(state)).toBe("writing");
   });
 
   it("reaches export only when every chapter is approved", () => {
     const state = emptyState("x");
+    state.writingConfirmed = true;
     state.chapters = [
       { number: 1, title: "One", synopsis: "", status: "approved", issues: [] },
       { number: 2, title: "Two", synopsis: "", status: "drafted", issues: [] }
@@ -121,12 +129,16 @@ describe("studio api", () => {
     expect(html).not.toContain("Reset questions and project analysis");
     expect(html).not.toContain("Use it");
     expect(html).not.toContain("Detected");
+    expect(html).toContain("Can't connect?");
+    expect(html).toContain("showDriveRecovery");
+    expect(html).toContain("about:blank");
+    expect(html).toContain("Source analysis failed");
   });
 
   it("returns state with a derived phase", async () => {
     const { body } = await call("/api/state");
     expect(body.state.projectName).toBe("Test Book");
-    expect(body.state.phase).toBe("engine");
+    expect(body.state.phase).toBe("start");
   });
 
   it("records project shape and drafting mode", async () => {
@@ -139,6 +151,38 @@ describe("studio api", () => {
     expect(body.intake.audience).toBe("adult");
   });
 
+  it("asks for the starting point before engine setup", async () => {
+    const short = await call("/api/project/start", { method: "POST", body: { projectStart: "from_scratch", startingBrief: "Too short" } });
+    expect(short.status).toBe(400);
+    const started = await call("/api/project/start", {
+      method: "POST",
+      body: { projectStart: "from_scratch", startingBrief: "A woman returns to a flooded coastal town to uncover why her sister disappeared, while an old promise threatens the life she rebuilt." }
+    });
+    expect(started.status).toBe(200);
+    expect(started.body.projectStart).toBe("from_scratch");
+    expect(started.body.startingBrief).toMatch(/flooded coastal town/);
+    expect(started.body.phase).toBe("engine");
+  });
+
+  it("supports separate providers for analysis and drafting", async () => {
+    const result = await call("/api/engine", {
+      method: "PATCH",
+      body: {
+        routing: "split",
+        analysisProvider: "openai",
+        analysisAuthMethod: "api_key",
+        draftingProvider: "anthropic",
+        draftingAuthMethod: "subscription"
+      }
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.choice.routing).toBe("split");
+    expect(result.body.choice.analysisProvider).toBe("openai");
+    expect(result.body.choice.draftingProvider).toBe("anthropic");
+    expect(result.body.resolvedModels.analysis).toBe("gpt-5.6-luna");
+    expect(result.body.resolvedModels.drafting).toBe("claude-opus-5");
+  });
+
   it("rejects an unknown drafting mode without clobbering the stored value", async () => {
     await call("/api/project", { method: "PATCH", body: { draftingMode: "chapter_by_chapter" } });
     const { body } = await call("/api/project", { method: "PATCH", body: { draftingMode: "nonsense" } });
@@ -149,7 +193,7 @@ describe("studio api", () => {
     const created = await call("/api/questions", {
       method: "POST",
       body: {
-        question: "Should Mara know about the forgery in chapter 3?",
+        question: "Should the lead know about the altered record in chapter 3?",
         askedBy: "book-04-preparation",
         options: ["Yes", "No", "She suspects"],
         blocking: true
@@ -196,22 +240,63 @@ describe("studio api", () => {
   it("moves to chapters after the final intake answer", () => {
     const state = emptyState("x");
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.projectStart = "with_material";
     state.drive.connected = true;
     state.drive.referenceRoots = ["root"];
     state.sources = [{ driveId: "source", name: "Reference", path: "/Reference", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"] }];
     state.sourcesReviewed = true;
     state.shape = "standalone";
     state.draftingMode = "chapter_by_chapter";
+    state.projectShapeReviewed = true;
     state.manuscriptReviewed = true;
     state.styleCorpus.built = true;
     state.styleCorpus.continuedAt = new Date().toISOString();
     state.projectAnalysis.completed = true;
+    state.writingConfirmed = true;
     state.conversationStartedAt = new Date().toISOString();
     state.questions = [{
       id: "q", key: "storyPromise", phase: "intake", askedBy: "book-01-intake", question: "What is the promise?",
       allowFreeText: true, askedAt: new Date().toISOString(), answer: "A promise.", answeredAt: new Date().toISOString(), blocking: true
     }];
     expect(derivePhase(state)).toBe("writing");
+  });
+
+  it("requires an explicit writing confirmation after preparation", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.projectStart = "from_scratch";
+    state.startingBrief = "A detailed premise about a woman returning home to uncover a family secret and choose what kind of life comes next.";
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} } as any;
+    state.shape = "standalone";
+    state.projectShapeReviewed = true;
+    state.manuscriptReviewed = true;
+    state.projectAnalysis.completed = true;
+    state.conversationStartedAt = new Date().toISOString();
+    state.questions = [];
+    await save(state);
+    expect((await call("/api/state")).body.state.phase).toBe("preflight");
+    const confirmed = await call("/api/writing/confirm", { method: "POST" });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.writingConfirmed).toBe(true);
+    expect(confirmed.body.phase).toBe("writing");
+  });
+
+  it("uploads planning files without requiring Drive", async () => {
+    const result = await call("/api/sources/upload", {
+      method: "POST",
+      body: { files: [{ name: "outline.md", mimeType: "text/markdown", text: "The protagonist must return home. The timeline begins in winter." }] }
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.sources[0].driveId).toMatch(/^local-/);
+    expect(result.body.sources[0].kinds).toContain("plot");
+  });
+
+  it("stores chapter-by-chapter planning chat", async () => {
+    await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "The return", synopsis: "She comes home." }] } });
+    const sent = await call("/api/chapters/1/chat", { method: "POST", body: { text: "The chapter must end with the locked room opening. Keep the dialogue indirect." } });
+    expect(sent.status).toBe(201);
+    const read = await call("/api/chapters/1/chat");
+    expect(read.body.messages[0].text).toMatch(/locked room/);
   });
 
   it("asks the analyzed question plan one decision at a time and resets it cleanly", async () => {
@@ -230,25 +315,25 @@ describe("studio api", () => {
     await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
     await writeFile(
       `${workspacePaths("test-book").driveCache}/plot.json`,
-      JSON.stringify({ text: "Premise: Mara must choose between the love she wants and the family secret that can destroy her. She is called Mara. Conflict: the secret threatens her relationship. Ending: the couple stays together." }),
+      JSON.stringify({ text: "Romance. Premise: Rowan must choose between the life they want and the family secret that can destroy it. They are called Rowan. Conflict: the secret threatens their relationship. Ending: the couple stays together." }),
       "utf8"
     );
 
     const started = await call("/api/conversation/start", { method: "POST" });
     expect(started.body.questions).toHaveLength(1);
     expect(started.body.questions[0].key).toBe("protagonistArc");
-    expect(started.body.questions[0].question).toMatch(/Mara|family secret/i);
+    expect(started.body.questions[0].question).toMatch(/Rowan|family secret/i);
 
     const answered = await call(`/api/questions/${started.body.questions[0].id}/answer`, {
       method: "POST",
-      body: { answer: "Mara is the protagonist and wants a life outside her family." }
+      body: { answer: "Rowan is the protagonist and wants a life outside their family." }
     });
     expect(answered.body.questions).toHaveLength(2);
     expect(answered.body.questions[1].key).toBe("relationshipArc");
 
     const relationshipAnswered = await call(`/api/questions/${answered.body.questions[1].id}/answer`, {
       method: "POST",
-      body: { answer: "Mara and her partner choose each other despite the family secret." }
+      body: { answer: "Rowan and their partner choose each other despite the family secret." }
     });
     expect(relationshipAnswered.body.questions[2].key).toBe("settingRules");
 
@@ -288,12 +373,14 @@ describe("studio api", () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.projectStart = "with_material";
     state.drive.connected = true;
     state.drive.referenceRoots = ["root"];
     state.sources = [{ driveId: "source", name: "Reference", path: "/Reference", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"] }];
     state.sourcesReviewed = true;
     state.shape = "standalone";
     state.draftingMode = "chapter_by_chapter";
+    state.projectShapeReviewed = true;
     state.manuscriptReviewed = true;
     state.styleCorpus.built = true;
     await save(state);
@@ -343,7 +430,7 @@ describe("studio api", () => {
     await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
     await writeFile(
       `${workspacePaths("test-book").driveCache}/own-book.json`,
-      JSON.stringify({ text: "At university, the college couple loved and kissed. Sex changed their relationship. ".repeat(30) }),
+      JSON.stringify({ text: "At twenty-two, in their freshman year, the couple loved and kissed. Sex changed their relationship. ".repeat(30) }),
       "utf8"
     );
 
@@ -356,12 +443,12 @@ describe("studio api", () => {
   it("stores a chapter plan and reports it", async () => {
     const { body } = await call("/api/chapters", {
       method: "PUT",
-      body: { chapters: [{ number: 1, title: "The Fence", synopsis: "He runs." }, { number: 2, title: "Marrow" }] }
+      body: { chapters: [{ number: 1, title: "Opening", synopsis: "The lead runs." }, { number: 2, title: "The crossing" }] }
     });
     expect(body.chapters).toHaveLength(2);
-    expect(body.chapters[0].title).toBe("The Fence");
+    expect(body.chapters[0].title).toBe("Opening");
     expect(body.ledger.plannedChapters).toBe(2);
-    expect(body.phase).toBe("writing");
+    expect(body.phase).toBe("preflight");
   });
 
   it("serves an opening contract for a chapter", async () => {
@@ -421,6 +508,7 @@ describe("studio api", () => {
   it("holds at analyze until the grouping is reviewed", async () => {
     const state = emptyState("x");
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.projectStart = "with_material";
     state.drive.connected = true;
     state.drive.referenceRoots = ["r"];
     state.sources = [{ driveId: "a", name: "n", path: "/n", mimeType: "text/plain", isFolder: false, kinds: ["notes"] }];
@@ -605,11 +693,13 @@ describe("style source requirement", () => {
   const doc = (id: string, kinds: string[], wordCount: number) =>
     ({ driveId: id, name: id, path: `/${id}`, mimeType: "text/plain", isFolder: false, kinds, wordCount });
 
-  it("refuses to continue with nothing marked as a style source", async () => {
+  it("accepts planning material without a style source", async () => {
     await seed([doc("a", ["notes"], 50000)]);
-    const { status, body } = await call("/api/sources/reviewed", { method: "POST" });
-    expect(status).toBe(400);
-    expect(body.error).toMatch(/reference material is required/i);
+    const check = await call("/api/sources/check");
+    const { status } = await call("/api/sources/reviewed", { method: "POST" });
+    expect(status).toBe(200);
+    expect(check.body.style.ok).toBe(true);
+    expect(check.body.style.reason).toMatch(/without a measured style corpus/i);
   });
 
   it("requires references as well as a style source", async () => {
@@ -617,7 +707,7 @@ describe("style source requirement", () => {
     const { body } = await call("/api/sources/check");
     expect(body.style.ok).toBe(true);
     expect(body.references.ok).toBe(false);
-    expect(body.references.reason).toMatch(/nothing is marked as a reference/i);
+    expect(body.references.reason).toMatch(/no plan|reference-book material/i);
     expect((await call("/api/sources/reviewed", { method: "POST" })).status).toBe(400);
   });
 
@@ -675,6 +765,11 @@ describe("style source requirement", () => {
 });
 
 describe("run halt and resume", () => {
+  it("refuses to start drafting before the writing gate", async () => {
+    const result = await call("/api/run/start", { method: "POST", body: { chapter: 1 } });
+    expect(result.status).toBe(409);
+  });
+
   it("records a halt with its reason and the chapter it stopped on", async () => {
     await call("/api/chapters", { method: "PUT", body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }] } });
     const { body } = await call("/api/run/halt", {
@@ -692,11 +787,26 @@ describe("run halt and resume", () => {
     expect(body.run.reason).toBe("other");
   });
 
+  it("redacts credential-shaped halt details before persistence", async () => {
+    const { body } = await call("/api/run/halt", {
+      method: "POST",
+      body: { reason: "provider_error", detail: "Authorization: Bearer abc.def.ghi api_key=sk-ant-1234567890abcdef" }
+    });
+    expect(body.run.detail).not.toContain("abc.def.ghi");
+    expect(body.run.detail).not.toContain("sk-ant-1234567890abcdef");
+    expect(body.run.detail).toContain("[redacted]");
+  });
+
   it("resumes at the first chapter that is not approved", async () => {
     await call("/api/chapters", {
       method: "PUT",
       body: { chapters: [{ number: 1, title: "One" }, { number: 2, title: "Two" }, { number: 3, title: "Three" }] }
     });
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.writingConfirmed = true;
+    await save(state);
+    await call("/api/chapters/1/status", { method: "POST", body: { status: "validated" } });
     await call("/api/chapters/1/status", { method: "POST", body: { status: "approved" } });
     await call("/api/run/halt", { method: "POST", body: { reason: "rate_limited" } });
 
@@ -712,7 +822,7 @@ describe("directions", () => {
   it("accepts an instruction and lists it as pending", async () => {
     const created = await call("/api/directions", {
       method: "POST",
-      body: { text: "Keep Mara's chapters colder.", scope: "book" }
+      body: { text: "Keep the protagonist's chapters colder.", scope: "book" }
     });
     expect(created.status).toBe(201);
 

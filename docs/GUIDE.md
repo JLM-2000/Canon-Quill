@@ -507,7 +507,7 @@ by the drafting agent before the next chapter and takes precedence over the
 chapter plan, because the plan was written earlier and you have since said
 otherwise.
 
-Scope it **from now on** for a standing change ("keep Mara's chapters colder"),
+ Scope it **from now on** for a standing change ("keep the protagonist's chapters colder"),
 or **next chapter only** for a one-off. Instructions move to an applied list once
 the agent has acted on them, so you can see what landed and when.
 
