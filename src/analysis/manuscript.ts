@@ -65,8 +65,8 @@ export interface ManuscriptAnalysis {
  * happens to open with the word.
  */
 const headingPatterns = [
-  /^\s*#{1,3}\s*(chapter|chapitre|capítulo|kapitel|part|book|prologue|epilogue|interlude)\b/i,
-  /^\s*(chapter|chapitre|capítulo|kapitel|part|book|prologue|epilogue|interlude)\b[\s\d\p{L}.:'-]*$/iu,
+  /^\s*#{1,3}\s*(chapter|chapitre|capítulo|kapitel|part|prologue|epilogue|interlude)\b/i,
+  /^\s*(chapter|chapitre|capítulo|kapitel|part|prologue|epilogue|interlude)\b[\s\d\p{L}.:'-]*$/iu,
   /^\s*#{1,3}\s+\S.*$/,
   /^\s*[A-Z][A-Z\s\d.:'-]{4,60}$/ // an all-caps line on its own
 ];

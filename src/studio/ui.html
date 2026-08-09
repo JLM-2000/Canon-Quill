@@ -672,7 +672,7 @@ function renderNav() {
       if (collapsedGroups[group]) continue;
       const locked = isLocked(p.id);
       const done = !locked && isDone(p.id);
-      const cur = !locked && phaseOrder()[furthestReached()] === p.id;
+      const cur = !locked && !done && (route === p.id || phaseOrder()[furthestReached()] === p.id);
       html += `<button class="navitem ${route === p.id ? "active" : ""} ${done ? "done" : ""} ${cur ? "current" : ""} ${locked ? "locked" : ""}"
         onclick="go('${p.id}')" ${locked ? 'title="Finish the earlier steps first"' : ""}>
         <span class="dot"></span>${p.label}${
@@ -693,6 +693,7 @@ function isDone(id) {
     case "connect":   return S.drive.connected;
     case "sources": {
       const hasSources = S.drive.referenceRoots.length > 0
+        || picked.size > 0
         || S.sources.some((source) => source.driveId.startsWith("local-"));
       return !indexError && hasSources
         && (sourceAnalysisStarted || S.sourcesReviewed);

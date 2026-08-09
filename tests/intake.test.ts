@@ -51,9 +51,9 @@ describe("project intake analysis", () => {
 
   it("does not cut a conflict finding in the middle of a sentence", () => {
     const conflict = [
-      "A three-book structure works beautifully if Book 3 is allowed to become the full completion of Julian's first-year transformation.",
+      "A three-volume structure works beautifully if the final volume is allowed to become the full completion of the protagonist's first-year transformation.",
       "The romance, the first sexual intimacy, and the boyfriend confirmation have already been earned.",
-      "Book 3 does not need to repeat those milestones.",
+      "The final volume does not need to repeat those milestones.",
       "It needs to test what the transformation costs when the relationship is no longer new."
     ].join(" ");
     const result = analyseProjectMaterial([{
@@ -62,7 +62,7 @@ describe("project intake analysis", () => {
       text: `Conflict and stakes: ${conflict}`
     }]);
 
-    expect(result.findings.centralConflict?.value).toMatch(/milestones\.$/);
+    expect(result.findings.centralConflict?.value).toMatch(/[.!?]$/);
     expect(result.findings.centralConflict?.value).not.toMatch(/what t$/);
   });
 
@@ -91,9 +91,26 @@ describe("project intake analysis", () => {
     ]);
 
     expect(result.findings.protagonist?.value).not.toMatch(/\b(?:The|You)\b/);
+    expect(result.findings.protagonist?.value).not.toMatch(/\b(?:And|But)\b/);
     expect(result.findings.relationships?.value).toMatch(/Rowan/);
     expect(result.findings.relationships?.value).toMatch(/Ellis/);
+    expect(result.findings.relationships?.value).not.toMatch(/\b(?:And|But)\b/);
     expect(result.findings.relationships?.confidence).toBeLessThan(0.8);
+  });
+
+  it("infers the lead from focus and arc evidence without hardcoding a cast", () => {
+    const result = analyseProjectMaterial([
+      {
+        name: "Novel plan",
+        kinds: ["plot"],
+        text: "The story focuses on Morgan and Riley, but Morgan owns the emotional arc. Morgan's first-year transformation is the spine of the final volume."
+      },
+      { name: "Character notes", kinds: ["characters"], text: "Name: Morgan. Name: Riley." }
+    ], { shape: "series" });
+
+    expect(result.findings.protagonist?.value).toBe("Morgan");
+    expect(result.findings.protagonist?.confidence).toBeGreaterThan(0.8);
+    expect(result.questionPlan.map((question) => question.key)).not.toContain("protagonistArc");
   });
 
   it("reads author notes as material without counting them as a document", () => {

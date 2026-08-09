@@ -20,6 +20,21 @@ describe("chapter detection", () => {
     expect(analyseManuscript(text).chapters).toHaveLength(3);
   });
 
+  it("does not count book-cover metadata as a chapter", () => {
+    const text = [
+      "The River House",
+      "The Silver Door",
+      "Book 7",
+      "A. Writer",
+      "________________",
+      "CHAPTER I",
+      prose
+    ].join("\n");
+    const analysis = analyseManuscript(text);
+    expect(analysis.chapters).toHaveLength(1);
+    expect(analysis.chapters[0].heading).toBe("CHAPTER I");
+  });
+
   it("finds all-caps headings", () => {
     const text = chapter("THE HARBOUR OFFICE", prose) + chapter("WHAT MARA KNEW", prose);
     expect(analyseManuscript(text).chapters).toHaveLength(2);

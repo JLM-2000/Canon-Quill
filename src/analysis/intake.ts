@@ -392,6 +392,22 @@ function findPremise(documents: IntakeDocument[]): IntakeFinding | null {
 function findProtagonist(documents: IntakeDocument[], names: string[]): IntakeFinding | null {
   const labeled = findLabeledSnippet(documents, /(?:protagonist|main character|primary character|lead)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) return labeled;
+  const planningText = documents.map((document) => document.text).join("\n\n");
+  const explicit = names.map((name) => {
+    const escaped = escapeRegExp(name);
+    const leadSignal = new RegExp(`\\b(?:protagonist|main character|primary character|lead|story follows|focus(?:es)? on)\\s*(?:is|on|around|:)?\\s*${escaped}\\b`, "i").test(planningText);
+    const arcSignal = new RegExp(`\\b${escaped}(?:['’]s)?\\s+(?:first[- ]year|emotional|character|personal|central|main|full|core)?(?:\\s+[A-Za-z-]+){0,3}\\s+(?:arc|transformation|journey)\\b`, "i").test(planningText);
+    return { name, signals: Number(leadSignal) + Number(arcSignal), leadSignal };
+  }).filter((candidate) => candidate.signals > 0)
+    .sort((a, b) => b.signals - a.signals || a.name.localeCompare(b.name));
+  if (explicit.length) {
+    const best = explicit[0];
+    return {
+      value: best.name,
+      confidence: best.signals > 1 ? 0.92 : 0.78,
+      evidence: [`${best.name} is identified by ${best.leadSignal ? "lead or focus language" : "arc or transformation language"} in the selected planning material.`]
+    };
+  }
   const characterDocuments = documents.filter((document) => document.kinds?.includes("characters"));
   if (!names.length) return null;
   const selected = names.slice(0, 5).join(", ");
@@ -515,7 +531,7 @@ function extractNames(documents: IntakeDocument[]): string[] {
     const normalized = candidate.trim().replace(/\s+/g, " ");
     if (!normalized) return;
     if (!/^[A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3}$/.test(normalized)) return;
-    if (normalized.split(/\s+/).some((token) => NON_NAME_TOKENS.has(token))) return;
+    if (normalized.split(/\s+/).some((token) => NON_NAME_TOKENS.has(token.toLowerCase()))) return;
     const current = candidates.get(normalized) ?? { score: 0, mentions: 0 };
     current.score += score;
     current.mentions += mentions;
@@ -572,9 +588,11 @@ function rankRelationshipPair(documents: IntakeDocument[], names: string[]): { n
 }
 
 const NON_NAME_TOKENS = new Set([
-  "The", "This", "That", "These", "Those", "Then", "You", "Your", "They", "Their", "Them",
-  "She", "Her", "He", "His", "Him", "We", "Our", "Us", "It", "Its", "What", "When", "Where",
-  "Who", "Why", "How", "Chapter", "Book", "Part", "Setting", "Conflict", "Ending", "Premise"
+  "the", "this", "that", "these", "those", "then", "you", "your", "they", "their", "them",
+  "she", "her", "he", "his", "him", "we", "our", "us", "it", "its", "what", "when", "where",
+  "who", "why", "how", "and", "but", "or", "so", "yet", "also", "still", "however", "because",
+  "before", "after", "while", "as", "if", "though", "although", "once", "until", "since",
+  "chapter", "book", "part", "setting", "conflict", "ending", "premise"
 ]);
 
 function isNarrativeDocument(document: IntakeDocument): boolean {
