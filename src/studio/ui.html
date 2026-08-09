@@ -1884,8 +1884,8 @@ function viewStyle() {
 
   <div class="card spread">
     <div><b>${books.length
-        ? plural(books.length, "document") + " of your writing"
-        : usingReference ? plural(refs.length, "document") + " of reference writing" : "Nothing to learn from"}</b>
+        ? plural(books.length, "document") + " used as reference"
+        : usingReference ? plural(refs.length, "document") + " used as reference" : "Nothing to learn from"}</b>
       <div class="hint">${(books.length ? books : refs).map((b) => esc(b.name)).join(", ")
         || "Mark something as Your writing on the Analyse screen."}</div>
       ${usingReference ? '<div class="hint" style="color:var(--warn);margin-top:4px">No writing of your own is marked, so this will learn from reference writing. The book will read like its author rather than like you.</div>' : ""}</div>
@@ -1899,9 +1899,8 @@ function viewStyle() {
     ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
     <div id="fp"><span class="spin"></span></div>
     <div class="row" style="margin-top:16px">
-      <button onclick="continueFromStyle(this)">Continue to project analysis</button>
+      <button onclick="continueFromStyle(this)">Continue</button>
     </div>
-    <div class="hint" style="margin-top:8px">The questions screen is where the writing agent records decisions instead of guessing.</div>
     </div>` : ""}
   ${!canBuild ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping and mark reference material before building the corpus.</div>' : ""}`;
 }
@@ -1965,12 +1964,10 @@ function viewIntakeAnalysis() {
                ? `<tr><td><b>${esc(label)}</b></td><td>${esc(finding.value)}</td><td class="hint">${esc((finding.evidence || []).join(" "))}</td></tr>`
                : `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`).join("")}
            </table>
-           ${analysis.unknowns?.length ? `<div class="info warn" style="margin-top:14px"><div><b>Still author-owned</b><p>${analysis.unknowns.map(esc).join(" · ")}</p></div></div>` : ""}
-           ${analysis.questionPlan?.length ? `<div class="hint" style="margin-top:12px"><b>Questions reserved for you:</b> ${analysis.questionPlan.length}. Each one is tied to an analysis gap and appears one at a time after you click Begin intake.</div>` : ""}`}
-    </div>
+            ${""}`}
+     </div>
     <div class="row" style="margin-top:14px">
-      <button ${complete ? "" : "disabled"} onclick="continueFromAnalysis(this)">Continue to questions</button>
-      ${!complete ? '<span class="hint">Analysis is still running.</span>' : ""}
+      <button ${complete ? "" : "disabled"} onclick="continueFromAnalysis(this)">Continue</button>
     </div>`;
 }
 

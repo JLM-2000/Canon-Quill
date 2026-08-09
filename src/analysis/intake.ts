@@ -338,10 +338,21 @@ function findRelationships(documents: IntakeDocument[], names: string[], genre: 
   const pair = rankRelationshipPair(documents, names);
   if (genre === "Romance" && pair) {
     return {
-      value: `${pair.names[0]} and ${pair.names[1]}`,
-      confidence: 0.72,
+      value: `${pair.names[0]} and ${pair.names[1]} share relationship evidence, but the full arc is not explicit yet.`,
+      confidence: 0.58,
       evidence: [`${pair.sharedScenes} shared narrative sections, including ${pair.romanceScenes} with relationship signals.`]
     };
+  }
+  if (genre === "Romance" && names.length >= 2) {
+    const romancePattern = signals.find((signal) => signal.genre === "Romance")?.pattern;
+    const romanceSignals = romancePattern ? count(documents.map((document) => document.text).join("\n\n"), romancePattern) : 0;
+    if (romanceSignals > 0) {
+      return {
+        value: `Relationship signals surround ${names.slice(0, 3).join(", ")}, but the selected material does not establish the arc yet.`,
+        confidence: 0.34,
+        evidence: [`${romanceSignals} relationship signals were found around named characters, without enough shared-scene evidence to identify the arc.`]
+      };
+    }
   }
   return null;
 }
@@ -434,6 +445,7 @@ function extractNames(documents: IntakeDocument[]): string[] {
     const normalized = candidate.trim().replace(/\s+/g, " ");
     if (!normalized) return;
     if (!/^[A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3}$/.test(normalized)) return;
+    if (normalized.split(/\s+/).some((token) => NON_NAME_TOKENS.has(token))) return;
     const current = candidates.get(normalized) ?? { score: 0, mentions: 0 };
     current.score += score;
     current.mentions += mentions;
@@ -441,7 +453,7 @@ function extractNames(documents: IntakeDocument[]): string[] {
   };
 
   for (const document of documents) {
-    for (const match of document.text.matchAll(/(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/g)) add(match[1], 4);
+    for (const match of document.text.matchAll(/(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/gi)) add(match[1], 4);
     for (const match of document.text.matchAll(/\b(?:called|named)\s+([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})\b/g)) add(match[1], 3);
 
     if (!isNarrativeDocument(document)) continue;
@@ -473,18 +485,27 @@ function rankRelationshipPair(documents: IntakeDocument[], names: string[]): { n
   if (names.length < 2) return null;
   const romancePattern = signals.find((signal) => signal.genre === "Romance")?.pattern;
   const scores: Array<{ names: [string, string]; sharedScenes: number; romanceScenes: number; score: number }> = [];
-  const prose = documents.filter(isNarrativeDocument).map(narrativeText).join("\n\n");
+  const prose = documents
+    .filter((document) => isNarrativeDocument(document) || isPlanningDocument(document))
+    .map((document) => isNarrativeDocument(document) ? narrativeText(document) : document.text)
+    .join("\n\n");
   const paragraphs = splitParagraphs(prose).map((paragraph) => paragraph.text);
   for (let i = 0; i < names.length; i += 1) {
     for (let j = i + 1; j < names.length; j += 1) {
       const pair: [string, string] = [names[i], names[j]];
       const occurrences = paragraphs.filter((paragraph) => pair.every((name) => namePattern(name).test(paragraph)));
       const romanceScenes = occurrences.filter((paragraph) => romancePattern ? count(paragraph, romancePattern) > 0 : false).length;
-      if (occurrences.length >= 2) scores.push({ names: pair, sharedScenes: occurrences.length, romanceScenes, score: occurrences.length + romanceScenes * 2 });
+      if (occurrences.length > 0 && romanceScenes > 0) scores.push({ names: pair, sharedScenes: occurrences.length, romanceScenes, score: occurrences.length + romanceScenes * 2 });
     }
   }
   return scores.sort((a, b) => b.score - a.score || b.sharedScenes - a.sharedScenes)[0] ?? null;
 }
+
+const NON_NAME_TOKENS = new Set([
+  "The", "This", "That", "These", "Those", "Then", "You", "Your", "They", "Their", "Them",
+  "She", "Her", "He", "His", "Him", "We", "Our", "Us", "It", "Its", "What", "When", "Where",
+  "Who", "Why", "How", "Chapter", "Book", "Part", "Setting", "Conflict", "Ending", "Premise"
+]);
 
 function isNarrativeDocument(document: IntakeDocument): boolean {
   const kinds = document.kinds ?? [];

@@ -1,5 +1,5 @@
 import { dialogueSpans, per1k, splitParagraphs, words } from "./text.js";
-import { detectNarration, type Narration } from "./narration.js";
+import { detectNarration, povLabel, tenseLabel, type Narration } from "./narration.js";
 import type { BeatType } from "./corpus.js";
 
 export interface WritingProfile {
@@ -104,8 +104,8 @@ export function analyseWriting(text: string, samples: WritingSample[] = []): Wri
   const intimacy = detectIntimacy(text);
   const audience = detectAudience(text, total);
   const narrationEvidence = [
-    `${narration.pov.replace("_", " ")} POV (${Math.round(narration.povConfidence * 100)}% confidence)`,
-    `${narration.tense} tense (${Math.round(narration.tenseConfidence * 100)}% confidence)`
+    `${povLabel(narration.pov)} POV (${Math.round(narration.povConfidence * 100)}% confidence)`,
+    `${tenseLabel(narration.tense)} tense (${Math.round(narration.tenseConfidence * 100)}% confidence)`
   ];
 
   return {

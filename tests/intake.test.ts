@@ -58,4 +58,24 @@ describe("project intake analysis", () => {
     expect(result.findings.protagonist).toBeNull();
     expect(result.questionPlan.find((question) => question.key === "protagonistArc")?.question).not.toMatch(/Location Notes|Technical Notes|Seasonal events/);
   });
+
+  it("filters sentence tokens and surfaces weak relationship evidence", () => {
+    const result = analyseProjectMaterial([
+      {
+        name: "Plot Notes",
+        kinds: ["plot"],
+        text: "Romance. Character: Rowan. Character: Ellis. Rowan and Ellis keep circling each other, but the relationship arc is not yet decided."
+      },
+      {
+        name: "Prose Sample",
+        kinds: ["reference_book"],
+        text: "The room was quiet. You waited by the door. Rowan looked at Ellis, and Ellis looked back."
+      }
+    ]);
+
+    expect(result.findings.protagonist?.value).not.toMatch(/\b(?:The|You)\b/);
+    expect(result.findings.relationships?.value).toMatch(/Rowan/);
+    expect(result.findings.relationships?.value).toMatch(/Ellis/);
+    expect(result.findings.relationships?.confidence).toBeLessThan(0.8);
+  });
 });
