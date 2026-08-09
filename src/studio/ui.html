@@ -2608,11 +2608,13 @@ function viewChapters() {
   })() : "";
 
   const live = run.status === "running" || runEvents.length > 0;
+  // A halted run offers Resume, which is the same act as starting.
+  const writingCard = live ? runPanel(run) : haltCard ? "" : startCard(cs.length > 0);
 
   if (!cs.length) return `<h1>Chapters</h1>
     ${haltCard}
     ${haltCard || live ? "" : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
-    ${live ? runPanel(run) : startCard(false)}
+    ${writingCard}
     ${directionsCard(pending, dirs)}`;
 
   const approved = cs.filter((c) => c.status === "approved").length;
@@ -2633,7 +2635,7 @@ function viewChapters() {
     <button onclick="continueToChapters(this)">Confirm the plan</button>
   </div>`}
 
-  ${live ? runPanel(run) : startCard(true)}
+  ${writingCard}
 
   <div class="card spread">
     <div><b>${approved} of ${plural(cs.length, "chapter")} approved</b>
