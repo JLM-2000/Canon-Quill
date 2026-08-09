@@ -112,6 +112,9 @@
   button.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
   button.text-link { background: none; color: var(--accent); padding: 0; font-size: inherit; font-weight: 600; }
   button.sm { padding: 4px 9px; font-size: 12px; }
+  .file-button { display:inline-flex; align-items:center; width:auto; margin:0; padding:8px 14px;
+    border-radius:7px; background:var(--surface-2); color:var(--text); border:1px solid var(--border); cursor:pointer; }
+  .file-button:hover { border-color:var(--accent); }
   input, textarea, select {
     background: var(--bg); border: 1px solid var(--border); color: var(--text);
     padding: 8px 10px; border-radius: 7px; font: inherit; width: 100%;
@@ -133,6 +136,8 @@
     padding: 14px; cursor: pointer; transition: border-color .12s, background .12s;
   }
   .choice:hover { border-color: var(--accent); }
+  .choice.locked { cursor: default; }
+  .choice.locked:hover { border-color: var(--accent); }
   .choice.on { border-color: var(--accent); background: var(--accent-dim); }
   .choice b { display: block; margin-bottom: 3px; }
   .choice p { margin: 0; color: var(--muted); font-size: 12.5px; }
@@ -325,7 +330,7 @@ let TENSE_OPTIONS = ["Mixed", "Past", "Present"];
 const PHASES = [
   { id: "start",       label: "Starting point", group: "Set up" },
   { id: "engine",      label: "Writing engine", group: "Set up" },
-  { id: "connect",     label: "Connect Drive", group: "Set up" },
+  { id: "connect",     label: "Add resources", group: "Set up" },
   { id: "sources",     label: "Select sources", group: "Set up" },
   { id: "analyze",     label: "Analyse & group", group: "Set up" },
   { id: "intake",      label: "Project shape",  group: "Prepare" },
@@ -649,7 +654,7 @@ function isDone(id) {
   if (!S) return false;
   switch (id) {
     case "start":     return !!effectiveProjectStart();
-    case "engine":    return !!(S.engine?.provider && S.engine?.authMethod);
+    case "engine":    return engineAssignmentsReady() && !!S.engineReviewed;
     case "connect":   return S.drive.connected;
     case "sources":   return !indexError && S.drive.referenceRoots.length > 0
       && (!!S.drive.targetFolderId || route === "analyze" || S.sourcesReviewed);
@@ -676,6 +681,16 @@ function phaseOrder() {
   }
   const order = ["start", "engine", "connect", "sources", "analyze", "intake", "draft", "style", "intake_analysis", "questions", "chapters"];
   return order.filter((id) => id !== "style" || S.sources.some((source) => source.kinds?.includes("past_book")));
+}
+
+function engineAssignmentsReady() {
+  if (!S?.engine) return false;
+  const e = S.engine;
+  const draftingProvider = e.draftingProvider || e.provider;
+  const draftingAuth = e.draftingAuthMethod || e.authMethod;
+  const analysisProvider = e.analysisProvider || draftingProvider;
+  const analysisAuth = e.analysisAuthMethod || draftingAuth;
+  return !!(draftingProvider && draftingAuth && analysisProvider && analysisAuth);
 }
 
 function furthestReached() {
@@ -768,15 +783,16 @@ function viewStart() {
   const draft = readStartDraft();
   const selected = startSelection || S.projectStart || draft.projectStart;
   const brief = S.startingBrief || draft.startingBrief || "";
+  const locked = Boolean(S.projectStart);
   return `
   <h1>How are you starting this book?</h1>
   <p class="sub">This decides whether Canon Quill waits for planning material or helps you build the project from a detailed brief.</p>
   <div class="choices">
-    <div class="choice ${selected === "from_scratch" ? "on" : ""}" onclick="chooseProjectStart('from_scratch')">
+    <div class="choice ${locked ? "locked " : ""}${selected === "from_scratch" ? "on" : ""}" onclick="${locked ? "showLockedStart()" : "chooseProjectStart('from_scratch')"}" aria-disabled="${locked}">
       <b>From scratch</b>
       <p>No plan, timeline, character file or outline yet. You will first describe in detail what the book is about, then we set up the project.</p>
     </div>
-    <div class="choice ${selected === "with_material" ? "on" : ""}" onclick="chooseProjectStart('with_material')">
+    <div class="choice ${locked ? "locked " : ""}${selected === "with_material" ? "on" : ""}" onclick="${locked ? "showLockedStart()" : "chooseProjectStart('with_material')"}" aria-disabled="${locked}">
       <b>I already have material</b>
       <p>I have a plan, timeline, characters, outline or related documents. Upload files directly or connect Google Drive and choose what Canon Quill may read.</p>
     </div>
@@ -784,13 +800,15 @@ function viewStart() {
   ${selected === "from_scratch" ? `<div class="card">
     <label>What is this book about?</label>
     <p class="hint">Describe the premise, protagonist, conflict, setting, tone and anything you already know. The more concrete this is, the fewer assumptions the preparation phase has to make.</p>
-    <textarea id="starting-brief" rows="9" placeholder="This book is about..." oninput="saveStartDraft('from_scratch',this.value);document.getElementById('start-continue').disabled=this.value.trim().length<40">${esc(brief)}</textarea>
+    <textarea id="starting-brief" rows="9" placeholder="This book is about..." ${locked ? "readonly" : ""} oninput="saveStartDraft('from_scratch',this.value);document.getElementById('start-continue').disabled=this.value.trim().length<40">${esc(brief)}</textarea>
   </div>` : ""}
   <div class="row" style="margin-top:16px">
-    <button id="start-continue" ${selected && (selected !== "from_scratch" || brief.trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
-    ${selected === "from_scratch" && brief.trim().length < 40 ? '<span class="hint" style="color:var(--warn)">Write a few detailed sentences before continuing.</span>' : ""}
+    ${locked ? '<span class="pill good">Starting point confirmed</span>' : `<button id="start-continue" ${selected && (selected !== "from_scratch" || brief.trim().length >= 40) ? "" : "disabled"} onclick="continueProjectStart(this)">Continue</button>
+    ${selected === "from_scratch" && brief.trim().length < 40 ? '<span class="hint" style="color:var(--warn)">Write a few detailed sentences before continuing.</span>' : ""}`}
   </div>`;
 }
+
+function showLockedStart() { toast("Starting point is locked after Continue.", "info"); }
 
 function chooseProjectStart(projectStart) {
   startSelection = projectStart;
@@ -975,7 +993,7 @@ function viewEngine() {
     <div><b>No per-token cost</b>
       <p>Writing is covered by your plan, subject to its usage limits.</p></div></div>` : ""}` : ""}
 
-  ${assignmentReady ? `<button onclick="go('${effectiveProjectStart() === "from_scratch" ? "intake" : "connect"}')">Continue</button>` : ""}`;
+  ${assignmentReady ? `<button onclick="continueEngine(this)">Continue</button>` : ""}`;
 }
 
 function renderEstimates(cat, provider) {
@@ -1047,6 +1065,14 @@ async function setEngine(patch) {
   catch (e) { toast(e.message, "error"); }
 }
 
+async function continueEngine(btn) {
+  btn.disabled = true;
+  try {
+    S = await api("/api/engine/continue", { method: "POST" });
+    go(effectiveProjectStart() === "from_scratch" ? "intake" : "connect");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+}
+
 let DRIVE = null;
 let showDriveRecovery = false;
 
@@ -1060,10 +1086,9 @@ function viewConnect() {
   const next = d?.next;
 
   return `
-  <h1>Connect Google Drive</h1>
-  <p class="sub">Canon Quill reads your reference material straight from Drive and writes approved
-  chapters back to a folder you choose. Access is limited to the <code>drive.file</code> scope, so
-  only files you explicitly pick.</p>
+  <h1>Add resources</h1>
+  <p class="sub">Upload planning files from this computer or connect Google Drive. Canon Quill only reads
+  the resources you explicitly choose and writes approved chapters to a folder you select.</p>
 
   ${!d ? '<div class="card empty"><span class="spin"></span> Checking…</div>' : `
     <div class="info ${next === "ready" ? "ok" : next === "connect" ? "" : "warn"}">
@@ -1109,8 +1134,9 @@ function viewConnect() {
     <div class="card">
       <b>Upload planning material instead</b>
       <p class="sub" style="margin:6px 0 10px">Use this for a plan, timeline, character sheet, outline or notes on this computer. Files are copied into this book's private workspace.</p>
-      <input id="local-sources" type="file" multiple accept=".txt,.md,.markdown,.rtf,.html,.csv,.json" />
-      <div class="row" style="margin-top:10px"><button class="ghost" onclick="uploadSources(this)">Upload files</button></div>
+      <input id="local-sources" type="file" multiple accept=".txt,.md,.markdown,.rtf,.html,.csv,.json" hidden onchange="showSelectedFiles(this)" />
+      <div class="row" style="margin-top:10px"><label class="file-button" for="local-sources">Choose file</label><span id="selected-files" class="hint">No file selected</span></div>
+      <div class="row" style="margin-top:10px"><button onclick="uploadSources(this)">Continue</button></div>
     </div>
 
     ${next === "ready" ? `<div class="card"><b>Select sources</b>
@@ -1118,7 +1144,7 @@ function viewConnect() {
        notes, timelines and references.</p>
       <button onclick="go('sources')">Select sources</button></div>
 
-     <div class="hint" style="margin:10px 0 0">Can't connect? <button class="text-link" onclick="showDriveRecovery = true; render()">Reconnect</button></div>
+      <div class="hint" style="margin:10px 0 0"><button class="text-link" onclick="showDriveRecovery = true; render()">Reconnect</button></div>
      ${showDriveRecovery ? `<div class="card" style="margin-top:10px">
        <b>Reconnect Google Drive</b>
        <p class="sub" style="margin:6px 0 10px">Use this if the stored connection no longer works or you want a different Google account.</p>
@@ -1167,6 +1193,12 @@ async function checkDrive(btn) {
     await reload(); render();
   }
   catch (e) { toast(e.message, "error"); if (btn) { btn.disabled = false; btn.textContent = "Check again"; } }
+}
+
+function showSelectedFiles(input) {
+  const target = document.getElementById("selected-files");
+  const files = [...(input?.files || [])];
+  if (target) target.textContent = files.length ? files.map((file) => file.name).join(", ") : "No file selected";
 }
 
 async function uploadSources(btn) {
@@ -1243,13 +1275,13 @@ function viewSources() {
             <b style="color:var(--text)">Nothing visible with the current access grant</b>
             <p style="margin:6px 0 0">Canon Quill was authorised for the narrow <code>drive.file</code>
             scope, which can only see files it created itself.</p>
-            <p style="margin:6px 0 0">Reconnect from <b>Connect Drive</b> to grant read access.</p></div>`
+            <p style="margin:6px 0 0">Reconnect from <b>Add resources</b> to grant read access.</p></div>`
         : (browse.folderId === "root"
           ? `<div class="empty" style="text-align:left;padding:16px">
               <b style="color:var(--text)">Nothing listed here</b>
               <p style="margin:6px 0 0">If you just reconnected Google Drive, press <b>Refresh</b> above.</p></div>`
           : '<div class="empty">This folder is empty</div>'))}</div>
-  </div>` : localSources.length ? "" : `<div class="card"><b>No source method selected</b><p class="sub">Connect Drive or go back to upload planning material.</p><button onclick="go('connect')">Choose source method</button></div>`}
+  </div>` : localSources.length ? "" : `<div class="card"><b>No source method selected</b><p class="sub">Add resources or go back to upload planning material.</p><button onclick="go('connect')">Choose source method</button></div>`}
 
   ${hasDrive ? `<div class="card">
     <label>Reference material</label>

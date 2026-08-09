@@ -434,6 +434,9 @@ export function createStudioApp() {
       if (models && typeof models === "object") {
         current.engine.models = { ...current.engine.models, ...models };
       }
+      if ([provider, authMethod, analysisProvider, analysisAuthMethod, draftingProvider, draftingAuthMethod, routing].some((value) => value !== undefined)) {
+        current.engineReviewed = false;
+      }
     });
 
     const catalog = await loadCatalog();
@@ -452,6 +455,21 @@ export function createStudioApp() {
           : null
       }
     });
+  }));
+
+  app.post("/api/engine/continue", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const state = await updateState(slug, (current) => {
+      const draftingProvider = current.engine.draftingProvider ?? current.engine.provider;
+      const draftingAuth = current.engine.draftingAuthMethod ?? current.engine.authMethod;
+      const analysisProvider = current.engine.analysisProvider ?? draftingProvider;
+      const analysisAuth = current.engine.analysisAuthMethod ?? draftingAuth;
+      if (!current.projectStart || !draftingProvider || !draftingAuth || !analysisProvider || !analysisAuth) {
+        throw new HttpError(400, "Choose the project starting point and complete both provider assignments first.");
+      }
+      current.engineReviewed = true;
+    });
+    res.json(withDerived(state));
   }));
 
   /** Store a key. The response carries a mask, never the key itself. */
@@ -983,6 +1001,7 @@ export function createStudioApp() {
     const current = await loadState(slug);
     const hasOwnStyle = current.sources.some((source) => source.kinds.includes("past_book"));
     if (!current.projectStart) throw new HttpError(400, "Choose how the book starts first.");
+    if (!current.engineReviewed) throw new HttpError(400, "Continue past the writing engine first.");
     if (!current.shape || !current.draftingMode || !current.projectShapeReviewed) throw new HttpError(400, "Finish project shape first.");
     if (current.projectStart === "with_material" && !current.sourcesReviewed) throw new HttpError(400, "Review the selected material first.");
     if (!current.manuscriptReviewed) throw new HttpError(400, "Choose whether to continue an existing draft or start fresh first.");

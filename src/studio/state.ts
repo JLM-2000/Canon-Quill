@@ -174,6 +174,8 @@ export interface StudioState {
   projectStart: ProjectStart | null;
   startingBrief: string;
   engine: EngineChoice;
+  /** True after the author continues past the writing-engine screen. */
+  engineReviewed: boolean;
   shape: ProjectShape | null;
   draftingMode: DraftingMode | null;
   /** True after the author continues past the project-shape screen. */
@@ -240,6 +242,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
       routing: "single",
       models: {}
     },
+    engineReviewed: false,
     shape: null,
     draftingMode: "chapter_by_chapter",
     projectShapeReviewed: false,
@@ -321,6 +324,7 @@ export async function loadState(slug: string): Promise<StudioState> {
         routing: parsed.engine?.routing === "split" ? ("split" as const) : ("single" as const),
         models: { ...base.engine.models, ...(parsed.engine?.models ?? {}) }
       },
+      engineReviewed: parsed.engineReviewed ?? false,
       intake,
       drive: { ...base.drive, ...(parsed.drive ?? {}) },
       projectAnalysis: { ...base.projectAnalysis, ...(parsed.projectAnalysis ?? {}) },
@@ -396,7 +400,7 @@ export function derivePhase(state: StudioState): PhaseId {
   // no entry marker. Keep the author on the engine screen until that legacy
   // state is migrated, rather than sending them back to the first screen.
   if (!state.projectStart) return "engine";
-  if (!draftingProvider || !draftingAuth || !analysisProvider || !analysisAuth) return "engine";
+  if (!draftingProvider || !draftingAuth || !analysisProvider || !analysisAuth || !state.engineReviewed) return "engine";
   if (state.projectStart === "with_material") {
     const hasLocalSources = state.sources.some((source) => source.driveId.startsWith("local-"));
     if (!state.drive.connected && !hasLocalSources) return "connect";

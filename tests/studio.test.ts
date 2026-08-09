@@ -57,6 +57,7 @@ describe("phase derivation", () => {
     const state = emptyState("x");
     state.projectStart = "with_material";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.engineReviewed = true;
     state.drive.connected = true;
     expect(derivePhase(state)).toBe("sources");
   });
@@ -65,6 +66,7 @@ describe("phase derivation", () => {
     const state = emptyState("x");
     state.projectStart = "with_material";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.engineReviewed = true;
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
     state.sources = [
@@ -83,6 +85,7 @@ describe("phase derivation", () => {
     const state = emptyState("x");
     state.projectStart = "with_material";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.engineReviewed = true;
     state.drive.connected = true;
     state.drive.referenceRoots = ["root-1"];
     state.sources = [{ driveId: "a", name: "book.md", path: "/book.md", mimeType: "text/plain", isFolder: false, kinds: ["past_book"] }];
@@ -129,10 +132,14 @@ describe("studio api", () => {
     expect(html).not.toContain("Reset questions and project analysis");
     expect(html).not.toContain("Use it");
     expect(html).not.toContain("Detected");
-    expect(html).toContain("Can't connect?");
+    expect(html).not.toContain("Can't connect?");
     expect(html).toContain("showDriveRecovery");
     expect(html).toContain("about:blank");
     expect(html).toContain("Source analysis failed");
+    expect(html).toContain("Add resources");
+    expect(html).toContain("Choose file");
+    expect(html).toContain('id="selected-files"');
+    expect(html).not.toContain("Can't connect?");
     expect(html).toContain("credentialsByRole");
     expect(html).toContain("Analysis and outlines");
     expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
@@ -187,7 +194,9 @@ describe("studio api", () => {
     await call("/api/engine");
     const reloaded = await call("/api/state");
     expect(reloaded.body.state.projectStart).toBe("with_material");
-    expect(reloaded.body.state.phase).toBe("connect");
+    expect(reloaded.body.state.phase).toBe("engine");
+    const continued = await call("/api/engine/continue", { method: "POST" });
+    expect(continued.body.phase).toBe("connect");
   });
 
   it("supports separate providers for analysis and drafting", async () => {
@@ -207,6 +216,25 @@ describe("studio api", () => {
     expect(result.body.choice.draftingProvider).toBe("anthropic");
     expect(result.body.resolvedModels.analysis).toBe("gpt-5.6-luna");
     expect(result.body.resolvedModels.drafting).toBe("claude-opus-5");
+  });
+
+  it("keeps resources locked until the engine is continued", async () => {
+    await call("/api/project/start", { method: "POST", body: { projectStart: "with_material" } });
+    await call("/api/engine", {
+      method: "PATCH",
+      body: {
+        routing: "split",
+        analysisProvider: "openai",
+        analysisAuthMethod: "subscription",
+        draftingProvider: "anthropic",
+        draftingAuthMethod: "subscription"
+      }
+    });
+    expect((await call("/api/state")).body.state.phase).toBe("engine");
+    const continued = await call("/api/engine/continue", { method: "POST" });
+    expect(continued.status).toBe(200);
+    expect(continued.body.engineReviewed).toBe(true);
+    expect(continued.body.phase).toBe("connect");
   });
 
   it("rejects an unknown drafting mode without clobbering the stored value", async () => {
@@ -266,6 +294,7 @@ describe("studio api", () => {
   it("moves to chapters after the final intake answer", () => {
     const state = emptyState("x");
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.engineReviewed = true;
     state.projectStart = "with_material";
     state.drive.connected = true;
     state.drive.referenceRoots = ["root"];
@@ -293,6 +322,7 @@ describe("studio api", () => {
     state.projectStart = "from_scratch";
     state.startingBrief = "A detailed premise about a woman returning home to uncover a family secret and choose what kind of life comes next.";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} } as any;
+    state.engineReviewed = true;
     state.shape = "standalone";
     state.projectShapeReviewed = true;
     state.manuscriptReviewed = true;
@@ -399,6 +429,7 @@ describe("studio api", () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.engineReviewed = true;
     state.projectStart = "with_material";
     state.drive.connected = true;
     state.drive.referenceRoots = ["root"];
@@ -534,6 +565,7 @@ describe("studio api", () => {
   it("holds at analyze until the grouping is reviewed", async () => {
     const state = emptyState("x");
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.engineReviewed = true;
     state.projectStart = "with_material";
     state.drive.connected = true;
     state.drive.referenceRoots = ["r"];
