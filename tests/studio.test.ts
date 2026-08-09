@@ -344,6 +344,41 @@ describe("studio api", () => {
     expect(confirmed.body.phase).toBe("writing");
   });
 
+  it("does not make the author open an intake with nothing to ask", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const prepared = async () => {
+      const state = await load("test-book");
+      state.projectStart = "from_scratch";
+      state.startingBrief = "A detailed premise about a woman returning home to uncover a family secret and choose what kind of life comes next.";
+      state.engine = { provider: "anthropic", authMethod: "subscription", models: {} } as any;
+      state.engineReviewed = true;
+      state.shape = "standalone";
+      state.projectShapeReviewed = true;
+      state.manuscriptReviewed = true;
+      state.projectAnalysis.completed = true;
+      state.conversationStartedAt = null;
+      state.questions = [];
+      return state;
+    };
+
+    const waiting = await prepared();
+    waiting.projectAnalysis.questionPlan = [{
+      key: "storyPromise", question: "What must this book promise?", rationale: "Nothing states it.", blocking: true
+    }];
+    await save(waiting);
+    const blocked = await call("/api/writing/confirm", { method: "POST" });
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.error).toMatch(/open the preparation questions/i);
+
+    const decided = await prepared();
+    decided.projectAnalysis.questionPlan = [];
+    await save(decided);
+    const confirmed = await call("/api/writing/confirm", { method: "POST" });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.phase).toBe("writing");
+    expect(confirmed.body.conversationStartedAt).toBeTruthy();
+  });
+
   it("uploads planning files without requiring Drive", async () => {
     const result = await call("/api/sources/upload", {
       method: "POST",

@@ -316,7 +316,9 @@ let indexError = null;
 let draftAnalysisLoading = false;
 let selectionSave = Promise.resolve();
 let questionPoll = null;
+let chapterPoll = null;
 let questionSnapshot = null;
+let chapterSnapshot = null;
 let projectAnalysisLoading = false;
 let collapsedGroups = { "Set up": false, Prepare: false, Write: false };
 let chapterChat = null;
@@ -666,9 +668,10 @@ function isDone(id) {
     // Answered either way: a draft was picked, or starting fresh was chosen.
     case "style":     return S.styleCorpus.built;
     case "intake_analysis": return S.projectAnalysis?.completed;
-    // Green means "done", so an untouched step with no questions is not green.
-    case "questions": return (S.questions || []).length > 0
-      && !S.questions.some((q) => q.blocking && q.answer === undefined);
+    // Closing the preparation gate finishes this step, whether it took
+    // questions or none. An untouched step is not green.
+    case "questions": return !!S.writingConfirmed
+      || ((S.questions || []).length > 0 && !S.questions.some((q) => q.blocking && q.answer === undefined));
     case "chapters":  return S.chapters.length > 0 && S.chapters.every((c) => c.status === "approved");
   }
   return false;
@@ -726,6 +729,7 @@ function go(r) {
   if (r === "intake_analysis") loadProjectAnalysis();
   if (r === "questions") { loadQuestions(); startQuestionPolling(); }
   else stopQuestionPolling();
+  if (r === "chapters") startChapterPolling(); else stopChapterPolling();
   if (r === "draft" && S.manuscript) loadDraftAnalysis();
 }
 
@@ -2212,6 +2216,8 @@ function viewQuestions() {
   const done = qs.filter((q) => q.answer !== undefined);
   const started = Boolean(S.conversationStartedAt || qs.length || conversation.length);
   const readyToStart = started && !open.length;
+  const plan = S.projectAnalysis?.questionPlan || [];
+  const pending = plan.filter((p) => !(S.intake || {})[p.key] && !qs.some((q) => q.key === p.key));
   const card = (q) => `<div class="card q ${q.answer !== undefined ? "answered" : ""}">
     <div class="meta">${esc(q.askedBy)} · ${esc(q.phase)}${q.blocking ? ' · <span style="color:var(--bad)">blocking</span>' : ""}</div>
     <div class="text">${esc(q.question)}</div>
@@ -2229,9 +2235,19 @@ function viewQuestions() {
   return `
   <h1>Questions</h1>
   <p class="sub">The intake agent has already read the project analysis. It asks one evidence-backed question at a time only when the selected material cannot safely decide something for you. Blocking questions hold the pipeline.</p>
-  ${!started ? `<div class="card">
+  ${!started && !pending.length ? `<div class="card" style="border-color:var(--accent)">
+    <b>No questions</b>
+    <p class="sub" style="margin:6px 0 12px">${plan.length
+      ? "Every gap the analysis found is already decided, so there is nothing for the intake agent to ask."
+      : "The analysis found no gap that needs an author decision, so there is nothing for the intake agent to ask."}
+      If that looks wrong, correct the analysis and the questions are rebuilt from your version.</p>
+    <div class="row">
+      <button onclick="requestWritingStart()">Start writing</button>
+      <button class="ghost" onclick="go('intake_analysis')">Back to the analysis</button>
+    </div>
+  </div>` : !started ? `<div class="card">
     <b>Ready to begin intake</b>
-    <p class="sub" style="margin:6px 0 12px">Click when you are ready. The first question is prepared from the analysis, and the next one will not appear until you answer it.</p>
+    <p class="sub" style="margin:6px 0 12px">${plural(pending.length, "question")} ${verb(pending.length, "is", "are")} prepared from the analysis. They come one at a time, and the next will not appear until you answer it.</p>
     <button onclick="beginIntake(this)">Begin intake</button>
   </div>` : `${open.length ? `<h2>Waiting on you (${open.length})</h2>${open.map(card).join("")}` : ""}
      ${done.length ? `<h2>Answered (${done.length})</h2>${done.map(card).join("")}` : ""}
@@ -2309,6 +2325,35 @@ function stopQuestionPolling() {
   questionPoll = null;
 }
 
+/** The plan and the drafts are written by a runtime the Studio does not own. */
+function startChapterPolling() {
+  if (chapterPoll) return;
+  chapterPoll = setInterval(pollChapters, 5000);
+}
+
+async function pollChapters() {
+  if (route !== "chapters") { stopChapterPolling(); return; }
+  // Re-rendering under the cursor would eat whatever is being typed.
+  const active = document.activeElement;
+  if (document.getElementById("modal")) return;
+  if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) return;
+  try {
+    const r = await api("/api/state");
+    const snapshot = JSON.stringify({ chapters: r.state.chapters, run: r.state.run, phase: r.state.phase });
+    if (snapshot === chapterSnapshot) return;
+    chapterSnapshot = snapshot;
+    S = r.state;
+    PROJECTS = r.projects || PROJECTS;
+    render();
+  } catch { /* the board keeps the last state it knew */ }
+}
+
+function stopChapterPolling() {
+  if (!chapterPoll) return;
+  clearInterval(chapterPoll);
+  chapterPoll = null;
+}
+
 async function answer(id, text) {
   if (!text || !String(text).trim()) return;
   try { S = await api(`/api/questions/${id}/answer`, { method: "POST", body: { answer: String(text) } });
@@ -2381,7 +2426,21 @@ function viewChapters() {
 
   if (!cs.length) return `<h1>Chapters</h1>
     ${haltCard}
-    <p class="sub">No chapter plan yet. The preparation phase writes one; it will appear here.</p>
+    <p class="sub">No chapter plan yet. Preparation writes one, and it appears here as soon as it does.</p>
+    <div class="card" style="border-color:var(--accent)">
+      <b>The writing happens in your runtime</b>
+      <p class="sub" style="margin:6px 0 10px">The Studio holds the decisions and the measurements. Claude Code
+      and OpenCode run the agents that build the plan and write the chapters, so the next move is there,
+      not here. Everything you have decided is already saved to this book's workspace.</p>
+      <div class="hint" style="margin-bottom:4px">In this project folder, start one of them:</div>
+      <div class="steplog">claude${"\n"}# or${"\n"}opencode</div>
+      <div class="hint" style="margin:10px 0 4px">Then ask for the orchestrator:</div>
+      <div class="steplog">Use the book-orchestrator agent to continue ${esc(S.projectName || "this book")}.</div>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" onclick="reload()">Check for the plan</button>
+        <span class="hint">This page also checks on its own while it is open.</span>
+      </div>
+    </div>
     ${directionsCard(pending, dirs)}`;
 
   const approved = cs.filter((c) => c.status === "approved").length;
@@ -2465,10 +2524,10 @@ function directionsCard(pending, all) {
   const applied = all.filter((d) => d.appliedAt);
   return `
   <div class="card" style="margin-top:14px">
-    <label>Instructions for the writing</label>
-    <div class="hint" style="margin-bottom:8px">Anything you want taken into account from here on: a
-    change of direction, a note about a character, something to stop doing. The drafting agent reads these
-    before each chapter and marks them applied.</div>
+    <label>Instructions for the writing <span class="pill" style="margin-left:6px">optional</span></label>
+    <div class="hint" style="margin-bottom:8px">Nothing to add? Leave it empty. This is here for when you
+    want something taken into account from here on: a change of direction, a note about a character,
+    something to stop doing. The drafting agent reads these before each chapter and marks them applied.</div>
     <textarea id="direction" rows="3" placeholder="Keep the protagonist's chapters colder. Stop explaining the central mystery in dialogue."></textarea>
     <div class="row" style="margin-top:8px">
       <button onclick="addDirection(this)">Add instruction</button>
@@ -2555,6 +2614,7 @@ async function setStatus(number, status) {
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
     if (route === "intake_analysis") loadProjectAnalysis();
     if (route === "questions") { loadQuestions(); startQuestionPolling(); }
+    if (route === "chapters") startChapterPolling();
   }
 })();
 </script>

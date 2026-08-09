@@ -17,7 +17,8 @@ import {
   findingKeys,
   hasAnalysisEdits,
   type AnalysisEdits,
-  type FindingKey
+  type FindingKey,
+  type IntakeQuestionPlan
 } from "../analysis/intake.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
 import { detectNarration, narrationOptions, povLabel, povOptions, tenseLabel, tenseOptions } from "../style/narration.js";
@@ -1122,9 +1123,14 @@ export function createStudioApp() {
     if (!current.manuscriptReviewed) throw new HttpError(400, "Choose whether to continue an existing draft or start fresh first.");
     if (hasOwnStyle && (!current.styleCorpus.built || !current.styleCorpus.continuedAt)) throw new HttpError(400, "Finish the style corpus first.");
     if (!current.projectAnalysis.completed) throw new HttpError(400, "Finish project analysis first.");
-    if (!current.conversationStartedAt) throw new HttpError(400, "Open the preparation questions first.");
+    // The gate is that no author decision is outstanding, not that a
+    // conversation happened. An analysis with nothing to ask needs no intake.
+    if (!current.conversationStartedAt && pendingPlannedQuestions(current).length > 0) {
+      throw new HttpError(400, "Open the preparation questions first.");
+    }
     const state = await updateState(slug, (current) => {
       if (blockingQuestions(current).length > 0) throw new HttpError(400, "Answer the blocking preparation questions first.");
+      current.conversationStartedAt ??= new Date().toISOString();
       current.writingConfirmed = true;
     });
     res.json(withDerived(state));
@@ -1778,10 +1784,15 @@ function renderFingerprint(corpus: StyleCorpus): string {
   ].join("\n");
 }
 
-function appendNextPlannedQuestion(state: StudioState, askedAt: string): void {
-  const plan = state.projectAnalysis.questionPlan.find((candidate) =>
+/** Planned questions the author has neither answered elsewhere nor been asked. */
+function pendingPlannedQuestions(state: StudioState): IntakeQuestionPlan[] {
+  return state.projectAnalysis.questionPlan.filter((candidate) =>
     !state.intake[candidate.key] && !state.questions.some((question) => question.key === candidate.key)
   );
+}
+
+function appendNextPlannedQuestion(state: StudioState, askedAt: string): void {
+  const plan = pendingPlannedQuestions(state)[0];
   if (!plan) return;
 
   const question: OpenQuestion = {
