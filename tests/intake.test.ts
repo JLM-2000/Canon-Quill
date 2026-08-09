@@ -48,4 +48,14 @@ describe("project intake analysis", () => {
       "storyPromise", "centralConflict", "settingRules", "endingAndStructure"
     ]));
   });
+
+  it("does not turn document titles or headings into characters", () => {
+    const result = analyseProjectMaterial([
+      { name: "Ashford Hall", kinds: ["characters"], text: "Setting: a university hall. New Year events occur here." },
+      { name: "Quantum Mechanics", kinds: ["notes"], text: "Then Cas leaves. Thank God the scene ends." }
+    ]);
+
+    expect(result.findings.protagonist).toBeNull();
+    expect(result.questionPlan.find((question) => question.key === "protagonistArc")?.question).not.toMatch(/Ashford|Quantum|New Year|Thank God/);
+  });
 });

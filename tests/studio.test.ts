@@ -118,7 +118,9 @@ describe("studio api", () => {
     const html = await response.text();
     expect(html).toContain("Canon Quill Studio");
     expect(html).toContain("questionSnapshot");
-    expect(html).toContain("Reset questions and project analysis");
+    expect(html).not.toContain("Reset questions and project analysis");
+    expect(html).not.toContain("Use it");
+    expect(html).not.toContain("Detected");
   });
 
   it("returns state with a derived phase", async () => {
@@ -191,6 +193,27 @@ describe("studio api", () => {
     expect(result.body.conversationStartedAt).toBeTruthy();
   });
 
+  it("moves to chapters after the final intake answer", () => {
+    const state = emptyState("x");
+    state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
+    state.drive.connected = true;
+    state.drive.referenceRoots = ["root"];
+    state.sources = [{ driveId: "source", name: "Reference", path: "/Reference", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"] }];
+    state.sourcesReviewed = true;
+    state.shape = "standalone";
+    state.draftingMode = "chapter_by_chapter";
+    state.manuscriptReviewed = true;
+    state.styleCorpus.built = true;
+    state.styleCorpus.continuedAt = new Date().toISOString();
+    state.projectAnalysis.completed = true;
+    state.conversationStartedAt = new Date().toISOString();
+    state.questions = [{
+      id: "q", key: "storyPromise", phase: "intake", askedBy: "book-01-intake", question: "What is the promise?",
+      allowFreeText: true, askedAt: new Date().toISOString(), answer: "A promise.", answeredAt: new Date().toISOString(), blocking: true
+    }];
+    expect(derivePhase(state)).toBe("writing");
+  });
+
   it("asks the analyzed question plan one decision at a time and resets it cleanly", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");
@@ -207,7 +230,7 @@ describe("studio api", () => {
     await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
     await writeFile(
       `${workspacePaths("test-book").driveCache}/plot.json`,
-      JSON.stringify({ text: "Premise: Mara must choose between the love she wants and the family secret that can destroy her. Conflict: the secret threatens her relationship. Ending: the couple stays together." }),
+      JSON.stringify({ text: "Premise: Mara must choose between the love she wants and the family secret that can destroy her. She is called Mara. Conflict: the secret threatens her relationship. Ending: the couple stays together." }),
       "utf8"
     );
 
@@ -303,6 +326,30 @@ describe("studio api", () => {
     expect(result.body.suggestions.shape.value).toBe("standalone");
     expect(result.body.suggestions.pov.value).toMatch(/third|past/i);
     expect(result.body.suggestions.tense.value).toBe("Past");
+  });
+
+  it("applies audience and intimacy findings during project analysis", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.sources = [{
+      driveId: "own-book",
+      name: "Book One",
+      path: "/Book One",
+      mimeType: "text/plain",
+      isFolder: false,
+      kinds: ["past_book"]
+    }];
+    await save(state);
+    await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
+    await writeFile(
+      `${workspacePaths("test-book").driveCache}/own-book.json`,
+      JSON.stringify({ text: "At university, the college couple loved and kissed. Sex changed their relationship. ".repeat(30) }),
+      "utf8"
+    );
+
+    const result = await call("/api/intake/analyse", { method: "POST" });
+    expect(result.body.state.intake.audience).toMatch(/New adult/);
+    expect(result.body.state.intake.spice).toMatch(/Open door|Explicit|Very explicit/);
   });
 
   it("stores a chapter plan and reports it", async () => {

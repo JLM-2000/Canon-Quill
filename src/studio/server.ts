@@ -121,13 +121,21 @@ export function createStudioApp() {
       const text = await readCached(slug, source.driveId);
       if (text) documents.push({ name: source.name, path: source.path, kinds: source.kinds, text });
     }
+    const intake = { ...state.intake };
     const context = {
       shape: state.shape,
       draftingMode: state.draftingMode,
-      intake: state.intake,
+      intake,
       existingDraft: Boolean(state.manuscript)
     };
     const analysis = analyseProjectMaterial(documents, context);
+    if (analysis.findings.audience && !intake.audience) {
+      intake.audience = analysis.findings.audience.value.replace(/\s*\/\s*/g, "|");
+    }
+    if (analysis.findings.intimacy && !intake.spice) {
+      intake.spice = analysis.findings.intimacy.value;
+    }
+    context.intake = intake;
     analysis.questionPlan = buildIntakeQuestionPlan(analysis, context);
     const paths = workspacePaths(slug);
     await mkdir(paths.artifacts, { recursive: true });
@@ -136,6 +144,8 @@ export function createStudioApp() {
       current.projectAnalysis = { ...analysis, completed: true };
       if (analysis.genre && !current.intake.genre) current.intake.genre = analysis.genre;
       if (analysis.subgenre && !current.intake.subgenre) current.intake.subgenre = analysis.subgenre;
+      if (!current.intake.audience && intake.audience) current.intake.audience = intake.audience;
+      if (!current.intake.spice && intake.spice) current.intake.spice = intake.spice;
     });
     return { analysis, state: withDerived(next) };
   }

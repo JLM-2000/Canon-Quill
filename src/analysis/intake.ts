@@ -84,10 +84,6 @@ const signals: GenreSignal[] = [
   { genre: "Contemporary", pattern: /\b(?:apartment|office|subway|instagram|texted|phone|college|university|modern|coffee shop|city life)\b/gi, evidence: "contemporary-life vocabulary" }
 ];
 
-const genericNames = new Set([
-  "A", "An", "And", "At", "But", "Chapter", "He", "Her", "I", "In", "It", "My", "On", "She", "The", "They", "This", "We", "What", "When", "Where", "Who", "Why", "You"
-]);
-
 export function analyseProjectMaterial(documents: IntakeDocument[], context: IntakeContext = {}): ProjectAnalysis {
   const nonEmpty = documents.filter((document) => words(document.text).length > 0);
   const allText = nonEmpty.map((document) => `${document.name}\n${document.text}`).join("\n\n");
@@ -158,7 +154,10 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
   const findings = analysis.findings;
   const genre = analysis.genre;
   const genreLabel = analysis.subgenre || analysis.genre || "the selected material";
-  const namedCharacters = findings.protagonist?.value || "the named characters";
+  const characterReference = findings.protagonist?.value
+    ? `the named character material around ${findings.protagonist.value}`
+    : "character material without a clear protagonist";
+  const storyFocus = findings.protagonist?.value || "the selected cast material";
   const setting = findings.setting?.value || "the setting implied by the selected material";
   const evidence = (finding: IntakeFinding | null, fallback: string) => finding?.evidence[0] || fallback;
   const add = (question: IntakeQuestionPlan) => {
@@ -168,7 +167,7 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
   if (!findings.premise) {
     add({
       key: "storyPromise",
-      question: `The analysis found ${namedCharacters} and ${setting}, and it reads as ${genreLabel}, but no target-book promise is stated in the selected material. What must this specific book promise and deliver to the reader?`,
+      question: `The analysis found ${characterReference} and ${setting}, and it reads as ${genreLabel}, but no target-book promise is stated in the selected material. What must this specific book promise and deliver to the reader?`,
       rationale: `The analyzer checked ${analysis.documentsRead} selected documents and found no explicit logline, premise, synopsis, or target outline. This is a book-defining decision, not a genre question.`,
       blocking: true
     });
@@ -177,7 +176,9 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
   if (!findings.protagonist || findings.protagonist.confidence < 0.8) {
     add({
       key: "protagonistArc",
-      question: `The character material names ${namedCharacters}. Which character owns this book's emotional arc, what do they want at the opening, and what must change in them by the end?`,
+      question: findings.protagonist?.value
+        ? `The character material names ${findings.protagonist.value}, but does not establish the lead's full arc. Which character owns this book's emotional arc, what do they want at the opening, and what must change in them by the end?`
+        : "The selected material does not identify a clear protagonist. Which character owns this book's emotional arc, what do they want at the opening, and what must change in them by the end?",
       rationale: `The selected material identifies cast members but does not unambiguously designate the target book's lead, opening want, and transformation.`,
       allowFreeText: true,
       blocking: true
@@ -196,7 +197,7 @@ export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: Inta
   if (!findings.centralConflict) {
     add({
       key: "centralConflict",
-      question: `The analysis found ${genreLabel} material around ${namedCharacters}, but no target-book conflict or stakes are explicit. What opposing force keeps the protagonist from getting what they want, and what becomes costly if they fail?`,
+      question: `The analysis found ${genreLabel} material around ${storyFocus}, but no target-book conflict or stakes are explicit. What opposing force keeps the protagonist from getting what they want, and what becomes costly if they fail?`,
       rationale: `No outline, plot note, or character document states the central opposition and consequence clearly enough for the preparation agent to canonize it.`,
       blocking: true
     });
@@ -439,23 +440,14 @@ function extractNames(documents: IntakeDocument[]): string[] {
   const counts = new Map<string, number>();
   const add = (candidate: string) => {
     const normalized = candidate.trim().replace(/\s+/g, " ");
-    if (!normalized || normalized.split(" ").some((word) => genericNames.has(word))) return;
+    if (!normalized) return;
     if (!/^[A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3}$/.test(normalized)) return;
     counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
   };
 
   for (const document of documents) {
-    if (document.kinds?.includes("characters")) {
-      const first = document.name
-        .replace(/[_-]+/g, " ")
-        .replace(/\b(?:profile|profiles|sheet|character|bio|notes?)\b/gi, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (first) add(first);
-      for (const match of document.text.matchAll(/(?:name|character|called|named)\s*[:\-]?\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/g)) add(match[1]);
-    }
-    for (const match of document.text.matchAll(/(?:premise|promise|conflict|setting|ending|protagonist|lead)\b[^\n]*?\b([A-Z][a-zÀ-ɏ]+)\b/gi)) add(match[1]);
-    for (const match of document.text.matchAll(/\b([A-Z][a-zÀ-ɏ]+\s+[A-Z][a-zÀ-ɏ]+)\b/g)) add(match[1]);
+    for (const match of document.text.matchAll(/(?:full\s+name|name|character|protagonist|lead)\s*[:\-]\s*([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})/gi)) add(match[1]);
+    for (const match of document.text.matchAll(/\b(?:called|named)\s+([A-Z][a-zÀ-ɏ]+(?:\s+[A-Z][a-zÀ-ɏ]+){0,3})\b/g)) add(match[1]);
   }
 
   return [...counts.entries()]

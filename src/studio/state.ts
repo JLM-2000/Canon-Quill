@@ -341,7 +341,8 @@ export function derivePhase(state: StudioState): PhaseId {
   if (!state.styleCorpus.built) return "preparation";
   if (!state.styleCorpus.continuedAt) return "preparation";
   if (!state.projectAnalysis.completed) return "intake_analysis";
-  return "preflight";
+  if (!state.conversationStartedAt && state.questions.length === 0) return "preflight";
+  return "writing";
 }
 
 export function blockingQuestions(state: StudioState): OpenQuestion[] {
