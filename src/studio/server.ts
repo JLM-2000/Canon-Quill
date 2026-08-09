@@ -231,7 +231,42 @@ export function createStudioApp() {
     return { ...withDerived(next), runtime: started.runtime, runtimeLabel: runtimeLabel(started.runtime), model };
   }
 
+  /**
+   * A run dies with the Studio that spawned it, so a restart can find a state
+   * file claiming a run that no longer exists. Say so rather than show a
+   * progress panel that will never move.
+   */
+  async function reconcileRun(slug: string): Promise<StudioState> {
+    const state = await loadState(slug);
+    if (state.run.status !== "running" || isRunning()) return state;
+    return updateState(slug, (current) => {
+      current.run = {
+        ...current.run,
+        status: "halted",
+        reason: "cancelled",
+        detail: "The Studio restarted while this run was going, so the run ended with it.",
+        haltedAt: new Date().toISOString()
+      };
+    });
+  }
+
   async function recordRunOutcome(slug: string, outcome: RunOutcome): Promise<void> {
+    try {
+      await appendLog(slug, "phase", {
+        timestamp: new Date().toISOString(),
+        stage: "chapter_drafting",
+        stageName: "Drafting",
+        agent: "book-orchestrator",
+        event: outcome.ok ? "run_finished" : "run_stopped",
+        message: outcome.reason ?? undefined,
+        data: {
+          exitCode: outcome.code,
+          signal: outcome.signal,
+          trace: outcome.trace.map((event) => `${event.at} [${event.kind}] ${event.text}`)
+        }
+      });
+    } catch { /* the trace is a convenience; losing it must not break the run */ }
+
     try {
       await updateState(slug, (current) => {
         current.run = outcome.ok
@@ -402,7 +437,7 @@ export function createStudioApp() {
       return;
     }
     res.json({
-      state: withDerived(await loadState(slug)),
+      state: withDerived(await reconcileRun(slug)),
       projects: await listProjects(),
       // Sent with the state so the client never keeps its own copy to drift.
       kinds: sourceKindLabels,

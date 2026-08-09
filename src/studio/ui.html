@@ -2597,11 +2597,12 @@ function viewChapters() {
       </div>
       <p class="sub" style="margin:0 0 8px">${help}</p>
       ${run.detail ? `<div class="steplog">${esc(run.detail)}</div>` : ""}
-      <p class="hint" style="margin:10px 0 0">Everything approved so far is kept. Resuming picks up at the
-      first chapter that is not finished, after re-checking your credentials.</p>
+      <p class="hint" style="margin:10px 0 0">Everything written so far is kept. Resuming starts a fresh
+      session at the first chapter that is not finished, reading the workspace to find where it got to.</p>
       <div class="row" style="margin-top:12px">
         <button onclick="resumeRun(this)">Resume</button>
-        <button class="ghost" onclick="go('engine')">Check writing engine</button>
+        ${["invalid_credentials", "no_credit", "rate_limited"].includes(run.reason)
+          ? '<button class="ghost" onclick="go(\'engine\')">Check writing engine</button>' : ""}
       </div>
     </div>`;
   })() : "";
@@ -2610,7 +2611,7 @@ function viewChapters() {
 
   if (!cs.length) return `<h1>Chapters</h1>
     ${haltCard}
-    <p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>
+    ${haltCard || live ? "" : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
     ${live ? runPanel(run) : startCard(false)}
     ${directionsCard(pending, dirs)}`;
 

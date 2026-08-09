@@ -42,6 +42,8 @@ export interface RunOutcome {
   signal: string | null;
   reason: "cancelled" | "no_credit" | "rate_limited" | "invalid_credentials" | "provider_error" | "other" | null;
   detail: string | null;
+  /** Everything the run said, for the phase log. */
+  trace: RunEvent[];
 }
 
 const AGENT = "book-orchestrator";
@@ -116,10 +118,15 @@ function onPath(binary: string): boolean {
 export function buildPrompt(options: { projectName: string; slug: string; note?: string }): string {
   const lines = [
     `Continue the Canon Quill book "${options.projectName}" (workspace ${options.slug}).`,
-    "Read workspaces/" + options.slug + "/project.json and the phase logs first, then carry the book",
-    "forward from whatever phase it is actually in, following workflows/book-writing.workflow.yaml.",
+    `Read workspaces/${options.slug}/project.json first, then carry the book forward from whatever`,
+    "phase it is actually in, following workflows/book-writing.workflow.yaml.",
     "The author approved the preparation gate in the Studio. Honour every author gate that remains:",
-    "do not approve a chapter on their behalf, and stop with a clear report if an input is missing."
+    "do not approve a chapter on their behalf, and stop with a clear report if an input is missing.",
+    "",
+    "You can write only inside workspaces/, and the only shell commands you have are this project's",
+    "own checks. That is deliberate. Inspect files with Read, Glob and Grep, never by shelling out to",
+    "python, node, curl or a pipeline: those are refused, and retrying them only spends the author's",
+    "money. If you genuinely cannot proceed without something you are denied, stop and say so."
   ];
   if (options.note?.trim()) {
     lines.push("", "The author added, for this run:", options.note.trim());
@@ -128,28 +135,39 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
 }
 
 /** Granted exactly what the agent file already allows, and nothing wider. */
-export function orchestratorBashRules(cwd: string): string[] {
+export function orchestratorRules(cwd: string): string[] {
+  const allowed = allowedPaths(cwd);
+  return [
+    "Read", "Glob", "Grep", "Task",
+    // Edit rules cover every file-editing tool. A Write rule matches nothing.
+    ...allowed("edit").map((glob) => `Edit(${glob})`),
+    ...allowed("bash").map((command) => `Bash(${command.endsWith("*") ? `${command.slice(0, -1)}:*` : command})`)
+  ];
+}
+
+function allowedPaths(cwd: string): (key: string) => string[] {
+  let frontmatter = "";
   try {
     const file = readFileSync(path.join(cwd, ".opencode", "agents", `${AGENT}.md`), "utf8");
-    const frontmatter = /^---\n([\s\S]*?)\n---/.exec(file)?.[1] ?? "";
-    const lines = frontmatter.split("\n");
-    const start = lines.findIndex((line) => /^\s*bash:\s*$/.test(line));
+    frontmatter = /^---\n([\s\S]*?)\n---/.exec(file)?.[1] ?? "";
+  } catch {
+    return () => [];
+  }
+
+  const lines = frontmatter.split("\n");
+  return (key: string) => {
+    const start = lines.findIndex((line) => new RegExp(`^\\s*${key}:\\s*$`).test(line));
     if (start < 0) return [];
     const depth = lines[start].search(/\S/);
-
     const rules: string[] = [];
     for (const line of lines.slice(start + 1)) {
       if (!line.trim()) continue;
       if (line.search(/\S/) <= depth) break;
       const match = /^\s+"?([^":]+(?::[^":]*)?)"?:\s*allow\s*$/.exec(line);
-      if (!match || match[1].trim() === "*") continue;
-      const command = match[1].trim();
-      rules.push(`Bash(${command.endsWith("*") ? `${command.slice(0, -1)}:*` : command})`);
+      if (match && match[1].trim() !== "*") rules.push(match[1].trim());
     }
     return rules;
-  } catch {
-    return [];
-  }
+  };
 }
 
 export function buildCommand(runtime: RuntimeId, options: {
@@ -159,10 +177,6 @@ export function buildCommand(runtime: RuntimeId, options: {
   cwd: string;
 }): { file: string; args: string[] } {
   if (runtime === "claude-code") {
-    const allowed = [
-      "Read", "Glob", "Grep", "Write", "Edit", "Task", "WebFetch", "WebSearch",
-      ...orchestratorBashRules(options.cwd)
-    ];
     return {
       file: "claude",
       args: [
@@ -170,9 +184,8 @@ export function buildCommand(runtime: RuntimeId, options: {
         "--agent", AGENT,
         "--output-format", "stream-json",
         "--verbose",
-        "--permission-mode", "acceptEdits",
         // Variadic flag: one comma-separated value, or it swallows the prompt.
-        "--allowedTools", allowed.join(","),
+        "--allowedTools", orchestratorRules(options.cwd).join(","),
         ...(options.model ? ["--model", options.model] : []),
         options.prompt
       ]
@@ -231,7 +244,7 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   child.on("error", (error: Error) => {
     emit("error", error.message);
-    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message }, options.onExit);
+    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events] }, options.onExit);
   });
 
   child.on("close", (code, signal) => {
@@ -243,7 +256,8 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
       code,
       signal,
       reason: ok ? null : cancelled ? "cancelled" : inferReason(recentText()),
-      detail: ok ? null : recentText().slice(-1500) || null
+      detail: ok ? null : recentText().slice(-1500) || null,
+      trace: [...events]
     }, options.onExit);
   });
 
@@ -254,7 +268,7 @@ export function stopRun(): boolean {
   if (!active) return false;
   active.stopping = true;
   if (!active.child) {
-    finish({ ok: false, code: null, signal: null, reason: "cancelled", detail: null }, () => undefined);
+    finish({ ok: false, code: null, signal: null, reason: "cancelled", detail: null, trace: [...events] }, () => undefined);
     return true;
   }
   active.child.kill("SIGTERM");

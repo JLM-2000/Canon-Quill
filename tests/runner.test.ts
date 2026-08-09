@@ -4,7 +4,7 @@ import {
   buildPrompt,
   describeClaudeEvent,
   inferReason,
-  orchestratorBashRules
+  orchestratorRules
 } from "../src/studio/runner.js";
 
 describe("runtime command", () => {
@@ -22,15 +22,32 @@ describe("runtime command", () => {
   it("passes the tool allowlist as one value so it cannot swallow the prompt", () => {
     const { args } = buildCommand("claude-code", base);
     const allowed = args[args.indexOf("--allowedTools") + 1];
-    expect(allowed.split(",")).toContain("Write");
-    expect(args.filter((arg) => arg === "Write")).toHaveLength(0);
+    expect(allowed.split(",")).toContain("Read");
+    expect(args.filter((arg) => arg === "Read")).toHaveLength(0);
+  });
+
+  it("confines writing to the workspaces the agent file allows", () => {
+    const rules = orchestratorRules(process.cwd());
+    expect(rules).toContain("Edit(workspaces/**)");
+    // Only Edit rules are matched by file permission checks, so a Write rule
+    // would silently grant nothing and every write would be refused.
+    expect(rules.some((rule) => rule.startsWith("Write("))).toBe(false);
+    expect(rules).not.toContain("Edit");
+  });
+
+  it("never hands over a mode that would auto-approve edits anywhere", () => {
+    const { args } = buildCommand("claude-code", base);
+    expect(args).not.toContain("--permission-mode");
+    expect(args).not.toContain("acceptEdits");
+    expect(args).not.toContain("--dangerously-skip-permissions");
   });
 
   it("grants only the bash commands the agent file already allows", () => {
-    const rules = orchestratorBashRules(process.cwd());
+    const rules = orchestratorRules(process.cwd());
     expect(rules).toContain("Bash(npm test)");
     expect(rules).toContain("Bash(git status:*)");
     expect(rules).not.toContain("Bash(*)");
+    expect(rules.some((rule) => /python|node -e|curl/.test(rule))).toBe(false);
     // The task allowlist sits directly below bash: in the same block.
     expect(rules.some((rule) => rule.includes("book-") || rule.includes("sub-"))).toBe(false);
   });
