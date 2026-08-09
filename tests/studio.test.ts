@@ -350,6 +350,7 @@ describe("studio api", () => {
     const result = await call("/api/intake/analyse", { method: "POST" });
     expect(result.body.state.intake.audience).toMatch(/New adult/);
     expect(result.body.state.intake.spice).toMatch(/Open door|Explicit|Very explicit/);
+    expect(result.body.state.projectAnalysis.questionPlan.map((question) => question.key)).not.toEqual(expect.arrayContaining(["audience", "spice"]));
   });
 
   it("stores a chapter plan and reports it", async () => {
