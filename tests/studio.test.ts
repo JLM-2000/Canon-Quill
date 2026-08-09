@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createStudioApp } from "../src/studio/server.js";
 import { derivePhase, emptyState, loadState } from "../src/studio/state.js";
 import { workspacesRoot, workspacePaths } from "../src/workspace/paths.js";
@@ -828,6 +828,167 @@ describe("style source requirement", () => {
     const { status, body } = await call("/api/style/build", { method: "POST" });
     expect(status).toBe(400);
     expect(body.error).toMatch(/read like whoever wrote it/i);
+  });
+});
+
+describe("editing and rebuilding the style corpus", () => {
+  const prose = "She crossed the yard before the rain came. \"You waited,\" he said, and she heard the question under it. ";
+
+  async function seedCorpusSources() {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.sources = [
+      { driveId: "mine", name: "Book One", path: "/Book One", mimeType: "text/plain", isFolder: false, kinds: ["past_book", "reference_book"], wordCount: 40000 },
+      { driveId: "ghost", name: "Ghostwritten", path: "/Ghostwritten", mimeType: "text/plain", isFolder: false, kinds: ["past_book"], wordCount: 40000 }
+    ];
+    state.sourcesReviewed = true;
+    await save(state);
+    const cache = workspacePaths("test-book").driveCache;
+    await mkdir(cache, { recursive: true });
+    await writeFile(`${cache}/mine.json`, JSON.stringify({ text: prose.repeat(60) }), "utf8");
+    await writeFile(`${cache}/ghost.json`, JSON.stringify({ text: prose.repeat(60) }), "utf8");
+  }
+
+  it("leaves excluded documents out of the corpus and remembers the choice", async () => {
+    await seedCorpusSources();
+    const all = await call("/api/style/build", { method: "POST" });
+    expect(all.status).toBe(200);
+
+    const { status, body } = await call("/api/style/build", { method: "POST", body: { excluded: ["ghost"] } });
+    expect(status).toBe(200);
+    expect(body.styleCorpus.excluded).toEqual(["ghost"]);
+    expect(body.styleCorpus.wordCount).toBeLessThan(all.body.styleCorpus.wordCount);
+
+    const corpus = JSON.parse(await readFile(path.join(workspacePaths("test-book").artifacts, "style-corpus.json"), "utf8"));
+    expect(corpus.passages.every((passage: { source: string }) => passage.source === "Book One")).toBe(true);
+  });
+
+  it("refuses to build when every document is excluded", async () => {
+    await seedCorpusSources();
+    const { status, body } = await call("/api/style/build", { method: "POST", body: { excluded: ["mine", "ghost"] } });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/every document you could learn from is excluded/i);
+  });
+
+  it("carries author notes into the fingerprint the writing agents read", async () => {
+    await seedCorpusSources();
+    const { body } = await call("/api/style/build", {
+      method: "POST",
+      body: { notes: "My dialogue runs shorter than book one suggests." }
+    });
+    expect(body.styleCorpus.notes).toMatch(/dialogue runs shorter/);
+
+    const fingerprint = await readFile(path.join(workspacePaths("test-book").artifacts, "style-fingerprint.md"), "utf8");
+    expect(fingerprint).toMatch(/## Author notes on this voice/);
+    expect(fingerprint).toMatch(/dialogue runs shorter/);
+
+    const again = await call("/api/style/build", { method: "POST" });
+    expect(again.body.styleCorpus.notes).toMatch(/dialogue runs shorter/);
+  });
+
+  it("keeps the author on the same screen when they rebuild after continuing", async () => {
+    await seedCorpusSources();
+    await call("/api/style/build", { method: "POST" });
+    await call("/api/style/continue", { method: "POST" });
+    const { body } = await call("/api/style/build", { method: "POST", body: { notes: "Colder." } });
+    expect(body.styleCorpus.continuedAt).toBeTruthy();
+  });
+});
+
+describe("editing and rebuilding the project analysis", () => {
+  async function seedAnalysis() {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.sources = [{
+      driveId: "plot", name: "Plot Notes", path: "/Plot Notes", mimeType: "text/plain", isFolder: false, kinds: ["plot"]
+    }];
+    await save(state);
+    const cache = workspacePaths("test-book").driveCache;
+    await mkdir(cache, { recursive: true });
+    await writeFile(`${cache}/plot.json`, JSON.stringify({
+      text: "Premise: Cole hunts the thing in the water and loses his nerve.\nThe murder case stays open."
+    }), "utf8");
+    await call("/api/intake/analyse", { method: "POST" });
+  }
+
+  it("takes an author correction over the measured finding", async () => {
+    await seedAnalysis();
+    const { status, body } = await call("/api/intake/analysis", {
+      method: "PATCH",
+      body: { findings: { protagonist: "Mara, who wants the harbour back and must give up the boat." } }
+    });
+
+    expect(status).toBe(200);
+    expect(body.analysis.findings.protagonist.value).toMatch(/^Mara/);
+    expect(body.analysis.findings.protagonist.authorEdited).toBe(true);
+    expect(body.analysis.questionPlan.map((question: { key: string }) => question.key)).not.toContain("protagonistArc");
+
+    const saved = JSON.parse(await readFile(path.join(workspacePaths("test-book").artifacts, "project-analysis.json"), "utf8"));
+    expect(saved.findings.protagonist.value).toMatch(/^Mara/);
+  });
+
+  it("writes an author genre through to the intake decisions", async () => {
+    await seedAnalysis();
+    const { body } = await call("/api/intake/analysis", { method: "PATCH", body: { genre: "Horror", subgenre: "Coastal horror" } });
+    expect(body.state.intake.genre).toBe("Horror");
+    expect(body.state.intake.subgenre).toBe("Coastal horror");
+    expect(body.analysis.confidence).toBe(1);
+  });
+
+  it("clears a finding the analyzer invented, and reopens its question", async () => {
+    await seedAnalysis();
+    const { body } = await call("/api/intake/analysis", { method: "PATCH", body: { findings: { premise: "" } } });
+    expect(body.analysis.findings.premise).toBeNull();
+    expect(body.analysis.questionPlan.map((question: { key: string }) => question.key)).toContain("storyPromise");
+  });
+
+  it("rejects a correction to a finding that does not exist", async () => {
+    await seedAnalysis();
+    const { status, body } = await call("/api/intake/analysis", { method: "PATCH", body: { findings: { vibes: "good" } } });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/unknown finding/i);
+  });
+
+  it("reads rebuild notes as material and keeps them on the record", async () => {
+    await seedAnalysis();
+    const { body } = await call("/api/intake/analyse", {
+      method: "POST",
+      body: { notes: "Setting: the story happens in a drowned harbour town in 1974." }
+    });
+    expect(body.state.projectAnalysis.authorNotes).toMatch(/drowned harbour town/);
+    expect(body.analysis.findings.setting?.value).toMatch(/drowned harbour town/);
+    expect(body.analysis.documentsRead).toBe(1);
+  });
+
+  it("keeps corrections through a rebuild unless the author drops them", async () => {
+    await seedAnalysis();
+    await call("/api/intake/analysis", { method: "PATCH", body: { findings: { protagonist: "Mara owns the arc." } } });
+
+    const kept = await call("/api/intake/analyse", { method: "POST", body: { notes: "" } });
+    expect(kept.body.analysis.findings.protagonist.value).toMatch(/^Mara/);
+
+    const dropped = await call("/api/intake/analyse", { method: "POST", body: { keepCorrections: false } });
+    expect(dropped.body.analysis.findings.protagonist?.value ?? "").not.toMatch(/^Mara/);
+    expect(dropped.body.state.projectAnalysis.edits).toEqual({});
+  });
+
+  it("clears every correction on request", async () => {
+    await seedAnalysis();
+    await call("/api/intake/analysis", { method: "PATCH", body: { genre: "Horror" } });
+    const { body } = await call("/api/intake/analysis", { method: "PATCH", body: { clear: true } });
+    expect(body.state.projectAnalysis.edits).toEqual({});
+    expect(body.analysis.genre).not.toBe("Horror");
+  });
+
+  it("keeps notes and corrections when the sources are re-grouped", async () => {
+    await seedAnalysis();
+    await call("/api/intake/analyse", { method: "POST", body: { notes: "Mara is the lead." } });
+    await call("/api/intake/analysis", { method: "PATCH", body: { genre: "Horror" } });
+
+    const { body } = await call("/api/sources/plot", { method: "PATCH", body: { kinds: ["notes"] } });
+    expect(body.projectAnalysis.completed).toBe(false);
+    expect(body.projectAnalysis.authorNotes).toMatch(/Mara is the lead/);
+    expect(body.projectAnalysis.edits.genre).toBe("Horror");
   });
 });
 

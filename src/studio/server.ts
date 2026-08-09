@@ -10,7 +10,15 @@ import { SafeDriveClient } from "../drive/client.js";
 import { beginDriveAuthorization, driveAuthStatus } from "../drive/auth.js";
 import { extractDriveId } from "../drive/id.js";
 import { classifySource, sourceKindCounts, sourceKindLabels, sourceKindPurpose, type SourceKind } from "../analysis/classify.js";
-import { analyseProjectMaterial, buildIntakeQuestionPlan } from "../analysis/intake.js";
+import {
+  analyseProjectMaterial,
+  applyAnalysisEdits,
+  deriveAnalysisGaps,
+  findingKeys,
+  hasAnalysisEdits,
+  type AnalysisEdits,
+  type FindingKey
+} from "../analysis/intake.js";
 import { analyseManuscript, renderContinuationBrief } from "../analysis/manuscript.js";
 import { detectNarration, narrationOptions, povLabel, povOptions, tenseLabel, tenseOptions } from "../style/narration.js";
 import { analyseWriting, type WritingProfile } from "../style/profile.js";
@@ -131,33 +139,52 @@ export function createStudioApp() {
         text: `Premise: ${state.startingBrief.trim()}`
       });
     }
+    const edits = state.projectAnalysis.edits ?? {};
     const intake = { ...state.intake };
     const context = {
       shape: state.shape,
       draftingMode: state.draftingMode,
       intake,
-      existingDraft: Boolean(state.manuscript)
+      existingDraft: Boolean(state.manuscript),
+      authorNotes: state.projectAnalysis.authorNotes ?? ""
     };
-    const analysis = analyseProjectMaterial(documents, context);
-    if (analysis.findings.audience && !intake.audience) {
-      intake.audience = analysis.findings.audience.value.replace(/\s*\/\s*/g, "|");
-    }
-    if (analysis.findings.intimacy && !intake.spice) {
-      intake.spice = analysis.findings.intimacy.value;
-    }
+    const corrected = applyAnalysisEdits(analyseProjectMaterial(documents, context), edits);
+    const audience = corrected.findings.audience?.value.replace(/\s*\/\s*/g, "|");
+    const intimacy = corrected.findings.intimacy?.value;
+    if (audience && !intake.audience) intake.audience = audience;
+    if (intimacy && !intake.spice) intake.spice = intimacy;
     context.intake = intake;
-    analysis.questionPlan = buildIntakeQuestionPlan(analysis, context);
+    // The gaps depend on the prefilled intake, so they are derived last.
+    const analysis = deriveAnalysisGaps(corrected, context);
+
     const paths = workspacePaths(slug);
     await mkdir(paths.artifacts, { recursive: true });
     await writeFile(path.join(paths.artifacts, "project-analysis.json"), JSON.stringify(analysis, null, 2), "utf8");
     const next = await updateState(slug, (current) => {
       current.projectAnalysis = { ...analysis, completed: true };
-      if (analysis.genre && !current.intake.genre) current.intake.genre = analysis.genre;
-      if (analysis.subgenre && !current.intake.subgenre) current.intake.subgenre = analysis.subgenre;
-      if (!current.intake.audience && intake.audience) current.intake.audience = intake.audience;
-      if (!current.intake.spice && intake.spice) current.intake.spice = intake.spice;
+      // A measured value only prefills; a correction is the author's answer.
+      const apply = (key: string, value: string | null | undefined, edited: boolean) => {
+        if (edited) {
+          if (value) current.intake[key] = value;
+          else delete current.intake[key];
+        } else if (value && !current.intake[key]) current.intake[key] = value;
+      };
+      apply("genre", analysis.genre, edits.genre !== undefined);
+      apply("subgenre", analysis.subgenre, edits.subgenre !== undefined);
+      apply("audience", audience, edits.findings?.audience !== undefined);
+      apply("spice", intimacy, edits.findings?.intimacy !== undefined);
     });
     return { analysis, state: withDerived(next) };
+  }
+
+  /** Clear the computed analysis while keeping what the author supplied. */
+  function resetAnalysis(current: StudioState): void {
+    const fresh = emptyState(current.slug, current.projectName).projectAnalysis;
+    current.projectAnalysis = {
+      ...fresh,
+      authorNotes: current.projectAnalysis.authorNotes ?? "",
+      edits: current.projectAnalysis.edits ?? {}
+    };
   }
 
   const route = (handler: (req: express.Request, res: express.Response) => Promise<void>) =>
@@ -277,8 +304,11 @@ export function createStudioApp() {
       current.conversation = [];
       current.conversationStartedAt = null;
       current.chapterChats = {};
-      current.styleCorpus = { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null };
-      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+      // Changing how the book starts discards the old material, including the
+      // notes and corrections that described it.
+      const fresh = emptyState(slug, current.projectName);
+      current.styleCorpus = fresh.styleCorpus;
+      current.projectAnalysis = fresh.projectAnalysis;
       if (projectStart === "from_scratch") {
         current.drive.referenceRoots = [];
         current.drive.referenceRootNames = {};
@@ -649,7 +679,7 @@ export function createStudioApp() {
       current.sourcesReviewed = false;
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
-      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+      resetAnalysis(current);
     });
     res.json(withDerived(state));
   }));
@@ -718,7 +748,7 @@ export function createStudioApp() {
       current.drive.lastIndexedAt = new Date().toISOString();
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
-      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+      resetAnalysis(current);
     });
 
     await appendLog(slug, "audit", {
@@ -749,7 +779,7 @@ export function createStudioApp() {
         source.kinds = kinds;
         current.styleCorpus.built = false;
         current.styleCorpus.continuedAt = null;
-        current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+        resetAnalysis(current);
       }
     });
     res.json(withDerived(state));
@@ -762,7 +792,7 @@ export function createStudioApp() {
       current.sources = current.sources.filter((entry) => entry.driveId !== req.params.driveId);
       current.styleCorpus.built = false;
       current.styleCorpus.continuedAt = null;
-      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+      resetAnalysis(current);
     });
     res.json(withDerived(state));
   }));
@@ -786,18 +816,39 @@ export function createStudioApp() {
   app.post("/api/style/build", route(async (req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
-    const own = state.sources.filter((source) => source.kinds.includes("past_book"));
-    const reference = state.sources.filter((source) => source.kinds.includes("reference_book"));
+
+    if (req.body?.excluded !== undefined && !Array.isArray(req.body.excluded)) {
+      throw new HttpError(400, "excluded must be an array of document ids.");
+    }
+    if (req.body?.notes !== undefined && typeof req.body.notes !== "string") {
+      throw new HttpError(400, "notes must be text.");
+    }
+    const excluded: string[] = Array.isArray(req.body?.excluded)
+      ? [...new Set<string>((req.body.excluded as unknown[]).map((id) => String(id)))]
+      : state.styleCorpus.excluded ?? [];
+    const notes = typeof req.body?.notes === "string"
+      ? req.body.notes.trim().slice(0, 4000)
+      : state.styleCorpus.notes ?? "";
+
+    const kept = (kind: SourceKind) =>
+      state.sources.filter((source) => source.kinds.includes(kind) && !excluded.includes(source.driveId));
+    const own = kept("past_book");
+    const reference = kept("reference_book");
+    const anyOwn = state.sources.some((source) => source.kinds.includes("past_book"));
+    const anyReference = state.sources.some((source) => source.kinds.includes("reference_book"));
 
     const useReference = req.body?.useReference === true;
     const chosen = own.length > 0 ? own : useReference ? reference : [];
 
     if (chosen.length === 0) {
+      const excludedEverything = (anyOwn || (useReference && anyReference)) && excluded.length > 0;
       throw new HttpError(
         400,
-        reference.length > 0
-          ? "Nothing is marked as your writing. You can build the corpus from your reference writing instead, but the book will read like whoever wrote it rather than like you."
-          : "Nothing is marked as your writing or your reference writing, so there is no prose to learn from. Group at least one document on the previous screen."
+        excludedEverything
+          ? "Every document you could learn from is excluded. Include at least one before rebuilding."
+          : anyReference
+            ? "Nothing is marked as your writing. You can build the corpus from your reference writing instead, but the book will read like whoever wrote it rather than like you."
+            : "Nothing is marked as your writing or your reference writing, so there is no prose to learn from. Group at least one document on the previous screen."
       );
     }
     if (!state.sourcesReviewed) {
@@ -814,15 +865,11 @@ export function createStudioApp() {
       if (text) documents.push({ source: source.name, text });
     }
 
-    const corpus = buildCorpus(state.projectName, documents);
+    const corpus: StyleCorpus = { ...buildCorpus(state.projectName, documents), notes };
     const paths = workspacePaths(slug);
     await mkdir(paths.artifacts, { recursive: true });
     await writeFile(path.join(paths.artifacts, "style-corpus.json"), JSON.stringify(corpus, null, 2), "utf8");
-    await writeFile(
-      path.join(paths.artifacts, "style-fingerprint.md"),
-      renderFingerprint(corpus.label, corpus.fingerprint, corpus.passages.length, corpus.profile),
-      "utf8"
-    );
+    await writeFile(path.join(paths.artifacts, "style-fingerprint.md"), renderFingerprint(corpus), "utf8");
 
     const next = await updateState(slug, (current) => {
       current.styleCorpus = {
@@ -831,8 +878,11 @@ export function createStudioApp() {
         passageCount: corpus.passages.length,
         wordCount: corpus.fingerprint.wordCount,
         builtAt: corpus.builtAt,
-        continuedAt: null,
-        fromReference: own.length === 0
+        // A rebuild does not send the author back through a screen they passed.
+        continuedAt: current.styleCorpus.continuedAt,
+        fromReference: own.length === 0,
+        excluded,
+        notes
       };
     });
 
@@ -906,8 +956,53 @@ export function createStudioApp() {
     });
   }));
 
-  app.post("/api/intake/analyse", route(async (_req, res) => {
+  app.post("/api/intake/analyse", route(async (req, res) => {
     const slug = await requireSlug();
+    const notes = req.body?.notes;
+    if (notes !== undefined && typeof notes !== "string") throw new HttpError(400, "notes must be text.");
+    const dropCorrections = req.body?.keepCorrections === false;
+    if (notes !== undefined || dropCorrections) {
+      await updateState(slug, (current) => {
+        if (typeof notes === "string") current.projectAnalysis.authorNotes = notes.trim().slice(0, 4000);
+        if (dropCorrections) current.projectAnalysis.edits = {};
+      });
+    }
+    res.json(await analyseProject(slug));
+  }));
+
+  /** Correct what the analyzer got wrong. Corrections survive a rebuild. */
+  app.patch("/api/intake/analysis", route(async (req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+    if (!state.projectAnalysis.completed) throw new HttpError(400, "Run the analysis before correcting it.");
+
+    const body = req.body ?? {};
+    if (body.clear === true) {
+      await updateState(slug, (current) => void (current.projectAnalysis.edits = {}));
+      res.json(await analyseProject(slug));
+      return;
+    }
+
+    const edits: AnalysisEdits = { ...(state.projectAnalysis.edits ?? {}) };
+    for (const key of ["genre", "subgenre"] as const) {
+      if (body[key] === undefined) continue;
+      if (body[key] !== null && typeof body[key] !== "string") throw new HttpError(400, `${key} must be text or null.`);
+      edits[key] = typeof body[key] === "string" ? body[key].trim().slice(0, 120) : null;
+    }
+    if (body.findings !== undefined) {
+      if (typeof body.findings !== "object" || body.findings === null || Array.isArray(body.findings)) {
+        throw new HttpError(400, "findings must be an object of corrections.");
+      }
+      const findings = { ...(edits.findings ?? {}) };
+      for (const [key, value] of Object.entries(body.findings as Record<string, unknown>)) {
+        if (!findingKeys.includes(key as FindingKey)) throw new HttpError(400, `Unknown finding: ${key}`);
+        if (typeof value !== "string") throw new HttpError(400, `Correction for ${key} must be text.`);
+        findings[key as FindingKey] = value.trim().slice(0, 600);
+      }
+      edits.findings = findings;
+    }
+    if (!hasAnalysisEdits(edits)) throw new HttpError(400, "No corrections were sent.");
+    await updateState(slug, (current) => void (current.projectAnalysis.edits = edits));
     res.json(await analyseProject(slug));
   }));
 
@@ -918,7 +1013,7 @@ export function createStudioApp() {
       current.conversation = [];
       current.conversationStartedAt = null;
       current.writingConfirmed = false;
-      current.projectAnalysis = emptyState(slug, current.projectName).projectAnalysis;
+      resetAnalysis(current);
     });
     try {
       await unlink(path.join(workspacePaths(slug).artifacts, "project-analysis.json"));
@@ -1621,13 +1716,25 @@ async function readCorpus(slug: string): Promise<StyleCorpus | undefined> {
   }
 }
 
-function renderFingerprint(label: string, fingerprint: StyleMetrics, passages: number, profile?: WritingProfile): string {
+function renderFingerprint(corpus: StyleCorpus): string {
+  const { label, fingerprint, profile } = corpus;
+  const passages = corpus.passages.length;
+  const notes = corpus.notes?.trim();
   const pct = (value: number) => `${Math.round(value * 100)}%`;
   return [
     `# Style fingerprint: ${label}`,
     "",
     `Built from ${passages} passages, ${fingerprint.wordCount.toLocaleString()} words of your own prose.`,
     "",
+    ...(notes ? [
+      "## Author notes on this voice",
+      "",
+      "The author wrote these by hand. Where they conflict with a measured target below,",
+      "follow the author.",
+      "",
+      notes,
+      ""
+    ] : []),
     "These are targets, not rules. Drafts are compared against them, and deviation",
     "is measured against your writing rather than a generic standard.",
     "",

@@ -34,6 +34,8 @@ export interface StyleCorpus {
   /** Weighted fingerprint across every passage. */
   fingerprint: StyleMetrics;
   profile: WritingProfile;
+  /** Author guidance attached after the build, not measured from the text. */
+  notes?: string;
   builtAt: string;
 }
 

@@ -220,6 +220,10 @@ export interface StudioState {
     continuedAt: string | null;
     /** Built from reference prose because the author had none of their own. */
     fromReference?: boolean;
+    /** Documents the author kept out of the corpus, by driveId. */
+    excluded: string[];
+    /** Author guidance about their voice, carried into the fingerprint document. */
+    notes: string;
   };
   createdAt: string;
   updatedAt: string;
@@ -288,6 +292,8 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
         intimacy: null
       },
       questionPlan: [],
+      authorNotes: "",
+      edits: {},
       analysedAt: null
     },
     chapters: [],
@@ -297,7 +303,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     directions: [],
     run: { status: "idle", chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
     ledger: emptyLedger(projectName, 0),
-    styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null },
+    styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null, excluded: [], notes: "" },
     createdAt: now,
     updatedAt: now
   };

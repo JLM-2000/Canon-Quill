@@ -121,6 +121,8 @@
   }
   input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
   label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 12.5px; }
+  label.opt { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; }
+  label.opt input { width: auto; margin: 0; }
   .hint { color: var(--faint); font-size: 12px; margin-top: 4px; }
 
   .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px;
@@ -714,7 +716,7 @@ function go(r) {
     toast(`Finish ${label} first.`, "info");
     return;
   }
-  route = r; render();
+  route = r; analysisEditing = false; render();
   if (r === "sources" && (S.drive.connected || !(S.sources || []).some((source) => source.driveId.startsWith("local-")))) loadBrowse(browse.folderId);   // always re-fetch when Drive is available
   if (r === "engine") loadEngine();
   if (r === "connect") loadDrive();
@@ -1869,12 +1871,22 @@ async function loadDraftAnalysis() {
   if (route === "draft") render();
 }
 
+/** Documents the corpus can learn from: the author's own, or reference prose if they have none. */
+function stylePool() {
+  const books = S.sources.filter((s) => (s.kinds || []).includes("past_book"));
+  return books.length ? books : S.sources.filter((s) => (s.kinds || []).includes("reference_book"));
+}
+
 function viewStyle() {
   const sc = S.styleCorpus;
+  const excluded = sc.excluded || [];
   const books = S.sources.filter((s) => (s.kinds || []).includes("past_book"));
   const refs = S.sources.filter((s) => (s.kinds || []).includes("reference_book"));
   const usingReference = books.length === 0 && refs.length > 0;
-  const canBuild = S.sourcesReviewed && (books.length > 0 || refs.length > 0);
+  const pool = stylePool();
+  const included = pool.filter((d) => !excluded.includes(d.driveId));
+  const left = pool.filter((d) => excluded.includes(d.driveId));
+  const canBuild = S.sourcesReviewed && included.length > 0;
   return `
   <h1>Style corpus</h1>
   <p class="sub">This is what stops the writing sounding generic. Canon Quill cuts your past books
@@ -1883,13 +1895,14 @@ function viewStyle() {
   scored against your measured fingerprint, not against a generic idea of good writing.</p>
 
   <div class="card spread">
-    <div><b>${books.length
-        ? plural(books.length, "document") + " used as reference"
-        : usingReference ? plural(refs.length, "document") + " used as reference" : "Nothing to learn from"}</b>
-      <div class="hint">${(books.length ? books : refs).map((b) => esc(b.name)).join(", ")
+    <div><b>${included.length
+        ? plural(included.length, "document") + " used as reference"
+        : "Nothing to learn from"}</b>
+      <div class="hint">${included.map((b) => esc(b.name)).join(", ")
         || "Mark something as Your writing on the Analyse screen."}</div>
+      ${left.length ? `<div class="hint" style="margin-top:4px">Left out: ${left.map((b) => esc(b.name)).join(", ")}.</div>` : ""}
       ${usingReference ? '<div class="hint" style="color:var(--warn);margin-top:4px">No writing of your own is marked, so this will learn from reference writing. The book will read like its author rather than like you.</div>' : ""}</div>
-    <button ${canBuild ? "" : "disabled"} onclick="buildStyle(this)">${sc.built ? "Rebuild style corpus" : "Build style corpus"}</button>
+    <button ${pool.length ? "" : "disabled"} onclick="styleBuildModal()">${sc.built ? "Rebuild style corpus" : "Build style corpus"}</button>
   </div>
 
   ${sc.built ? `<div class="card">
@@ -1897,22 +1910,68 @@ function viewStyle() {
       <span class="pill good">${plural(sc.passageCount, "passage")}</span>
       <span class="pill">${plural(sc.wordCount, "word", null, sc.wordCount.toLocaleString())}</span></div>
     ${sc.wordCount < 2000 ? '<div class="hint" style="color:var(--warn)">Under 2,000 words, so the fingerprint will be noisy. Add more of your prose.</div>' : ""}
+    ${sc.notes ? `<div class="info" style="margin:0 0 12px">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M4 5h16M4 10h16M4 15h10"/></svg>
+      <div><b>Your notes on this voice</b><p style="white-space:pre-wrap">${esc(sc.notes)}</p>
+        <p style="margin-top:6px">The drafting and editing agents read these with the fingerprint, and follow them where a measured target disagrees.</p></div></div>` : ""}
     <div id="fp"><span class="spin"></span></div>
     <div class="row" style="margin-top:16px">
       <button onclick="continueFromStyle(this)">Continue</button>
     </div>
     </div>` : ""}
-  ${!canBuild ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping and mark reference material before building the corpus.</div>' : ""}`;
+  ${!canBuild && pool.length ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping, and keep at least one document in the corpus.</div>' : ""}
+  ${!pool.length ? '<div class="hint" style="color:var(--warn);margin-top:8px">Review the source grouping and mark reference material before building the corpus.</div>' : ""}`;
+}
+
+let styleKeep = null;
+
+function styleBuildModal() {
+  const sc = S.styleCorpus;
+  const pool = stylePool();
+  const excluded = sc.excluded || [];
+  styleKeep = new Set(pool.filter((d) => !excluded.includes(d.driveId)).map((d) => d.driveId));
+  showModal({
+    title: sc.built ? "Rebuild the style corpus" : "Build the style corpus",
+    body: `<p class="hint" style="margin:0 0 12px">Everything here stays on this machine. Measuring the
+      prose is deterministic, so a rebuild over the same documents gives the same fingerprint.</p>
+      <label>Learn my voice from</label>
+      <div class="chips" id="stylepick" style="margin-top:0">
+        ${pool.map((d) => `<button class="chip ${styleKeep.has(d.driveId) ? "on" : ""}"
+          onclick="toggleStyleDoc(this,'${d.driveId}')">${esc(d.name)}</button>`).join("")}</div>
+      <div class="hint">Drop anything that is not your own voice: a ghostwritten book, a co-authored
+      one, or a draft you would not want copied.</div>
+      <label style="margin-top:16px">Notes for the writing agents</label>
+      <textarea id="stylenotes" rows="4" placeholder="Book two was heavily edited, so trust book three. My dialogue runs shorter than the average suggests.">${esc(sc.notes || "")}</textarea>
+      <div class="hint">Optional. These go into the fingerprint document the drafting and editing
+      agents read, and they outrank a measured target when the two disagree.</div>`,
+    actions: `<button id="stylebuildbtn" onclick="buildStyle(this)">${sc.built ? "Rebuild corpus" : "Build corpus"}</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+function toggleStyleDoc(btn, id) {
+  if (styleKeep.has(id)) styleKeep.delete(id); else styleKeep.add(id);
+  btn.classList.toggle("on", styleKeep.has(id));
+  document.getElementById("stylebuildbtn").disabled = styleKeep.size === 0;
 }
 
 async function buildStyle(btn) {
+  const pool = stylePool();
+  const books = S.sources.filter((x) => (x.kinds || []).includes("past_book"));
+  const body = { useReference: books.length === 0 };
+  const notes = document.getElementById("stylenotes");
+  if (notes) {
+    body.notes = notes.value;
+    body.excluded = pool.filter((d) => !styleKeep.has(d.driveId)).map((d) => d.driveId);
+  }
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Building…';
   try {
-    const books = S.sources.filter((x) => (x.kinds || []).includes("past_book"));
-    S = await api("/api/style/build", { method: "POST", body: { useReference: books.length === 0 } });
+    S = await api("/api/style/build", { method: "POST", body });
+    closeModal();
     toast("Style corpus built."); render(); loadFingerprint();
   }
-  catch (e) { toast(e.message, "error"); render(); }
+  catch (e) { toast(e.message, "error"); closeModal(); render(); }
 }
 
 async function continueFromStyle(btn) {
@@ -1928,47 +1987,157 @@ async function continueFromStyle(btn) {
   }
 }
 
+const FINDING_ROWS = [
+  ["premise", "Story promise"],
+  ["protagonist", "Protagonist / cast"],
+  ["relationships", "Relationship arc"],
+  ["centralConflict", "Conflict and stakes"],
+  ["setting", "Setting"],
+  ["timeline", "Timeline"],
+  ["structure", "Structure / ending"],
+  ["narration", "Narration"],
+  ["audience", "Audience"],
+  ["intimacy", "Intimacy signal"]
+];
+
+let analysisEditing = false;
+
+function correctionCount(analysis) {
+  const edits = analysis.edits || {};
+  return Object.keys(edits.findings || {}).length
+    + (edits.genre !== undefined ? 1 : 0)
+    + (edits.subgenre !== undefined ? 1 : 0);
+}
+
 function viewIntakeAnalysis() {
   const analysis = S.projectAnalysis || {};
   const complete = analysis.completed;
   const findings = analysis.findings || {};
-  const findingRows = [
-    ["Story promise", findings.premise],
-    ["Protagonist / cast", findings.protagonist],
-    ["Relationship arc", findings.relationships],
-    ["Conflict and stakes", findings.centralConflict],
-    ["Setting", findings.setting],
-    ["Timeline", findings.timeline],
-    ["Structure / ending", findings.structure],
-    ["Narration", findings.narration],
-    ["Audience", findings.audience],
-    ["Intimacy signal", findings.intimacy]
-  ];
+  const corrections = correctionCount(analysis);
+  const editing = analysisEditing && complete;
+
+  const row = ([key, label]) => {
+    const finding = findings[key];
+    if (editing) {
+      return `<tr><td><b>${esc(label)}</b></td><td>
+        <input data-finding="${key}" data-orig="${esc(finding?.value || "")}" value="${esc(finding?.value || "")}"
+          placeholder="Not established. Type what is true, or leave it empty." /></td></tr>`;
+    }
+    if (!finding) return `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`;
+    return `<tr><td><b>${esc(label)}</b></td><td>${esc(finding.value)}
+      ${finding.authorEdited ? '<span class="pill good" style="margin-left:6px">Yours</span>' : ""}</td>
+      <td class="hint">${esc((finding.evidence || []).join(" "))}</td></tr>`;
+  };
+
   return `<h1>Project analysis</h1>
-    <p class="sub">The analyzer reads every selected document before the agent asks anything. It separates source-supported facts from author decisions, so the intake conversation is about this book rather than a generic form.</p>
+    <p class="sub">The analyzer reads every selected document before the agent asks anything. It separates source-supported facts from author decisions, so the intake conversation is about this book rather than a generic form. It measures text, so it can read something wrong: correct anything below and your version is what the agents work from.</p>
     <div class="card">
       ${projectAnalysisLoading || !complete
         ? `<div style="text-align:center;padding:28px 12px"><span class="spin spin-lg"></span><h3 style="margin:14px 0 6px">Analyzing your project material</h3><p class="sub" style="margin:0 auto;max-width:48ch">Reading the cached references, plot material, character notes, and existing style signals. This is deterministic and stays on your machine.</p></div>`
-        : `<div class="row" style="margin-bottom:10px"><b>Analysis complete</b><span class="pill good">${plural(analysis.documentsRead || 0, "document")} read</span><span class="pill">${plural(analysis.wordsRead || 0, "word", null, (analysis.wordsRead || 0).toLocaleString())}</span></div>
-           <div class="info ok" style="margin:0 0 12px">
-             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-               <path d="M20 6L9 17l-5-5"/>
-             </svg>
-             <div><b>${analysis.genre ? esc(analysis.subgenre || analysis.genre) : "Genre remains an author decision"}</b>
-               <p>${analysis.genre ? `${Math.round((analysis.confidence || 0) * 100)}% confidence. The signal is a prefill, not an imposed decision.` : "The analysis found no reliable genre signal, so the agent will ask about it only if it remains unresolved."}</p>
-             </div>
+        : `<div class="row spread" style="margin-bottom:10px">
+             <div class="row"><b>Analysis complete</b><span class="pill good">${plural(analysis.documentsRead || 0, "document")} read</span><span class="pill">${plural(analysis.wordsRead || 0, "word", null, (analysis.wordsRead || 0).toLocaleString())}</span>
+               ${corrections ? `<span class="pill good">${plural(corrections, "correction")}</span>` : ""}</div>
+             ${editing ? "" : `<div class="row">
+               <button class="ghost sm" onclick="analysisEditing=true;render()">Correct findings</button>
+               <button class="ghost sm" onclick="rebuildAnalysisModal()">Rebuild</button></div>`}
            </div>
+           ${analysis.authorNotes ? `<div class="info" style="margin:0 0 12px">
+             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+               <path d="M4 5h16M4 10h16M4 15h10"/></svg>
+             <div><b>Your notes for this analysis</b><p style="white-space:pre-wrap">${esc(analysis.authorNotes)}</p>
+               <p style="margin-top:6px">Read as part of the material, and kept with the result for the intake agent.</p></div></div>` : ""}
+           ${editing
+             ? `<div class="choices" style="grid-template-columns:1fr 1fr;margin:0 0 14px">
+                  <div><label>Genre</label><input id="an-genre" data-orig="${esc(analysis.genre || "")}" value="${esc(analysis.genre || "")}" placeholder="Romance" /></div>
+                  <div><label>Subgenre</label><input id="an-subgenre" data-orig="${esc(analysis.subgenre || "")}" value="${esc(analysis.subgenre || "")}" placeholder="Contemporary romance" /></div>
+                </div>`
+             : `<div class="info ok" style="margin:0 0 12px">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                  <div><b>${analysis.genre ? esc(analysis.subgenre || analysis.genre) : "Genre remains an author decision"}</b>
+                    <p>${analysis.genre
+                      ? (analysis.edits?.genre !== undefined
+                        ? "Set by you, so the agent takes it as decided."
+                        : `${Math.round((analysis.confidence || 0) * 100)}% confidence. The signal is a prefill, not an imposed decision.`)
+                      : "The analysis found no reliable genre signal, so the agent will ask about it only if it remains unresolved."}</p>
+                  </div>
+                </div>`}
            <h3 style="margin:16px 0 8px">What the material establishes</h3>
-           <table><tr><th>Area</th><th>Finding</th><th>Evidence</th></tr>
-             ${findingRows.map(([label, finding]) => finding
-               ? `<tr><td><b>${esc(label)}</b></td><td>${esc(finding.value)}</td><td class="hint">${esc((finding.evidence || []).join(" "))}</td></tr>`
-               : `<tr><td><b>${esc(label)}</b></td><td colspan="2" style="color:var(--warn)">Not established in the selected material</td></tr>`).join("")}
+           ${editing ? '<div class="hint" style="margin-bottom:8px">Empty a field to say the material does not establish it. The questions the agent asks are rebuilt from whatever you leave here.</div>' : ""}
+           <table><tr><th>Area</th><th>Finding</th>${editing ? "" : "<th>Evidence</th>"}</tr>
+             ${FINDING_ROWS.map(row).join("")}
            </table>
-            ${""}`}
+           ${editing ? `<div class="row" style="margin-top:14px">
+             <button onclick="saveAnalysisEdits(this)">Save corrections</button>
+             <button class="ghost" onclick="analysisEditing=false;render()">Cancel</button>
+             ${corrections ? '<button class="ghost" style="margin-left:auto" onclick="clearAnalysisEdits(this)">Clear all corrections</button>' : ""}
+           </div>` : ""}`}
      </div>
-    <div class="row" style="margin-top:14px">
+    ${editing ? "" : `<div class="row" style="margin-top:14px">
       <button ${complete ? "" : "disabled"} onclick="continueFromAnalysis(this)">Continue</button>
-    </div>`;
+    </div>`}`;
+}
+
+function rebuildAnalysisModal() {
+  const analysis = S.projectAnalysis || {};
+  const corrections = correctionCount(analysis);
+  showModal({
+    title: "Rebuild the project analysis",
+    body: `<p class="hint" style="margin:0 0 12px">The selected material is read again from scratch.
+      Anything you write here is read with it, and stays on the record for the intake agent.</p>
+      <label>Notes for the analysis</label>
+      <textarea id="an-notes" rows="4" placeholder="Mara is the protagonist, not Cole. The timeline document is out of date. The deleted subplot in the chapter notes is not canon.">${esc(analysis.authorNotes || "")}</textarea>
+      <div class="hint">Optional.</div>
+      ${corrections ? `<label class="opt"><input type="checkbox" id="an-keep" checked />
+        Keep my ${plural(corrections, "correction")}</label>
+        <div class="hint">Unchecked, the fresh reading stands on its own and your corrections are dropped.</div>` : ""}`,
+    actions: `<button onclick="rebuildAnalysis(this)">Rebuild analysis</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function rebuildAnalysis(btn) {
+  const keep = document.getElementById("an-keep");
+  const body = { notes: document.getElementById("an-notes").value };
+  if (keep && !keep.checked) body.keepCorrections = false;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Rebuilding…';
+  try {
+    S = (await api("/api/intake/analyse", { method: "POST", body })).state;
+    closeModal();
+    analysisEditing = false;
+    toast("Analysis rebuilt."); render();
+  } catch (e) { toast(e.message, "error"); closeModal(); render(); }
+}
+
+async function saveAnalysisEdits(btn) {
+  const body = {};
+  const findings = {};
+  document.querySelectorAll("[data-finding]").forEach((el) => {
+    if (el.value.trim() !== el.dataset.orig) findings[el.dataset.finding] = el.value.trim();
+  });
+  if (Object.keys(findings).length) body.findings = findings;
+  for (const [id, key] of [["an-genre", "genre"], ["an-subgenre", "subgenre"]]) {
+    const el = document.getElementById(id);
+    if (el && el.value.trim() !== el.dataset.orig) body[key] = el.value.trim();
+  }
+  if (!Object.keys(body).length) { analysisEditing = false; render(); return; }
+
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Saving…';
+  try {
+    S = (await api("/api/intake/analysis", { method: "PATCH", body })).state;
+    analysisEditing = false;
+    toast("Your corrections are what the agents will use."); render();
+  } catch (e) { toast(e.message, "error"); render(); }
+}
+
+async function clearAnalysisEdits(btn) {
+  btn.disabled = true;
+  try {
+    S = (await api("/api/intake/analysis", { method: "PATCH", body: { clear: true } })).state;
+    analysisEditing = false;
+    toast("Corrections cleared."); render();
+  } catch (e) { toast(e.message, "error"); render(); }
 }
 
 async function loadProjectAnalysis() {

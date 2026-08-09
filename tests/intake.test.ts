@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyseProjectMaterial } from "../src/analysis/intake.js";
+import { analyseProjectMaterial, applyAnalysisEdits, deriveAnalysisGaps, hasAnalysisEdits } from "../src/analysis/intake.js";
 
 describe("project intake analysis", () => {
   it("uses reference material before asking for genre", () => {
@@ -77,5 +77,63 @@ describe("project intake analysis", () => {
     expect(result.findings.relationships?.value).toMatch(/Rowan/);
     expect(result.findings.relationships?.value).toMatch(/Ellis/);
     expect(result.findings.relationships?.confidence).toBeLessThan(0.8);
+  });
+
+  it("reads author notes as material without counting them as a document", () => {
+    const documents = [{ name: "Notes", kinds: ["notes"], text: "A woman waits beside a window." }];
+    const plain = analyseProjectMaterial(documents);
+    const noted = analyseProjectMaterial(documents, {
+      authorNotes: "Premise: she must choose between the love she wants and the town that raised her."
+    });
+
+    expect(plain.findings.premise).toBeNull();
+    expect(noted.findings.premise?.value).toMatch(/love she wants/);
+    expect(noted.documentsRead).toBe(plain.documentsRead);
+    expect(noted.wordsRead).toBeGreaterThan(plain.wordsRead);
+    expect(noted.authorNotes).toMatch(/Premise/);
+  });
+});
+
+describe("author corrections to an analysis", () => {
+  const analysis = () => analyseProjectMaterial([
+    { name: "Notes", kinds: ["plot"], text: "Premise: Cole hunts the thing in the water and loses his nerve." }
+  ]);
+
+  it("replaces a measured finding and closes the question it left open", () => {
+    const before = analysis();
+    expect(before.questionPlan.map((question) => question.key)).toContain("protagonistArc");
+
+    const after = deriveAnalysisGaps(applyAnalysisEdits(before, {
+      findings: { protagonist: "Mara, who wants the harbour back and must give up the boat to get it." }
+    }));
+
+    expect(after.findings.protagonist?.value).toMatch(/^Mara/);
+    expect(after.findings.protagonist?.authorEdited).toBe(true);
+    expect(after.findings.protagonist?.confidence).toBe(1);
+    expect(after.questionPlan.map((question) => question.key)).not.toContain("protagonistArc");
+    expect(after.unknowns).not.toContain("protagonist arc");
+  });
+
+  it("clears a finding the analyzer invented", () => {
+    const after = deriveAnalysisGaps(applyAnalysisEdits(analysis(), { findings: { premise: "  " } }));
+    expect(after.findings.premise).toBeNull();
+    expect(after.unknowns).toContain("target-book story promise");
+    expect(after.questionPlan.map((question) => question.key)).toContain("storyPromise");
+  });
+
+  it("takes an author genre over the measured one", () => {
+    const after = applyAnalysisEdits(analysis(), { genre: "Horror", subgenre: "Coastal horror" });
+    expect(after.genre).toBe("Horror");
+    expect(after.subgenre).toBe("Coastal horror");
+    expect(after.confidence).toBe(1);
+    expect(after.evidence[0]).toMatch(/set by the author/i);
+  });
+
+  it("reports whether anything was corrected", () => {
+    expect(hasAnalysisEdits(undefined)).toBe(false);
+    expect(hasAnalysisEdits({})).toBe(false);
+    expect(hasAnalysisEdits({ findings: {} })).toBe(false);
+    expect(hasAnalysisEdits({ genre: null })).toBe(true);
+    expect(hasAnalysisEdits({ findings: { setting: "A harbour town" } })).toBe(true);
   });
 });

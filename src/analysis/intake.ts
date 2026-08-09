@@ -13,6 +13,8 @@ export interface IntakeFinding {
   value: string;
   confidence: number;
   evidence: string[];
+  /** Set when the author corrected the finding by hand. */
+  authorEdited?: boolean;
 }
 
 export interface IntakeQuestionPlan {
@@ -36,6 +38,8 @@ export interface IntakeContext {
   draftingMode?: string | null;
   intake?: Record<string, string>;
   existingDraft?: boolean;
+  /** Author notes for this run, read alongside the selected material. */
+  authorNotes?: string;
 }
 
 export interface ProjectAnalysis {
@@ -61,7 +65,30 @@ export interface ProjectAnalysis {
   };
   unknowns: string[];
   questionPlan: IntakeQuestionPlan[];
+  authorNotes: string;
+  edits: AnalysisEdits;
   analysedAt: string;
+}
+
+export type FindingKey = keyof ProjectAnalysis["findings"];
+
+/** Author corrections, which replace the measurement rather than compete with it. */
+export interface AnalysisEdits {
+  genre?: string | null;
+  subgenre?: string | null;
+  /** Finding key to corrected value. An empty value clears the finding. */
+  findings?: Partial<Record<FindingKey, string>>;
+}
+
+export const findingKeys: FindingKey[] = [
+  "premise", "protagonist", "relationships", "centralConflict", "setting",
+  "timeline", "structure", "narration", "audience", "intimacy"
+];
+
+export function hasAnalysisEdits(edits: AnalysisEdits | undefined): boolean {
+  if (!edits) return false;
+  return edits.genre !== undefined || edits.subgenre !== undefined
+    || Object.keys(edits.findings ?? {}).length > 0;
 }
 
 interface GenreSignal {
@@ -86,7 +113,13 @@ const signals: GenreSignal[] = [
 ];
 
 export function analyseProjectMaterial(documents: IntakeDocument[], context: IntakeContext = {}): ProjectAnalysis {
-  const nonEmpty = documents.filter((document) => words(document.text).length > 0);
+  const authorNotes = (context.authorNotes ?? "").trim();
+  const selected = documents.filter((document) => words(document.text).length > 0);
+  // Notes are read as material but are not one of the author's documents, so
+  // they must not inflate the document count the author sees.
+  const nonEmpty = authorNotes
+    ? [...selected, { name: "Author notes for this analysis", path: "/author-analysis-notes", kinds: ["notes"], text: authorNotes }]
+    : selected;
   const allText = nonEmpty.map((document) => `${document.name}\n${document.text}`).join("\n\n");
   const proseDocuments = nonEmpty.filter((document) =>
     !document.kinds?.length || document.kinds.some((kind) => ["past_book", "reference_book", "notes"].includes(kind))
@@ -127,9 +160,8 @@ export function analyseProjectMaterial(documents: IntakeDocument[], context: Int
   } : null;
 
   const findings = { premise, protagonist, relationships, centralConflict, setting, timeline, structure, narration, audience, intimacy };
-  const unknowns = findUnknowns({ genre, findings, context });
   const base: ProjectAnalysis = {
-    documentsRead: nonEmpty.length,
+    documentsRead: selected.length,
     wordsRead,
     sourceInventory,
     documents: summaries,
@@ -140,13 +172,51 @@ export function analyseProjectMaterial(documents: IntakeDocument[], context: Int
       ? ranked.slice(0, 5).map((signal) => `${signal.genre}: ${signal.hits} ${signal.evidence}`)
       : ["No genre signal was strong enough to prefill a project decision."],
     findings,
-    unknowns,
+    unknowns: [],
     questionPlan: [],
+    authorNotes,
+    edits: {},
     analysedAt: new Date().toISOString()
   };
 
-  base.questionPlan = buildIntakeQuestionPlan(base, context);
-  return base;
+  return deriveAnalysisGaps(base, context);
+}
+
+/** Recompute what is still missing, and the questions that close it. */
+export function deriveAnalysisGaps(analysis: ProjectAnalysis, context: IntakeContext = {}): ProjectAnalysis {
+  const next: ProjectAnalysis = {
+    ...analysis,
+    unknowns: findUnknowns({ genre: analysis.genre, findings: analysis.findings, context })
+  };
+  next.questionPlan = buildIntakeQuestionPlan(next, context);
+  return next;
+}
+
+export function applyAnalysisEdits(analysis: ProjectAnalysis, edits: AnalysisEdits): ProjectAnalysis {
+  const findings = { ...analysis.findings };
+  for (const key of findingKeys) {
+    const corrected = edits.findings?.[key];
+    if (corrected === undefined) continue;
+    const value = corrected.trim();
+    findings[key] = value
+      ? { value, confidence: 1, evidence: ["Corrected by the author."], authorEdited: true }
+      : null;
+  }
+
+  const genreEdited = edits.genre !== undefined;
+  const genre = genreEdited ? edits.genre?.trim() || null : analysis.genre;
+  const subgenre = edits.subgenre !== undefined ? edits.subgenre?.trim() || null : analysis.subgenre;
+  return {
+    ...analysis,
+    genre,
+    subgenre,
+    confidence: genreEdited ? 1 : analysis.confidence,
+    evidence: genreEdited
+      ? [genre ? `Genre set by the author: ${genre}.` : "Genre cleared by the author.", ...analysis.evidence]
+      : analysis.evidence,
+    findings,
+    edits
+  };
 }
 
 export function buildIntakeQuestionPlan(analysis: ProjectAnalysis, context: IntakeContext = {}): IntakeQuestionPlan[] {
