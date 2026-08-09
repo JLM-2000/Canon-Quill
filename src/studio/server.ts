@@ -266,6 +266,7 @@ export function createStudioApp() {
       current.startingBrief = projectStart === "from_scratch" ? brief.slice(0, 12000) : "";
       if (!changed) return;
       current.writingConfirmed = false;
+      current.resourceMethod = null;
       current.shape = null;
       current.projectShapeReviewed = false;
       current.manuscript = null;
@@ -341,6 +342,23 @@ export function createStudioApp() {
     const state = await updateState(slug, (current) => {
       if (!current.shape || !current.draftingMode) throw new HttpError(400, "Choose a book shape and drafting mode first.");
       current.projectShapeReviewed = true;
+    });
+    res.json(withDerived(state));
+  }));
+
+  app.post("/api/resources/method", route(async (req, res) => {
+    const slug = await requireSlug();
+    const method = req.body?.method;
+    if (method !== "drive" && method !== "upload") throw new HttpError(400, "Choose Drive or upload.");
+    const state = await updateState(slug, (current) => {
+      current.resourceMethod = method;
+      if (method === "drive") {
+        current.sources = current.sources.filter((source) => !source.driveId.startsWith("local-"));
+        current.sourcesReviewed = false;
+      } else {
+        current.sources = current.sources.filter((source) => source.driveId.startsWith("local-"));
+        current.sourcesReviewed = false;
+      }
     });
     res.json(withDerived(state));
   }));
@@ -626,6 +644,7 @@ export function createStudioApp() {
     }
 
     const state = await updateState(slug, (current) => {
+      current.resourceMethod = "upload";
       current.sources = [...current.sources.filter((source) => !source.driveId.startsWith("local-")), ...uploaded];
       current.sourcesReviewed = false;
       current.styleCorpus.built = false;
@@ -693,6 +712,7 @@ export function createStudioApp() {
     );
 
     const next = await updateState(slug, (current) => {
+      current.resourceMethod = "drive";
       current.sources = found.map((entry) => entry.source);
       current.sourcesReviewed = false;
       current.drive.lastIndexedAt = new Date().toISOString();

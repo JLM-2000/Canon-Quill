@@ -1089,13 +1089,13 @@ function viewConnect() {
   the resources you explicitly choose and writes approved chapters to a folder you select.</p>
 
   ${!d ? '<div class="card empty"><span class="spin"></span> Checking…</div>' : `
-    <div class="info ${next === "ready" ? "ok" : next === "connect" ? "" : "warn"}">
+    ${next !== "ready" ? `<div class="info ${next === "connect" ? "" : "warn"}">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-        ${next === "ready" ? '<path d="M20 6L9 17l-5-5"/>' : '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>'}
+        <circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>
       </svg>
-       <div><b>${next === "ready" ? "Connected" : next === "connect" ? "Credentials found, not authorised yet" : "Not configured"}</b>
-         ${next !== "ready" && d.reason ? `<p style="white-space:pre-wrap">${esc(d.reason)}</p>` : ""}</div>
-    </div>
+      <div><b>${next === "connect" ? "Credentials found, not authorised yet" : "Not configured"}</b>
+        ${d.reason ? `<p style="white-space:pre-wrap">${esc(d.reason)}</p>` : ""}</div>
+    </div>` : ""}
 
     ${next === "configure" ? `<div class="card">
       <b>Set up the credentials file</b>
@@ -1129,13 +1129,13 @@ function viewConnect() {
         <code>https://www.googleapis.com/auth/drive.file</code> and restart. Browsing stops working and you
         paste folder links instead.</p></div></div>` : ""}
 
-    ${next === "ready" ? `<div class="card"><b>Select sources</b>
-       <p class="sub" style="margin:6px 0 12px">Pick the folders holding your past books, character
-       notes, timelines and references.</p>
-      <button onclick="go('sources')">Select sources</button></div>
-
-      <div class="hint" style="margin:10px 0 0"><button class="text-link" onclick="showDriveRecovery = true; render()">Reconnect</button></div>
-     ${showDriveRecovery ? `<div class="card" style="margin-top:10px">
+    ${next === "ready" ? `<div class="card">
+       <div class="sectionlabel" style="padding:0;margin:0 0 8px">Google Drive</div>
+       <div class="row" style="margin-bottom:6px"><b>Connected</b><span class="pill good">Ready</span></div>
+       <p class="sub" style="margin:0 0 12px">Pick the folders holding your past books, character notes, timelines and references.</p>
+       <button onclick="chooseResourceMethod('drive')">Select sources</button>
+       <div class="hint" style="margin-top:10px"><button class="text-link" onclick="showDriveRecovery = true; render()">Reconnect</button></div>
+      ${showDriveRecovery ? `<div class="card" style="margin-top:10px">
        <b>Reconnect Google Drive</b>
        <p class="sub" style="margin:6px 0 10px">Use this if the stored connection no longer works or you want a different Google account.</p>
        <div class="row"><button class="ghost" onclick="connectDrive(this)">Reconnect Google Drive</button>
@@ -1144,9 +1144,10 @@ function viewConnect() {
        <div id="authlink" class="hint" style="margin-top:10px"></div>
       </div>` : ""}` : ""}
 
-    <div class="card">
-      <b>Upload planning material instead</b>
-      <p class="sub" style="margin:6px 0 10px">Use this for a plan, timeline, character sheet, outline or notes on this computer. Files are copied into this book's private workspace.</p>
+    <div class="card" style="margin-top:20px">
+      <div class="sectionlabel" style="padding:0;margin:0 0 8px">Alternative</div>
+      <b>Upload from this computer</b>
+      <p class="sub" style="margin:6px 0 10px">Use this for a plan, timeline, character sheet, outline or notes. Files are copied into this book's private workspace.</p>
       <input id="local-sources" type="file" multiple accept=".txt,.md,.markdown,.rtf,.html,.csv,.json" hidden onchange="showSelectedFiles(this)" />
       <div class="row" style="margin-top:10px"><label class="file-button" for="local-sources">Choose file</label><span id="selected-files" class="hint">No file selected</span></div>
       <div class="row" style="margin-top:10px"><button onclick="uploadSources(this)">Continue</button></div>
@@ -1215,9 +1216,18 @@ async function uploadSources(btn) {
   finally { if (btn.isConnected) btn.disabled = false; }
 }
 
+async function chooseResourceMethod(method) {
+  try {
+    S = await api("/api/resources/method", { method: "POST", body: { method } });
+    route = method === "drive" ? "sources" : "connect";
+    render();
+    if (method === "drive") loadBrowse(browse.folderId);
+  } catch (e) { toast(e.message, "error"); }
+}
+
 function viewSources() {
   const localSources = (S.sources || []).filter((source) => source.driveId.startsWith("local-"));
-  const hasDrive = Boolean(S.drive.connected);
+  const hasDrive = S.resourceMethod === "drive" && Boolean(S.drive.connected);
   const rows = browse.entries.map((e) => {
     const safe = esc(e.name).replace(/'/g, "\\'");
     const isRef = picked.has(e.id);

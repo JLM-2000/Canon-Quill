@@ -8,6 +8,7 @@ import { workspacePaths } from "../workspace/paths.js";
 export type ProjectShape = "standalone" | "series";
 export type DraftingMode = "chapter_by_chapter" | "whole_book";
 export type ProjectStart = "from_scratch" | "with_material";
+export type ResourceMethod = "drive" | "upload";
 export type ProviderId = "anthropic" | "openai";
 export type AuthMethod = "subscription" | "api_key";
 export type EngineRouting = "single" | "split";
@@ -173,6 +174,7 @@ export interface StudioState {
   /** Whether the project begins with a detailed brief or selected material. */
   projectStart: ProjectStart | null;
   startingBrief: string;
+  resourceMethod: ResourceMethod | null;
   engine: EngineChoice;
   /** True after the author continues past the writing-engine screen. */
   engineReviewed: boolean;
@@ -232,6 +234,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     phase: "engine",
     projectStart: null,
     startingBrief: "",
+    resourceMethod: null,
     engine: {
       provider: null,
       authMethod: null,
@@ -312,6 +315,8 @@ export async function loadState(slug: string): Promise<StudioState> {
       version: 7 as const,
       projectStart: parsed.projectStart ?? null,
       startingBrief: parsed.startingBrief ?? "",
+      resourceMethod: parsed.resourceMethod
+        ?? (parsed.sources?.some((source) => source.driveId.startsWith("local-")) ? "upload" : parsed.drive?.referenceRoots?.length ? "drive" : null),
       draftingMode: parsed.draftingMode ?? base.draftingMode,
       projectShapeReviewed: parsed.projectShapeReviewed ?? false,
       engine: {
@@ -403,6 +408,8 @@ export function derivePhase(state: StudioState): PhaseId {
   if (!draftingProvider || !draftingAuth || !analysisProvider || !analysisAuth || !state.engineReviewed) return "engine";
   if (state.projectStart === "with_material") {
     const hasLocalSources = state.sources.some((source) => source.driveId.startsWith("local-"));
+    if (state.resourceMethod === "upload" && !hasLocalSources) return "connect";
+    if (!state.resourceMethod) return "connect";
     if (!state.drive.connected && !hasLocalSources) return "connect";
     if (state.drive.referenceRoots.length === 0 && !hasLocalSources) return "sources";
     if (state.sources.length === 0) return "sources";

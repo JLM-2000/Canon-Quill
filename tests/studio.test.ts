@@ -56,6 +56,7 @@ describe("phase derivation", () => {
   it("asks for sources once the engine and Drive are set", () => {
     const state = emptyState("x");
     state.projectStart = "with_material";
+    state.resourceMethod = "drive";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.engineReviewed = true;
     state.drive.connected = true;
@@ -65,6 +66,7 @@ describe("phase derivation", () => {
   it("asks for intake once sources are confirmed", () => {
     const state = emptyState("x");
     state.projectStart = "with_material";
+    state.resourceMethod = "drive";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.engineReviewed = true;
     state.drive.connected = true;
@@ -84,6 +86,7 @@ describe("phase derivation", () => {
   it("holds at the existing-draft step until it is answered", () => {
     const state = emptyState("x");
     state.projectStart = "with_material";
+    state.resourceMethod = "drive";
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.engineReviewed = true;
     state.drive.connected = true;
@@ -140,7 +143,7 @@ describe("studio api", () => {
     expect(html).toContain("Choose file");
     expect(html).toContain('id="selected-files"');
     expect(html).not.toContain("Can't connect?");
-    expect(html.indexOf("Select sources")).toBeLessThan(html.indexOf("Upload planning material instead"));
+    expect(html.indexOf("Select sources")).toBeLessThan(html.indexOf("Upload from this computer"));
     expect(html).toContain("credentialsByRole");
     expect(html).toContain("Analysis and outlines");
     expect(html.indexOf('roleProviderCard("analysis", "anthropic"')).toBeLessThan(html.indexOf('roleProviderCard("analysis", "openai"'));
@@ -299,6 +302,7 @@ describe("studio api", () => {
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.engineReviewed = true;
     state.projectStart = "with_material";
+    state.resourceMethod = "drive";
     state.drive.connected = true;
     state.drive.referenceRoots = ["root"];
     state.sources = [{ driveId: "source", name: "Reference", path: "/Reference", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"] }];
@@ -434,6 +438,7 @@ describe("studio api", () => {
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.engineReviewed = true;
     state.projectStart = "with_material";
+    state.resourceMethod = "drive";
     state.drive.connected = true;
     state.drive.referenceRoots = ["root"];
     state.sources = [{ driveId: "source", name: "Reference", path: "/Reference", mimeType: "text/plain", isFolder: false, kinds: ["reference_book"] }];
@@ -570,6 +575,7 @@ describe("studio api", () => {
     state.engine = { provider: "anthropic", authMethod: "subscription", models: {} };
     state.engineReviewed = true;
     state.projectStart = "with_material";
+    state.resourceMethod = "drive";
     state.drive.connected = true;
     state.drive.referenceRoots = ["r"];
     state.sources = [{ driveId: "a", name: "n", path: "/n", mimeType: "text/plain", isFolder: false, kinds: ["notes"] }];
