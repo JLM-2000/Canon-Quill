@@ -4016,6 +4016,7 @@ async function resumeRunModal() {
     }
     showModal({
       title: preparationRun ? "Resume preparation?" : "Resume writing?",
+      size: "writing-modal",
       body: `<p class="hint">This restores the saved provider conversation when available. It also reads the saved workspace, decisions, artifacts, and recorded runtime conversation before continuing. If the provider cannot restore its session, the saved workspace remains the authority.</p>
         ${preparationChecklist(status)}
         ${preparationRun ? '<p class="hint">Preparation will continue building the missing documents and stop again before prose drafting.</p>' : writingEstimateCard(WRITING_ESTIMATE)}`,
