@@ -1,11 +1,18 @@
 export function renderMarkdown(markdown: string): string {
-  const blocks = markdown.split(/\n{2,}/);
+  const blocks = markdown.replace(/<br\s*\/?\s*>/gi, "\n").split(/\n{2,}/);
   return blocks.map(renderBlock).join("\n");
 }
 
 function renderBlock(block: string): string {
   const trimmed = block.trim();
   if (!trimmed) return "";
+  const lines = trimmed.split(/\r?\n/);
+
+  if (isTable(lines)) {
+    const headers = tableCells(lines[0]);
+    const rows = lines.slice(2).map(tableCells);
+    return `<table><thead><tr>${headers.map((cell) => `<th>${inline(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((_, index) => `<td>${inline(row[index] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  }
 
   if (trimmed.startsWith("# ")) return `<h1>${inline(trimmed.slice(2))}</h1>`;
   if (trimmed.startsWith("## ")) return `<h2>${inline(trimmed.slice(3))}</h2>`;
@@ -28,7 +35,19 @@ function renderBlock(block: string): string {
     return `<ul>${items}</ul>`;
   }
 
+  if (/^-{3,}$/.test(trimmed)) return "<hr />";
+
   return `<p>${inline(trimmed.replace(/\r?\n/g, "<br />"))}</p>`;
+}
+
+function isTable(lines: string[]): boolean {
+  return lines.length >= 2
+    && lines[0].includes("|")
+    && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1]);
+}
+
+function tableCells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 }
 
 function inline(value: string): string {

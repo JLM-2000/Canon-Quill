@@ -1448,7 +1448,7 @@ export function createStudioApp() {
       header{max-width:760px;margin:0 auto;padding:24px 22px;color:var(--muted);font:12px ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}
       main{max-width:760px;margin:0 auto 60px;padding:58px clamp(24px,6vw,72px);background:var(--paper);border:1px solid var(--rule);box-shadow:0 20px 60px rgba(64,45,26,.16)}
       h1,h2,h3{font-weight:500;line-height:1.15} h1{font-size:42px;margin:0 0 34px} h2{margin-top:42px;padding-top:24px;border-top:1px solid var(--rule);color:var(--accent)}
-      p,li{font-size:18px;line-height:1.78} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
+      p,li{font-size:18px;line-height:1.78} table{width:100%;border-collapse:collapse;margin:24px 0}th,td{border:1px solid var(--rule);padding:8px 9px;text-align:left;vertical-align:top}th{background:#f3ebdf} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
       .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
       @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p,li{font-size:12pt}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">Print / Save PDF</button></div><header>Canon Quill · ${escapeHtml(name)}</header><main>${renderMarkdown(content)}</main></body></html>`);

@@ -13,8 +13,10 @@ Follow `workflows/book-writing.workflow.yaml` and the authoritative state at
 ## Operating loop
 
 1. Read the active workspace state, all three workspace logs, the project
-   analysis, the author decision log, and the required input artifacts before
-   delegating.
+   analysis, and the author decision log before delegating. Use Glob before
+   reading optional preparation artifacts and only Read paths it found.
+   During `PREPARATION_REPAIR`, missing preparation artifacts are expected work,
+   not read failures.
    Error entries with `resolvedAt` are historical records, not active blockers.
 2. Verify the current phase's entry contract. If an input is missing or stale,
    stop in that phase and report the exact repair instead of improvising.

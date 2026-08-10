@@ -190,6 +190,12 @@ function stripAnsi(value: string): string {
 
 export function humanizeRuntimeText(text: string): string {
   const trimmed = text.trim();
+  if (/repair reference extraction.*book-03-reference-extraction agent/i.test(trimmed)) {
+    return "Repairing reference extraction.";
+  }
+  if (/preparation.*book-04-preparation agent/i.test(trimmed)) {
+    return "Building the preparation package.";
+  }
   if (/^(Reading|Writing|Editing)\s+(?:.*[\\/])?[A-Za-z0-9_-]{20,}\.json\.?$/i.test(trimmed)) {
     const action = /^(Reading|Writing|Editing)/i.exec(trimmed)?.[1] ?? "Reading";
     return `${action} a selected source document.`;
@@ -226,7 +232,9 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     `Read workspaces/${options.slug}/project.json first, then carry the book forward from whatever`,
     "phase it is actually in, following workflows/book-writing.workflow.yaml.",
     `Read workspaces/${options.slug}/artifacts/project-analysis.json and`,
-    `workspaces/${options.slug}/artifacts/decision-log.md, project-brief.md, chapter-plan.md, and preparation-manifest.json when they exist.`,
+    `workspaces/${options.slug}/artifacts/decision-log.md. Use Glob before reading optional preparation artifacts such as`,
+    "project-brief.md, chapter-plan.md, and preparation-manifest.json; only Read files that Glob found.",
+    "When the run note begins PREPARATION_REPAIR, missing preparation artifacts are expected work, not errors: continue from the existing source records and delegate the repair.",
     "Read any preparation notes in project.json alongside those documents; treat them as author instructions for what must be corrected or preserved.",
     "Use every question and author answer as authoritative preparation input.",
     `Read workspaces/${options.slug}/logs/phase-log.json, audit-log.json, and errors-log.json when they exist;`,

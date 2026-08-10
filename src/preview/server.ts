@@ -126,6 +126,9 @@ function renderPage(title: string, markdown: string): string {
       line-height: 1.78;
       margin: 0 0 1.15em;
     }
+    table { width: 100%; border-collapse: collapse; margin: 28px 0; font-size: 15px; }
+    th, td { border: 1px solid var(--rule); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #f3ebdf; }
     blockquote {
       margin: 28px 0;
       padding-left: 24px;
