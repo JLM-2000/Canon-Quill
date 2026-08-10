@@ -3465,8 +3465,15 @@ function outputCard() {
     : file.kind === "book"
       ? `<button class="ghost sm" onclick="retouchBookModal()">Edit</button>`
       : "";
+  const draftNote = (file) => {
+    const manuscript = S?.manuscript;
+    if (file.kind !== "chapter" || !file.chapter || !manuscript || file.chapter !== (manuscript.lastChapterComplete ? manuscript.chapterCount + 1 : manuscript.chapterCount)) return "";
+    const section = manuscript.sections?.at(-1);
+    const heading = section?.heading?.replace(/^\s*#{0,3}\s*/i, "");
+    return heading ? `<div class="s">${esc(heading)}<br>(already in the draft)</div>` : "";
+  };
   const fileGroup = (group) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
-    <span>${esc(group[0].label)}</span><span class="row">${outputActions(group)}</span></div>`;
+    <div><div>${esc(group[0].label)}</div>${draftNote(group[0])}</div><span class="row">${outputActions(group)}</span></div>`;
   const finalFiles = files.filter((file) => file.kind === "book");
   const chapterGroups = grouped.filter((group) => group[0].kind === "chapter");
   const finalPreview = primary.kind === "book" && primary.preview
@@ -3515,49 +3522,6 @@ async function postBookToDrive(btn) {
     btn.disabled = false;
     btn.textContent = "Send full book";
   }
-}
-
-function existingDraftItems() {
-  const m = S?.manuscript;
-  if (!m) return [];
-  const sections = m.sections || [];
-  const editUrl = `https://docs.google.com/document/d/${encodeURIComponent(m.driveId)}/edit`;
-  return sections.map((section) => {
-    const label = section.kind === "prologue"
-      ? "Prologue"
-      : section.kind === "chapter"
-        ? section.heading.replace(/^\s*#{0,3}\s*/i, "")
-        : section.heading.replace(/^\s*#{0,3}\s*/i, "") || `Section ${section.index}`;
-    return { order: section.index, html: `<div class="chap">
-      <div class="num">${section.index}</div>
-      <div><div class="t">${esc(label)}</div><div class="s">(already in the draft)</div></div>
-      <span class="row">
-        <span class="pill">${plural(section.wordCount, "word", null, section.wordCount.toLocaleString())}</span>
-        <a class="btn ghost sm" href="/api/manuscript/sections/${section.index}/view" target="_blank" rel="noopener">View</a>
-        <a class="btn ghost sm" href="${editUrl}" target="_blank" rel="noopener">Edit</a>
-        <details class="download-menu"><summary class="btn ghost sm">Download</summary>
-          <div class="download-options"><a href="/api/manuscript/sections/${section.index}/download?format=docx" download>DOCX</a><a href="/api/manuscript/sections/${section.index}/download?format=pdf" download>PDF</a></div>
-        </details>
-      </span>
-    </div>` };
-  });
-}
-
-function plannedChapterItem(c, mode) {
-  return { order: c.number, html: `<div class="chap">
-    <div class="num">${c.number}</div>
-    <div><div class="t">${esc(c.title)}</div>
-      <div class="s">${esc(c.synopsis || "")}</div>
-      ${c.issues?.length ? `<div class="s" style="color:var(--warn);margin-top:3px">${esc(c.issues[0])}${c.issues.length > 1 ? ` (+${c.issues.length - 1} more)` : ""}</div>` : ""}</div>
-    <div class="row">
-      ${c.styleFidelity !== undefined ? `<span class="pill ${fidelityClass(c.styleFidelity)}">style ${c.styleFidelity}</span>` : ""}
-      ${c.flowVerdict ? `<span class="pill ${c.flowVerdict === "pass" ? "good" : c.flowVerdict === "revise" ? "warn" : "bad"}">flow ${esc(c.flowVerdict)}</span>` : ""}
-      <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
-      ${mode === "chapter_by_chapter" ? `<button class="ghost sm" onclick="openChapterChat(${c.number})">Chapter chat</button>` : ""}
-      ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
-      ${c.status === "approved" ? `<button class="ghost sm" onclick="redoChapterModal(${c.number})">Redo chapter</button>` : ""}
-    </div>
-  </div>` };
 }
 
 function dismissOutputAlert(key) {
@@ -3825,11 +3789,6 @@ function viewChapters() {
   const packageReviewed = Boolean(PREPARATION?.ready && S.preparationReviewed);
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
-  const chapterItems = [...existingDraftItems(), ...cs.map((chapter) => plannedChapterItem(chapter, mode))]
-    .sort((a, b) => a.order - b.order);
-  const chapterContainer = chapterItems.length
-    ? `<div><h2 style="margin:18px 0 8px">Chapters</h2><div class="card" style="padding:0">${chapterItems.map((item) => item.html).join("")}</div></div>`
-    : "";
   const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   // A file can appear before the orchestrator has finished its writing and
   // editing passes. Keep it out of the author-facing output until the run ends.
@@ -3842,17 +3801,15 @@ function viewChapters() {
       ${packageReviewed ? directionsCard(pending, dirs) : ""}
       ${writingCard}
       ${finishedOutput}`;
-    return `${packageReviewed ? directionsCard(pending, dirs) : ""}
-      ${chapterContainer}
-      ${haltCard}
+    return `${haltCard}
+      ${packageReviewed ? directionsCard(pending, dirs) : ""}
       ${writingCard}
       ${finishedOutput}`;
   }
 
   return `
-  ${packageReviewed ? directionsCard(pending, dirs) : ""}
-
   ${haltCard}
+  ${packageReviewed ? directionsCard(pending, dirs) : ""}
 
   ${S.writingConfirmed ? "" : `<div class="card" style="border-color:var(--accent)">
     <b>The chapter plan changed</b>
@@ -3863,8 +3820,6 @@ function viewChapters() {
 
   ${writingCard}
   ${finishedOutput}
-
-  ${chapterContainer}
 
   ${chapterChat ? chapterChatCard(chapterChat) : ""}
   `;
