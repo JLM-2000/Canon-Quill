@@ -209,9 +209,9 @@ describe("studio api", () => {
     expect(html).toContain("Preparation complete");
     expect(html).toContain('preparation: S.writingConfirmed ? "chapters"');
     expect(html).toContain("function enterPreparation()");
-    expect(html).toContain(">Edit</button>");
+    expect(html).toContain("output-icon-button");
     expect(html).toContain("Edit final book with instructions");
-    expect(html).toContain(">View</a>");
+    expect(html).toContain('name === "view"');
     expect(html).toContain("Download");
     expect(html).toContain(">DOCX</a>");
     expect(html).toContain(">PDF</a>");

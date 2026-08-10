@@ -183,6 +183,21 @@
     box-shadow: 0 10px 24px rgba(0,0,0,.15); }
   .download-options a { display: block; padding: 7px 9px; white-space: nowrap; color: var(--text); text-decoration: none; font-size: 12px; }
   .download-options a:hover { background: var(--surface-2); }
+  .chapter-output-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center;
+    padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .chapter-output-row:last-child { border-bottom: none; }
+  .chapter-output-title { min-width: 0; font-weight: 400; }
+  .chapter-output-note { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .output-actions { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+  .output-icon-button { width: 31px; height: 31px; padding: 6px; display: inline-flex; align-items: center;
+    justify-content: center; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 7px; text-decoration: none; cursor: pointer; box-sizing: border-box; }
+  .output-icon-button:hover { border-color: var(--accent); color: var(--accent); filter: none; }
+  .output-icon-button svg { width: 16px; height: 16px; }
+  .output-download { position: relative; }
+  .output-download summary { list-style: none; }
+  .output-download summary::-webkit-details-marker { display: none; }
+  @media (max-width: 600px) { .chapter-output-row { grid-template-columns: 1fr; gap: 9px; } }
   .analysis-finding { min-height: 76px; resize: vertical; }
 
   #view.readonly .choice, #view.readonly .chip, #view.readonly .doc-x,
@@ -3442,8 +3457,8 @@ function resetDismissedOutputAlerts() {
 
 function outputCard() {
   const primary = runOutput?.primary;
-  if (!primary) return "";
-  const files = runOutput.files || [];
+  const files = runOutput?.files || [];
+  if (!primary && !files.length && !(S?.manuscript?.sections || []).some((section) => section.kind === "chapter" || section.kind === "prologue")) return "";
   const grouped = [...new Map(files.map((file) => [`${file.kind}-${file.chapter ?? "book"}`, []])).keys()]
     .map((key) => files.filter((file) => `${file.kind}-${file.chapter ?? "book"}` === key));
   const downloadUrlFor = (file, format) => {
@@ -3451,47 +3466,53 @@ function outputCard() {
     url.searchParams.set("format", format);
     return `${url.pathname}${url.search}`;
   };
+  const iconSvg = (name) => name === "view"
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></svg>'
+    : name === "edit"
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 4.5-1 10.8-10.8a2.1 2.1 0 0 0-3-3L5.5 16z"/><path d="m14.5 6.5 3 3"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>';
+  const iconLink = (name, href, label) => `<a class="output-icon-button" href="${esc(href)}" title="${esc(label)}" aria-label="${esc(label)}" target="_blank" rel="noopener">${iconSvg(name)}</a>`;
+  const downloadMenu = (docxUrl, pdfUrl, label) => `<details class="output-download"><summary class="output-icon-button" title="Download ${esc(label)}" aria-label="Download ${esc(label)}">${iconSvg("download")}</summary><div class="download-options"><a href="${esc(docxUrl)}" download>DOCX</a><a href="${esc(pdfUrl)}" download>PDF</a></div></details>`;
   const outputActions = (group) => {
     const file = group.find((entry) => entry.format === "md") || group[0];
     const viewUrl = `/api/run/output/view?kind=${file.kind}${file.chapter ? `&chapter=${file.chapter}` : ""}`;
-    return `<a class="btn ghost sm" href="${viewUrl}" target="_blank" rel="noopener">View</a>
-      ${editAction(file)}
-      <details class="download-menu"><summary class="btn ghost sm">Download</summary>
-        <div class="download-options"><a href="${esc(downloadUrlFor(file, "docx"))}" download>DOCX</a><a href="${esc(downloadUrlFor(file, "pdf"))}" download>PDF</a></div>
-      </details>`;
+    const edit = file.kind === "chapter" && file.chapter
+      ? `<button class="output-icon-button" title="Edit" aria-label="Edit ${esc(file.label)}" onclick="redoChapterModal(${file.chapter})">${iconSvg("edit")}</button>`
+      : file.kind === "book"
+        ? `<button class="output-icon-button" title="Edit" aria-label="Edit ${esc(file.label)}" onclick="retouchBookModal()">${iconSvg("edit")}</button>`
+        : "";
+    return `${iconLink("view", viewUrl, `View ${file.label}`)}${edit}${downloadMenu(downloadUrlFor(file, "docx"), downloadUrlFor(file, "pdf"), file.label)}`;
   };
-  const editAction = (file) => file.kind === "chapter" && file.chapter
-    ? `<button class="ghost sm" onclick="redoChapterModal(${file.chapter})">Edit</button>`
-    : file.kind === "book"
-      ? `<button class="ghost sm" onclick="retouchBookModal()">Edit</button>`
-      : "";
-  const draftNote = (file) => {
-    const manuscript = S?.manuscript;
-    if (file.kind !== "chapter" || !file.chapter || !manuscript || file.chapter !== (manuscript.lastChapterComplete ? manuscript.chapterCount + 1 : manuscript.chapterCount)) return "";
-    const section = manuscript.sections?.at(-1);
-    const heading = section?.heading?.replace(/^\s*#{0,3}\s*/i, "");
-    return heading ? `<div class="s">${esc(heading)}<br>(already in the draft)</div>` : "";
-  };
-  const fileGroup = (group) => `<div style="padding:10px 0;border-top:1px solid var(--border)">
-    <div><div>${esc(group[0].label)}</div>${draftNote(group[0])}</div>
-    <div class="row" style="margin-top:8px">${outputActions(group)}</div>
+  const existingRows = (S?.manuscript?.sections || [])
+    .filter((section) => section.kind === "chapter" || section.kind === "prologue")
+    .map((section) => {
+      const label = section.kind === "prologue" ? "Prologue" : `Chapter ${section.index}`;
+      const note = "(already in the draft)";
+      const editUrl = `https://docs.google.com/document/d/${encodeURIComponent(S.manuscript.driveId)}/edit`;
+      return `<div class="chapter-output-row">
+        <div><div class="chapter-output-title">${label}</div><div class="chapter-output-note">${note}</div></div>
+        <div class="output-actions">${iconLink("view", `/api/manuscript/sections/${section.index}/view`, `View ${label}`)}${iconLink("edit", editUrl, `Edit ${label}`)}${downloadMenu(`/api/manuscript/sections/${section.index}/download?format=docx`, `/api/manuscript/sections/${section.index}/download?format=pdf`, label)}</div>
+      </div>`;
+    }).join("");
+  const fileGroup = (group) => `<div class="chapter-output-row">
+    <div class="chapter-output-title">${esc(group[0].label)}</div><div class="output-actions">${outputActions(group)}</div>
   </div>`;
   const finalFiles = files.filter((file) => file.kind === "book");
   const chapterGroups = grouped.filter((group) => group[0].kind === "chapter");
-  const finalPreview = primary.kind === "book" && primary.preview
+  const finalPreview = primary?.kind === "book" && primary.preview
     ? `<div class="output-preview ${primary.truncated ? "truncated" : ""}">${esc(primary.preview)}</div>
        ${primary.truncated ? '<div class="hint" style="margin-top:7px">Preview shortened here. The download contains the complete output.</div>' : ""}`
     : "";
-  const alertKey = `${primary.kind}-${primary.chapter ?? "book"}`;
-  const readyAlert = isOutputAlertDismissed(alertKey) ? "" : `<div class="info ok finished-alert">
+  const alertKey = primary ? `${primary.kind}-${primary.chapter ?? "book"}` : "";
+  const readyAlert = !primary || isOutputAlertDismissed(alertKey) ? "" : `<div class="info ok finished-alert">
        <button class="alert-close" aria-label="Dismiss ${esc(primary.label)} alert" title="Dismiss" onclick="dismissOutputAlert('${alertKey}')">×</button>
        <div><b>${esc(primary.label)} is ready</b><p>Your finished ${primary.kind === "book" ? "book" : "chapter"} has passed its run and is available in the files below.</p></div>
      </div>`;
   const canPostToDrive = Boolean(S?.drive?.connected && (S.drive.targetFolderId || S.manuscript));
   return `${readyAlert}
-     ${(finalFiles.length || chapterGroups.length) ? `<div class="card" style="margin-top:12px">
+     ${(finalFiles.length || chapterGroups.length || existingRows) ? `<div class="card" style="margin-top:12px">
         ${finalFiles.length ? `<div><div class="spread"><h3 style="margin:0 0 4px">Final book</h3>${canPostToDrive ? '<button class="ghost sm" onclick="postBookModal()">Send to Drive</button>' : ""}</div>${fileGroup(finalFiles)}${finalPreview}</div>` : ""}
-      ${chapterGroups.length ? `<div style="${finalFiles.length ? "margin-top:18px;" : ""}"><h3 style="margin:0 0 4px">Chapters</h3>${chapterGroups.map(fileGroup).join("")}</div>` : ""}
+       ${(existingRows || chapterGroups.length) ? `<div style="${finalFiles.length ? "margin-top:18px;" : ""}"><h3 style="margin:0 0 4px">Chapters</h3>${existingRows}${chapterGroups.map(fileGroup).join("")}</div>` : ""}
     </div>` : ""}`;
 }
 
