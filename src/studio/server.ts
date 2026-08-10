@@ -2106,6 +2106,47 @@ export function createStudioApp() {
     })));
   }));
 
+  async function existingSection(slug: string, state: StudioState, index: number): Promise<{ markdown: string; heading: string }> {
+    if (!state.manuscript) throw new HttpError(404, "No existing draft has been selected.");
+    if (!Number.isInteger(index) || index < 1) throw new HttpError(400, "Unknown draft section.");
+    const text = await readCached(slug, state.manuscript.driveId);
+    if (!text) throw new HttpError(404, "The selected draft text is not cached.");
+    const analysis = analyseManuscript(text);
+    const section = analysis.chapters[index - 1];
+    if (!section) throw new HttpError(404, "That draft section is not available.");
+    const nextSectionOffset = analysis.chapters[index]?.offset ?? analysis.epilogue?.offset ?? analysis.backMatter?.offset ?? analysis.storyEndOffset;
+    return { heading: section.heading, markdown: text.slice(section.offset, nextSectionOffset).trim() };
+  }
+
+  app.get("/api/manuscript/sections/:index/view", route(async (req, res) => {
+    const slug = await requireSlug();
+    const state = await loadState(slug);
+    const section = await existingSection(slug, state, Number(req.params.index));
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(section.heading)}</title><style>
+      :root{color-scheme:light;--paper:#fffdf8;--ink:#201914;--muted:#7c6f64;--rule:#e8decf;--accent:#8f5838}
+      body{margin:0;background:#eee7dc;color:var(--ink);font-family:Georgia,'Times New Roman',serif}
+      header{max-width:760px;margin:0 auto;padding:24px 22px;color:var(--muted);font:12px ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+      main{max-width:760px;margin:0 auto 60px;padding:58px clamp(24px,6vw,72px);background:var(--paper);border:1px solid var(--rule);box-shadow:0 20px 60px rgba(64,45,26,.16)}
+      h1,h2,h3{font-weight:500;line-height:1.15} h1{font-size:42px;margin:0 0 34px} h2{margin-top:42px;padding-top:24px;border-top:1px solid var(--rule);color:var(--accent)}
+      p{font-size:18px;line-height:1.78;margin:0 0 1.15em} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
+      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
+      @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p{font-size:12pt}}
+    </style></head><body><div class="toolbar"><button onclick="window.print()">Print</button></div><header>Canon Quill · ${escapeHtml(section.heading)}</header><main>${renderMarkdown(section.markdown)}</main></body></html>`);
+  }));
+
+  app.get("/api/manuscript/sections/:index/download", route(async (req, res) => {
+    const slug = await requireSlug();
+    const format = req.query.format === "pdf" ? "pdf" : req.query.format === "docx" ? "docx" : null;
+    if (!format) throw new HttpError(400, "Choose DOCX or PDF.");
+    const state = await loadState(slug);
+    const section = await existingSection(slug, state, Number(req.params.index));
+    const number = String(Number(req.params.index)).padStart(2, "0");
+    const outputPath = path.join(workspacePaths(slug).chapters, `existing-section-${number}.${format}`);
+    if (format === "docx") await generateMarkdownDocx(section.markdown, outputPath);
+    else await generateMarkdownPdf(section.markdown, outputPath);
+    res.download(outputPath, `existing-section-${number}.${format}`);
+  }));
+
   /** The brief a drafting agent needs to continue without a visible seam. */
   app.get("/api/manuscript/brief", route(async (_req, res) => {
     const slug = await requireSlug();

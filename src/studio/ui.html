@@ -3461,9 +3461,9 @@ function outputCard() {
       </details>`;
   };
   const editAction = (file) => file.kind === "chapter" && file.chapter
-    ? `<button class="ghost sm" onclick="redoChapterModal(${file.chapter})">Edit with instructions</button>`
+    ? `<button class="ghost sm" onclick="redoChapterModal(${file.chapter})">Edit</button>`
     : file.kind === "book"
-      ? `<button class="ghost sm" onclick="retouchBookModal()">Edit with instructions</button>`
+      ? `<button class="ghost sm" onclick="retouchBookModal()">Edit</button>`
       : "";
   const fileGroup = (group) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
     <span>${esc(group[0].label)}</span><span class="row">${outputActions(group)}</span></div>`;
@@ -3517,32 +3517,47 @@ async function postBookToDrive(btn) {
   }
 }
 
-function existingDraftSectionsCard() {
+function existingDraftItems() {
   const m = S?.manuscript;
-  if (!m) return "";
+  if (!m) return [];
   const sections = m.sections || [];
-  const rows = sections.map((section) => {
+  const editUrl = `https://docs.google.com/document/d/${encodeURIComponent(m.driveId)}/edit`;
+  return sections.map((section) => {
     const label = section.kind === "prologue"
       ? "Prologue"
       : section.kind === "chapter"
         ? section.heading.replace(/^\s*#{0,3}\s*/i, "")
         : section.heading.replace(/^\s*#{0,3}\s*/i, "") || `Section ${section.index}`;
-    return `<div class="chap">
+    return { order: section.index, html: `<div class="chap">
       <div class="num">${section.index}</div>
-      <div><div class="t">${esc(label)}</div><div class="s">Already in the selected draft</div></div>
-      <span class="pill">${plural(section.wordCount, "word", null, section.wordCount.toLocaleString())}</span>
-    </div>`;
-  }).join("");
-  const epilogue = m.epilogueHeading
-    ? `<div class="chap"><div class="num">•</div><div><div class="t">Epilogue</div><div class="s">${esc(m.epilogueHeading)}</div></div><span class="pill">${m.epilogueWords ? plural(m.epilogueWords, "word", null, m.epilogueWords.toLocaleString()) : "in draft"}</span></div>`
-    : "";
-  if (!rows && !epilogue) return "";
-  return `<div class="card" style="padding:0;border-color:var(--rule)">
-    <div style="padding:14px 16px 8px"><b>Already in the selected draft</b>
-      <div class="hint" style="margin-top:4px">These sections stay part of the full book. Canon Quill is continuing after them, not starting a new book at the next chapter.</div>
+      <div><div class="t">${esc(label)}</div><div class="s">(already in the draft)</div></div>
+      <span class="row">
+        <span class="pill">${plural(section.wordCount, "word", null, section.wordCount.toLocaleString())}</span>
+        <a class="btn ghost sm" href="/api/manuscript/sections/${section.index}/view" target="_blank" rel="noopener">View</a>
+        <a class="btn ghost sm" href="${editUrl}" target="_blank" rel="noopener">Edit</a>
+        <details class="download-menu"><summary class="btn ghost sm">Download</summary>
+          <div class="download-options"><a href="/api/manuscript/sections/${section.index}/download?format=docx" download>DOCX</a><a href="/api/manuscript/sections/${section.index}/download?format=pdf" download>PDF</a></div>
+        </details>
+      </span>
+    </div>` };
+  });
+}
+
+function plannedChapterItem(c, mode) {
+  return { order: c.number, html: `<div class="chap">
+    <div class="num">${c.number}</div>
+    <div><div class="t">${esc(c.title)}</div>
+      <div class="s">${esc(c.synopsis || "")}</div>
+      ${c.issues?.length ? `<div class="s" style="color:var(--warn);margin-top:3px">${esc(c.issues[0])}${c.issues.length > 1 ? ` (+${c.issues.length - 1} more)` : ""}</div>` : ""}</div>
+    <div class="row">
+      ${c.styleFidelity !== undefined ? `<span class="pill ${fidelityClass(c.styleFidelity)}">style ${c.styleFidelity}</span>` : ""}
+      ${c.flowVerdict ? `<span class="pill ${c.flowVerdict === "pass" ? "good" : c.flowVerdict === "revise" ? "warn" : "bad"}">flow ${esc(c.flowVerdict)}</span>` : ""}
+      <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
+      ${mode === "chapter_by_chapter" ? `<button class="ghost sm" onclick="openChapterChat(${c.number})">Chapter chat</button>` : ""}
+      ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
+      ${c.status === "approved" ? `<button class="ghost sm" onclick="redoChapterModal(${c.number})">Redo chapter</button>` : ""}
     </div>
-    ${rows}${epilogue}
-  </div>`;
+  </div>` };
 }
 
 function dismissOutputAlert(key) {
@@ -3811,7 +3826,9 @@ function viewChapters() {
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
   const boardTitle = route === "preparation" ? "Preparation" : "Chapters";
-  const existingDraftCard = existingDraftSectionsCard();
+  const chapterItems = [...existingDraftItems(), ...cs.map((chapter) => plannedChapterItem(chapter, mode))]
+    .sort((a, b) => a.order - b.order);
+  const chapterContainer = chapterItems.length ? `<div class="card" style="padding:0">${chapterItems.map((item) => item.html).join("")}</div>` : "";
   const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   // A file can appear before the orchestrator has finished its writing and
   // editing passes. Keep it out of the author-facing output until the run ends.
@@ -3820,7 +3837,7 @@ function viewChapters() {
   if (!cs.length) return `<h1>${boardTitle}</h1>
      ${haltCard}
       ${haltCard || live ? "" : route === "preparation" ? '<p class="sub">The package is built before a chapter plan is opened. Review it below when it is ready.</p>' : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
-     ${existingDraftCard}
+      ${chapterContainer}
      ${packageReviewed ? directionsCard(pending, dirs) : ""}
     ${writingCard}
     ${finishedOutput}
@@ -3846,8 +3863,6 @@ function viewChapters() {
       : `The draft analysis finds that Chapter ${S.manuscript.chapterCount} is unfinished. Canon Quill will finish it before starting Chapter ${S.manuscript.chapterCount + 1}.`}</p></div>
   </div>` : ""}
 
-  ${existingDraftCard}
-
   ${haltCard}
 
   ${S.writingConfirmed ? "" : `<div class="card" style="border-color:var(--accent)">
@@ -3870,24 +3885,7 @@ function viewChapters() {
     </div>
   </div>
 
-  <div class="card" style="padding:0">
-    ${cs.map((c) => `<div class="chap">
-      <div class="num">${c.number}</div>
-      <div><div class="t">${esc(c.title)}</div>
-        <div class="s">${esc(c.synopsis || "")}</div>
-        ${c.issues?.length ? `<div class="s" style="color:var(--warn);margin-top:3px">${esc(c.issues[0])}${
-          c.issues.length > 1 ? ` (+${c.issues.length - 1} more)` : ""}</div>` : ""}</div>
-      <div class="row">
-        ${c.styleFidelity !== undefined
-          ? `<span class="pill ${fidelityClass(c.styleFidelity)}">style ${c.styleFidelity}</span>` : ""}
-         ${c.flowVerdict ? `<span class="pill ${c.flowVerdict === "pass" ? "good" : c.flowVerdict === "revise" ? "warn" : "bad"}">flow ${esc(c.flowVerdict)}</span>` : ""}
-         <span class="pill ${c.status === "approved" ? "good" : c.status === "needs_work" ? "bad" : ""}">${esc(c.status)}</span>
-         ${mode === "chapter_by_chapter" ? `<button class="ghost sm" onclick="openChapterChat(${c.number})">Chapter chat</button>` : ""}
-         ${c.status === "validated" ? `<button class="sm" onclick="setStatus(${c.number},'approved')">Approve</button>` : ""}
-          ${c.status === "approved" ? `<button class="ghost sm" onclick="redoChapterModal(${c.number})">Redo chapter</button>` : ""}
-       </div>
-    </div>`).join("")}
-  </div>
+  ${chapterContainer}
 
   ${chapterChat ? chapterChatCard(chapterChat) : ""}
   `;

@@ -209,7 +209,7 @@ describe("studio api", () => {
     expect(html).toContain("Preparation complete");
     expect(html).toContain('preparation: S.writingConfirmed ? "chapters"');
     expect(html).toContain("function enterPreparation()");
-    expect(html).toContain("Edit with instructions");
+    expect(html).toContain(">Edit</button>");
     expect(html).toContain("Edit final book with instructions");
     expect(html).toContain(">View</a>");
     expect(html).toContain("Download");
@@ -261,6 +261,36 @@ describe("studio api", () => {
     const view = await fetch(`${base}/api/run/output/view?kind=chapter&chapter=1`);
     expect(view.status).toBe(200);
     expect(await view.text()).toContain("Print / Save PDF");
+  });
+
+  it("serves view and downloads for chapters already in the selected draft", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.manuscript = {
+      driveId: "draft-source",
+      name: "Draft",
+      target: "continue",
+      totalWords: 12,
+      chapterCount: 1,
+      lastChapterComplete: true,
+      completenessReason: "complete",
+      analysedAt: new Date().toISOString()
+    };
+    await save(state);
+    await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
+    await writeFile(path.join(workspacePaths("test-book").driveCache, "draft-source.json"), JSON.stringify({ text: "CHAPTER I\n\nAlready written." }), "utf8");
+
+    const view = await fetch(`${base}/api/manuscript/sections/1/view`);
+    expect(view.status).toBe(200);
+    expect(await view.text()).toContain("Already written.");
+
+    const docx = await fetch(`${base}/api/manuscript/sections/1/download?format=docx`);
+    expect(docx.status).toBe(200);
+    expect(Buffer.from(await docx.arrayBuffer()).subarray(0, 2).toString()).toBe("PK");
+
+    const pdf = await fetch(`${base}/api/manuscript/sections/1/download?format=pdf`);
+    expect(pdf.status).toBe(200);
+    expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
   });
 
   it("returns state with a derived phase", async () => {
