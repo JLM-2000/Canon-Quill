@@ -3472,8 +3472,10 @@ function outputCard() {
     const heading = section?.heading?.replace(/^\s*#{0,3}\s*/i, "");
     return heading ? `<div class="s">${esc(heading)}<br>(already in the draft)</div>` : "";
   };
-  const fileGroup = (group) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
-    <div><div>${esc(group[0].label)}</div>${draftNote(group[0])}</div><span class="row">${outputActions(group)}</span></div>`;
+  const fileGroup = (group) => `<div style="padding:10px 0;border-top:1px solid var(--border)">
+    <div><div>${esc(group[0].label)}</div>${draftNote(group[0])}</div>
+    <div class="row" style="margin-top:8px">${outputActions(group)}</div>
+  </div>`;
   const finalFiles = files.filter((file) => file.kind === "book");
   const chapterGroups = grouped.filter((group) => group[0].kind === "chapter");
   const finalPreview = primary.kind === "book" && primary.preview
