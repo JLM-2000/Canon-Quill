@@ -3828,7 +3828,9 @@ function viewChapters() {
   const boardTitle = route === "preparation" ? "Preparation" : "Chapters";
   const chapterItems = [...existingDraftItems(), ...cs.map((chapter) => plannedChapterItem(chapter, mode))]
     .sort((a, b) => a.order - b.order);
-  const chapterContainer = chapterItems.length ? `<div class="card" style="padding:0">${chapterItems.map((item) => item.html).join("")}</div>` : "";
+  const chapterContainer = chapterItems.length
+    ? `<div><h2 style="margin:18px 0 8px">Chapters</h2><div class="card" style="padding:0">${chapterItems.map((item) => item.html).join("")}</div></div>`
+    : "";
   const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   // A file can appear before the orchestrator has finished its writing and
   // editing passes. Keep it out of the author-facing output until the run ends.
@@ -3843,7 +3845,6 @@ function viewChapters() {
     ${finishedOutput}
     `;
 
-  const approved = cs.filter((c) => c.status === "approved").length;
   return `
   <h1>${boardTitle}</h1>
   <p class="sub">${route === "preparation"
@@ -3853,15 +3854,6 @@ function viewChapters() {
       : mode === "whole_book"
         ? "<b>Whole-book mode.</b> All chapters are drafted and validated in one pass; you review the finished manuscript."
         : "Pick a drafting mode under Project shape."}</p>
-
-  ${S.manuscript ? `<div class="info ok">
-    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-      <path d="M20 6L9 17l-5-5"/>
-    </svg>
-    <div><b>Continuing an existing draft</b><p>${S.manuscript.lastChapterComplete
-      ? `The draft analysis finds a complete ending after Chapter ${S.manuscript.chapterCount}. The next chapter is Chapter ${S.manuscript.chapterCount + 1}.`
-      : `The draft analysis finds that Chapter ${S.manuscript.chapterCount} is unfinished. Canon Quill will finish it before starting Chapter ${S.manuscript.chapterCount + 1}.`}</p></div>
-  </div>` : ""}
 
   ${haltCard}
 
@@ -3875,15 +3867,6 @@ function viewChapters() {
   ${packageReviewed ? directionsCard(pending, dirs) : ""}
   ${writingCard}
   ${finishedOutput}
-
-  <div class="card spread">
-    <div><b>${approved} of ${plural(cs.length, "chapter")} approved</b>
-      <div class="meter" style="width:180px;margin-top:6px"><i style="width:${cs.length ? (approved / cs.length) * 100 : 0}%"></i></div></div>
-    <div class="row">
-      ${run.status === "running" ? '<span class="pill good">drafting</span>' : ""}
-      <span class="pill">${(() => { const t = cs.reduce((n, c) => n + (c.wordCount || 0), 0); return plural(t, "word", null, t.toLocaleString()); })()}</span>
-    </div>
-  </div>
 
   ${chapterContainer}
 
@@ -3953,7 +3936,7 @@ function directionsCard(pending, all) {
   return `
   <div class="card" style="margin-top:14px">
     <div class="spread">
-      <div><b>Instructions for the writing</b><span class="pill" style="margin-left:6px">optional</span>
+       <div><b>Instructions</b>
         <div class="hint" style="margin-top:3px">Saved instructions appear here and are read before the next writing run.</div></div>
       <button class="ghost sm" onclick="addDirectionModal()">Add instruction</button>
     </div>
