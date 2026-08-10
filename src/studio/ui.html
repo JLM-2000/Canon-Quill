@@ -3758,7 +3758,7 @@ function viewChapters() {
   const cs = S.chapters || [];
   const mode = S.draftingMode;
   const run = S.run || {};
-  const dirs = S.directions || [];
+  const dirs = (S.directions || []).filter((direction) => direction.scope === "book");
   const pending = dirs.filter((d) => !d.appliedAt);
 
   const HALTS = {
@@ -3876,10 +3876,12 @@ async function redoChapter(number, btn) {
   btn.disabled = true;
   try {
     const direction = await api("/api/directions", { method: "POST", body: { text: note, scope: "chapter", chapter: number } });
-    S = await api(`/api/chapters/${number}/status`, { method: "POST", body: { status: "needs_work" } });
+    S = direction.state;
+    const plannedChapter = (S.chapters || []).some((chapter) => chapter.number === number);
+    if (plannedChapter) S = await api(`/api/chapters/${number}/status`, { method: "POST", body: { status: "needs_work" } });
     closeModal();
     render();
-    toast("Chapter marked for redo with your instructions.");
+    toast(plannedChapter ? "Chapter marked for redo with your instructions." : `Redo note saved for Chapter ${number}.`);
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
