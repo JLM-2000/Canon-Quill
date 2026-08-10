@@ -95,6 +95,7 @@ const NESTED_POLL_MS = 1500;
 const NESTED_STALL_MS = 5 * 60_000;
 const PARENT_WATCHDOG_MS = 30_000;
 const PARENT_STALL_MS = 5 * 60_000;
+const DELEGATED_STALL_MS = 5 * 60_000;
 
 interface NestedMonitor {
   child: ChildProcess;
@@ -129,6 +130,7 @@ interface ActiveRun {
   lastOutputAt: number;
   lastMeaningfulAt: number;
   repeatedLookup: { text: string; since: number } | null;
+  delegated: Map<string, { agent: string; lastActivityAt: number }>;
 }
 
 let active: ActiveRun | null = null;
@@ -177,6 +179,10 @@ function emit(kind: RunEvent["kind"], text: string, meta?: EventMeta): void {
   const now = Date.now();
   const stripped = stripAnsi(text);
   if (!meta?.sessionId && active?.nested) active.nested.lastParentEventAt = Date.now();
+  if (active && meta?.sessionId) {
+    if (meta.done) active.delegated.delete(meta.sessionId);
+    else active.delegated.set(meta.sessionId, { agent: meta.agent ?? "Subagent", lastActivityAt: now });
+  }
   const key = meta?.sessionId ?? "orchestrator";
   ensureAgent(key, meta?.agent ?? (key === "orchestrator" ? "Orchestrator" : "Subagent"), meta?.depth ?? 0);
   setAgentStatus(key, meta?.done || isDoneSignal(stripped) ? "done" : "working");
@@ -525,7 +531,8 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
     onEvent: options.onEvent,
     lastOutputAt: now,
     lastMeaningfulAt: now,
-    repeatedLookup: null
+    repeatedLookup: null,
+    delegated: new Map()
   };
   active.onProgress?.(progress);
 
@@ -551,6 +558,14 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
   active.heartbeat.unref();
   active.watchdog = setInterval(() => {
     if (!active || active.child !== child || active.stopping) return;
+    const staleDelegation = [...active.delegated.values()].find((task) => Date.now() - task.lastActivityAt > DELEGATED_STALL_MS);
+    if (staleDelegation) {
+      active.stopping = true;
+      active.stopReason = "stalled";
+      emit("error", `${staleDelegation.agent} stopped making progress. The run was stopped automatically.`);
+      child.kill("SIGTERM");
+      return;
+    }
     const quietFor = Date.now() - active.lastOutputAt;
     const repeatedFor = active.repeatedLookup ? Date.now() - active.repeatedLookup.since : 0;
     const meaningfulQuietFor = Date.now() - active.lastMeaningfulAt;

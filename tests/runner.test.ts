@@ -117,7 +117,7 @@ describe("reading the runtime stream", () => {
       message: {
         content: [
           { type: "text", text: "Building the chapter plan." },
-          { type: "tool_use", name: "Task", input: { subagent_type: "book-04-preparation", description: "Draft the plan" } },
+          { type: "tool_use", id: "task-1", name: "Task", input: { subagent_type: "book-04-preparation", description: "Draft the plan" } },
           { type: "tool_use", name: "Write", input: { file_path: "/books/the-tide-house/artifacts/plan.md" } }
         ]
       }
@@ -129,6 +129,7 @@ describe("reading the runtime stream", () => {
       "Writing plan.md."
     ]);
     expect(described[1].kind).toBe("step");
+    expect(described[1].sessionId).toBe("task-1");
   });
 
   it("keeps delegation tool names out of the author-facing activity", () => {
