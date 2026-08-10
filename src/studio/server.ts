@@ -1,7 +1,7 @@
 import express from "express";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -437,6 +437,38 @@ export function createStudioApp() {
     path: string;
   }
 
+  async function finalChapterMarkdownPath(slug: string, state: StudioState, number: number): Promise<string | null> {
+    const chapterDirectory = workspacePaths(slug).chapters;
+    const padded = String(number).padStart(2, "0");
+    const markdownPath = [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`]
+      .map((name) => path.join(chapterDirectory, name))
+      .find((candidate) => existsSync(candidate));
+    if (!markdownPath) return null;
+
+    const validationPath = [`chapter-${padded}-validation.md`, `chapter-${number}-validation.md`, `chapter-${padded}-validation.json`, `chapter-${number}-validation.json`]
+      .map((name) => path.join(chapterDirectory, name))
+      .find((candidate) => existsSync(candidate));
+    if (!validationPath) return null;
+
+    const validation = await readFile(validationPath, "utf8");
+    let passed = /(?:^|\n)\s*Transition:\s*pass_(?:chapter_by_chapter|whole_book)\b/i.test(validation);
+    if (!passed && validationPath.endsWith(".json")) {
+      try {
+        const report = JSON.parse(validation) as { transition?: unknown; result?: { transition?: unknown } };
+        const transition = report.transition ?? report.result?.transition;
+        passed = transition === "pass_chapter_by_chapter" || transition === "pass_whole_book";
+      } catch { /* an unreadable report cannot open the output gate */ }
+    }
+    if (!passed) return null;
+
+    // A halted or active run must not expose an edited file it changed after starting.
+    if (state.run.chapter === number && state.run.status !== "complete" && state.run.startedAt) {
+      const startedAt = Date.parse(state.run.startedAt);
+      if (Number.isFinite(startedAt) && (await stat(markdownPath)).mtimeMs >= startedAt) return null;
+    }
+    return markdownPath;
+  }
+
   async function resolveOutput(slug: string, state: StudioState, kind: OutputKind, format: "md" | "docx" | "pdf", requestedChapter?: number): Promise<OutputFile | null> {
     const paths = workspacePaths(slug);
     if (kind === "book") {
@@ -468,12 +500,10 @@ export function createStudioApp() {
     }
 
     for (const number of [...numbers].sort((a, b) => b - a)) {
-      const padded = String(number).padStart(2, "0");
-      const candidates = [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`, `chapter-${padded}-draft.md`, `chapter-${number}-draft.md`];
-      const markdownName = candidates.find((candidate) => existsSync(path.join(paths.chapters, candidate)));
-      if (!markdownName) continue;
+      const markdownPath = await finalChapterMarkdownPath(slug, state, number);
+      if (!markdownPath) continue;
+      const markdownName = path.basename(markdownPath);
       if (format === "md") return { kind, format, chapter: number, label: `Chapter ${number}`, fileName: markdownName, path: path.join(paths.chapters, markdownName) };
-      const markdownPath = path.join(paths.chapters, markdownName);
        const outputName = markdownName.replace(/\.md$/i, format === "docx" ? ".docx" : ".pdf");
        const outputPath = path.join(paths.chapters, outputName);
        if (format === "docx") await generateMarkdownDocx(await readFile(markdownPath, "utf8"), outputPath);

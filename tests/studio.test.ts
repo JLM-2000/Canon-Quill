@@ -256,15 +256,19 @@ describe("studio api", () => {
     await writeFile(path.join(workspacePaths("test-book").final, "manuscript.md"), "# Final\n\nBook.", "utf8");
     await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-01-edited.md"), "# Chapter 1\n\nFirst.", "utf8");
     await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-02-edited.md"), "# Chapter 2\n\nSecond.", "utf8");
+    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-01-validation.md"), "Transition: pass_chapter_by_chapter\n", "utf8");
 
     const output = await call("/api/run/output");
-    expect(output.body.files.filter((file: any) => file.kind === "chapter")).toHaveLength(4);
+    expect(output.body.files.filter((file: any) => file.kind === "chapter")).toHaveLength(2);
     expect(output.body.files.some((file: any) => file.format === "docx" && file.chapter === 1)).toBe(true);
+    expect(output.body.files.some((file: any) => file.chapter === 2)).toBe(false);
     const view = await fetch(`${base}/api/run/output/view?kind=chapter&chapter=1`);
     expect(view.status).toBe(200);
     const viewText = await view.text();
     expect(viewText).toContain('class="download-button"');
     expect(viewText).toContain(">Download</a>");
+    const hidden = await fetch(`${base}/api/run/output/view?kind=chapter&chapter=2`);
+    expect(hidden.status).toBe(404);
   });
 
   it("serves view and downloads for chapters already in the selected draft", async () => {
