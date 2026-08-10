@@ -3825,7 +3825,6 @@ function viewChapters() {
   const packageReviewed = Boolean(PREPARATION?.ready && S.preparationReviewed);
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
-  const boardTitle = route === "preparation" ? "Preparation" : "Chapters";
   const chapterItems = [...existingDraftItems(), ...cs.map((chapter) => plannedChapterItem(chapter, mode))]
     .sort((a, b) => a.order - b.order);
   const chapterContainer = chapterItems.length
@@ -3836,24 +3835,22 @@ function viewChapters() {
   // editing passes. Keep it out of the author-facing output until the run ends.
   const finishedOutput = run.status === "running" ? "" : outputCard();
 
-  if (!cs.length) return `<h1>${boardTitle}</h1>
-     ${haltCard}
-      ${haltCard || live ? "" : route === "preparation" ? '<p class="sub">The package is built before a chapter plan is opened. Review it below when it is ready.</p>' : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
+  if (!cs.length) {
+    if (route === "preparation") return `<h1>Preparation</h1>
+      ${haltCard}
+      ${haltCard || live ? "" : '<p class="sub">The package is built before a chapter plan is opened. Review it below when it is ready.</p>'}
+      ${packageReviewed ? directionsCard(pending, dirs) : ""}
+      ${writingCard}
+      ${finishedOutput}`;
+    return `${packageReviewed ? directionsCard(pending, dirs) : ""}
       ${chapterContainer}
-     ${packageReviewed ? directionsCard(pending, dirs) : ""}
-    ${writingCard}
-    ${finishedOutput}
-    `;
+      ${haltCard}
+      ${writingCard}
+      ${finishedOutput}`;
+  }
 
   return `
-  <h1>${boardTitle}</h1>
-  <p class="sub">${route === "preparation"
-      ? "Review the preparation package before opening the writing instructions."
-      : mode === "chapter_by_chapter"
-      ? "<b>Chapter-by-chapter mode.</b> Each chapter stops here for your approval before the next one starts."
-      : mode === "whole_book"
-        ? "<b>Whole-book mode.</b> All chapters are drafted and validated in one pass; you review the finished manuscript."
-        : "Pick a drafting mode under Project shape."}</p>
+  ${packageReviewed ? directionsCard(pending, dirs) : ""}
 
   ${haltCard}
 
@@ -3864,7 +3861,6 @@ function viewChapters() {
     <button onclick="continueToChapters(this)">Confirm the plan</button>
   </div>`}
 
-  ${packageReviewed ? directionsCard(pending, dirs) : ""}
   ${writingCard}
   ${finishedOutput}
 
