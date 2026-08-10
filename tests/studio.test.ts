@@ -213,6 +213,8 @@ describe("studio api", () => {
     expect(html).toContain("Edit final book with instructions");
     expect(html).toContain('name === "view"');
     expect(html).toContain("Download");
+    expect(html).toContain("closeOutputDownloads");
+    expect(html).not.toContain("const existingRows");
     expect(html).toContain(">DOCX</a>");
     expect(html).toContain(">PDF</a>");
     expect(html).toContain("addDirectionModal");
@@ -260,7 +262,9 @@ describe("studio api", () => {
     expect(output.body.files.some((file: any) => file.format === "docx" && file.chapter === 1)).toBe(true);
     const view = await fetch(`${base}/api/run/output/view?kind=chapter&chapter=1`);
     expect(view.status).toBe(200);
-    expect(await view.text()).toContain(">Download</a>");
+    const viewText = await view.text();
+    expect(viewText).toContain('class="download-button"');
+    expect(viewText).toContain(">Download</a>");
   });
 
   it("serves view and downloads for chapters already in the selected draft", async () => {
@@ -288,6 +292,7 @@ describe("studio api", () => {
     expect(viewText).not.toContain("Why We Braved");
     expect(viewText).toContain("<strong>Already written.</strong>");
     expect(viewText).toContain("<em>The thought stayed.</em>");
+    expect(viewText).toContain('class="download-button"');
     expect(viewText).toContain(">Download</a>");
 
     const docx = await fetch(`${base}/api/manuscript/sections/1/download?format=docx`);

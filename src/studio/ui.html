@@ -594,6 +594,17 @@ function closeModal() {
   document.removeEventListener("keydown", escClose);
 }
 
+function closeOutputDownloads() {
+  document.querySelectorAll("details.output-download[open]").forEach((menu) => { menu.open = false; });
+}
+
+document.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element) || !event.target.closest("details.output-download")) closeOutputDownloads();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeOutputDownloads();
+});
+
 function newBookModal() {
   showModal({
     title: "New book",
@@ -3458,7 +3469,7 @@ function resetDismissedOutputAlerts() {
 function outputCard() {
   const primary = runOutput?.primary;
   const files = runOutput?.files || [];
-  if (!primary && !files.length && !(S?.manuscript?.sections || []).some((section) => section.kind === "chapter" || section.kind === "prologue")) return "";
+  if (!primary && !files.length) return "";
   const grouped = [...new Map(files.map((file) => [`${file.kind}-${file.chapter ?? "book"}`, []])).keys()]
     .map((key) => files.filter((file) => `${file.kind}-${file.chapter ?? "book"}` === key));
   const downloadUrlFor = (file, format) => {
@@ -3483,17 +3494,6 @@ function outputCard() {
         : "";
     return `${iconLink("view", viewUrl, `View ${file.label}`)}${edit}${downloadMenu(downloadUrlFor(file, "docx"), downloadUrlFor(file, "pdf"), file.label)}`;
   };
-  const existingRows = (S?.manuscript?.sections || [])
-    .filter((section) => section.kind === "chapter" || section.kind === "prologue")
-    .map((section) => {
-      const label = section.kind === "prologue" ? "Prologue" : `Chapter ${section.index}`;
-      const note = "(already in the draft)";
-      const editUrl = `https://docs.google.com/document/d/${encodeURIComponent(S.manuscript.driveId)}/edit`;
-      return `<div class="chapter-output-row">
-        <div><div class="chapter-output-title">${label}</div><div class="chapter-output-note">${note}</div></div>
-        <div class="output-actions">${iconLink("view", `/api/manuscript/sections/${section.index}/view`, `View ${label}`)}${iconLink("edit", editUrl, `Edit ${label}`)}${downloadMenu(`/api/manuscript/sections/${section.index}/download?format=docx`, `/api/manuscript/sections/${section.index}/download?format=pdf`, label)}</div>
-      </div>`;
-    }).join("");
   const fileGroup = (group) => `<div class="chapter-output-row">
     <div class="chapter-output-title">${esc(group[0].label)}</div><div class="output-actions">${outputActions(group)}</div>
   </div>`;
@@ -3510,9 +3510,9 @@ function outputCard() {
      </div>`;
   const canPostToDrive = Boolean(S?.drive?.connected && (S.drive.targetFolderId || S.manuscript));
   return `${readyAlert}
-     ${(finalFiles.length || chapterGroups.length || existingRows) ? `<div class="card" style="margin-top:12px">
-        ${finalFiles.length ? `<div><div class="spread"><h3 style="margin:0 0 4px">Final book</h3>${canPostToDrive ? '<button class="ghost sm" onclick="postBookModal()">Send to Drive</button>' : ""}</div>${fileGroup(finalFiles)}${finalPreview}</div>` : ""}
-       ${(existingRows || chapterGroups.length) ? `<div style="${finalFiles.length ? "margin-top:18px;" : ""}"><h3 style="margin:0 0 4px">Chapters</h3>${existingRows}${chapterGroups.map(fileGroup).join("")}</div>` : ""}
+      ${(finalFiles.length || chapterGroups.length) ? `<div class="card" style="margin-top:12px">
+         ${finalFiles.length ? `<div><div class="spread"><h3 style="margin:0 0 4px">Final book</h3>${canPostToDrive ? '<button class="ghost sm" onclick="postBookModal()">Send to Drive</button>' : ""}</div>${fileGroup(finalFiles)}${finalPreview}</div>` : ""}
+        ${chapterGroups.length ? `<div style="${finalFiles.length ? "margin-top:18px;" : ""}"><h3 style="margin:0 0 4px">Chapters</h3>${chapterGroups.map(fileGroup).join("")}</div>` : ""}
     </div>` : ""}`;
 }
 
