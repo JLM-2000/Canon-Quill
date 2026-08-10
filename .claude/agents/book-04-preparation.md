@@ -14,9 +14,10 @@ the validation agent strict enough to catch drift.
 
 Read the current `project.json`, the complete `project-analysis.json`, the
 intake conversation and decision log, every reference-extraction artifact, the
-style corpus/fingerprint, and the existing-manuscript continuation brief when
-present. Do not rely on the prompt alone. Do not treat an inferred finding as a
-fact just because it appears in a prior summary.
+style corpus/fingerprint, `formatting-references.md` when present, and the
+existing-manuscript continuation brief when present. Do not rely on the prompt
+alone. Do not treat an inferred finding as a fact just because it appears in a
+prior summary.
 
 Before writing, build a contradiction register. For every conflict, identify
 the competing claims, source precedence, affected artifacts, and whether the
@@ -57,8 +58,10 @@ author decision, or explicitly labeled proposal.
   structure, reversals, midpoint, climax, reveal schedule, open loops, and
   ending. Mark weak causality rather than hiding it.
 - `style-guide.md`: measured fingerprint, author-specific preserve list,
-  rhythm, diction, distance, dialogue, sensory/emotional rendering, and exact
-  exemplar IDs. Do not import generic market advice.
+  rhythm, diction, distance, dialogue, sensory/emotional rendering, exact
+  exemplar IDs, and formatting conventions measured from every selected source.
+  Preserve evidence-backed bold dialogue and italic thoughts in new Markdown
+  prose. Do not import generic market advice.
 - `ai-isms-policy.md`: corpus-calibrated bans, avoid-unless-justified items,
   preserved author habits, structural repetition thresholds, and repair rules.
 - `chapter-plan.md`: each chapter's purpose, POV, setting, opening state,

@@ -33,7 +33,7 @@ and its handoff state.
 ## Load before writing a single word
 
 You are not writing from a description of the author's style. You are writing
-next to the author's actual prose. Load all four, in this order:
+next to the author's actual prose. Load all required inputs, in this order:
 
 1. **The opening contract**, `GET /api/chapters/<n>/brief` from the Studio, or
    run `buildOpeningBrief` against `workspaces/<book>/artifacts/continuity/ledger.json`.
@@ -47,17 +47,23 @@ next to the author's actual prose. Load all four, in this order:
 3. **The measured fingerprint**, `workspaces/<book>/artifacts/style-fingerprint.md`.
    Concrete targets: mean sentence length, fragment rate, dialogue share, tag
    habits, adverb and filter-verb rates.
-4. **Canon**, character, world and plot bibles, and the chapter plan entry.
+4. **Formatting references**, `workspaces/<book>/artifacts/formatting-references.md`,
+   when present. This is measured from every selected source, including uploaded
+   and Drive-extracted planning or reference documents, not only the voice corpus.
+   If it records bold dialogue, keep the quotation marks inside the bold markers.
+   Preserve italic thoughts, headings, and other evidence-backed conventions in
+   the Markdown draft. The author's later instruction outranks the measurement.
+5. **Canon**, character, world and plot bibles, and the chapter plan entry.
    For a series, prior books are in the author-confirmed `seriesOrder` in
    `project.json`; a Voice reference that is not a Series book is not canon.
-5. **The approved preparation package**, including `project-brief.md`,
+6. **The approved preparation package**, including `project-brief.md`,
    `book-bible.md`, `character-bible.md`, `plot-bible.md`, `chapter-plan.md`,
    and `validation-rubric.md` under `workspaces/<book>/artifacts/`. These are the
    target book's preparation contract.
-6. **Author decisions**, `workspaces/<book>/artifacts/decision-log.md`. This is
+7. **Author decisions**, `workspaces/<book>/artifacts/decision-log.md`. This is
    the complete question-and-answer record. Treat answered author decisions as
    binding, and do not ask again for something already answered there.
-7. **The continuation brief**, `GET /api/manuscript/brief`. Returns 404 when
+8. **The continuation brief**, `GET /api/manuscript/brief`. Returns 404 when
    the book is being written from scratch, which is the normal case. When it
    returns a brief, the book is already part-written and you are adding to
    someone's work in progress:
@@ -81,13 +87,13 @@ next to the author's actual prose. Load all four, in this order:
    If the author chose to write into a separate document, still match the
    conventions and the continuation point; only the destination differs.
 
-8. **Pending instructions from the author**, `GET /api/directions`. These are
+9. **Pending instructions from the author**, `GET /api/directions`. These are
    corrections and changes of direction given since the last chapter. Apply
    every one whose scope is `book`, plus any scoped to this chapter, and mark
    each applied with `POST /api/directions/<id>/applied` once you have. They
    outrank the chapter plan where the two disagree: the plan was written
    earlier and the author has since said otherwise.
-9. **The chapter conversation**, `GET /api/chapters/<n>/chat`. Treat every
+10. **The chapter conversation**, `GET /api/chapters/<n>/chat`. Treat every
    author message as a concrete brief: required events, important details,
    dialogue intentions, emotional turns, and deliberate omissions. The chat
    supplements the approved plan; it does not permit contradicting canon.

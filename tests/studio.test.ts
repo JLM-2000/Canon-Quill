@@ -211,7 +211,10 @@ describe("studio api", () => {
     expect(html).toContain("function enterPreparation()");
     expect(html).toContain("Edit with instructions");
     expect(html).toContain("Edit final book with instructions");
-    expect(html).toContain("View as PDF");
+    expect(html).toContain(">View</a>");
+    expect(html).toContain("Download");
+    expect(html).toContain(">DOCX</a>");
+    expect(html).toContain(">PDF</a>");
     expect(html).toContain("addDirectionModal");
     expect(html).toContain("editDirectionModal");
     expect(html).toContain('size: "writing-modal"');
@@ -234,6 +237,11 @@ describe("studio api", () => {
     const download = await fetch(`${base}/api/run/output/download?kind=book&format=md`);
     expect(download.status).toBe(200);
     expect(await download.text()).toContain("The finished book.");
+
+    const pdf = await fetch(`${base}/api/run/output/download?kind=book&format=pdf`);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get("content-type")).toContain("application/pdf");
+    expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
   });
 
   it("lists chapter downloads and provides a print-friendly document view", async () => {

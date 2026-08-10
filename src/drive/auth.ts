@@ -30,6 +30,15 @@ export function canBrowse(token: { scope?: string } | undefined): boolean {
       scope === "https://www.googleapis.com/auth/drive.metadata.readonly"
   );
 }
+
+/** Existing Google Docs require a broader grant than `drive.file`. */
+export function canWriteExisting(token: { scope?: string } | undefined): boolean {
+  return token?.scope?.split(/\s+/).some(
+    (scope) =>
+      scope === "https://www.googleapis.com/auth/drive" ||
+      scope === "https://www.googleapis.com/auth/documents"
+  ) ?? false;
+}
 const tokenRefreshSkewMs = 60_000;
 
 interface OAuthClientConfig {
@@ -75,6 +84,8 @@ export interface DriveAuthStatus {
   needsReauthorization?: boolean;
   /** The grant is wide enough to list folders. */
   canBrowse?: boolean;
+  /** The grant can replace content in an existing Google Doc. */
+  canWriteExisting?: boolean;
   detail: string;
 }
 
@@ -113,6 +124,7 @@ export async function driveAuthStatus(): Promise<DriveAuthStatus> {
       authorized: false,
       needsReauthorization: true,
       canBrowse: canBrowse(token),
+      canWriteExisting: canWriteExisting(token),
       detail: "Authorised, but with narrower access than configured. Reconnect to grant the required Drive access."
     };
   }
@@ -122,6 +134,7 @@ export async function driveAuthStatus(): Promise<DriveAuthStatus> {
       configured: true,
       authorized: true,
       canBrowse: canBrowse(token),
+      canWriteExisting: canWriteExisting(token),
       detail: "Connected. The stored access token is still valid."
     };
   }
@@ -133,6 +146,7 @@ export async function driveAuthStatus(): Promise<DriveAuthStatus> {
         configured: true,
         authorized: true,
         canBrowse: canBrowse(refreshed),
+        canWriteExisting: canWriteExisting(refreshed),
         detail: "Connected. The access token was refreshed."
       };
     } catch (error) {

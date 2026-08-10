@@ -51,6 +51,7 @@ import {
   type OpenQuestion,
   type SelectedSource,
   type ChapterChatMessage,
+  type ExistingManuscriptSection,
   type StudioState
 } from "./state.js";
 import {
@@ -70,7 +71,9 @@ import { applyUpdate, getVersionInfo } from "./updates.js";
 import { deleteApiKey, maskKey, readApiKey, saveApiKey, verifyApiKey } from "./credentials.js";
 import { loadDotEnv } from "../config/env.js";
 import { generateMarkdownDocx } from "../project/docx.js";
+import { generateMarkdownPdf } from "../project/pdf.js";
 import { escapeHtml, renderMarkdown } from "../preview/markdown.js";
+import { measureFormatting, renderFormattingReference } from "../style/formatting.js";
 
 // Read .env before anything looks at process.env.
 loadDotEnv();
@@ -212,6 +215,12 @@ export function createStudioApp() {
         backMatterWords: analysis.backMatter?.wordCount,
         epilogueHeading: analysis.epilogue?.heading,
         epilogueWords: analysis.epilogue?.wordCount,
+        sections: analysis.chapters.map((section) => ({
+          index: section.index,
+          heading: section.heading,
+          wordCount: section.wordCount,
+          kind: /^	1?prologue\b/i.test(section.heading) ? "prologue" : /^\s*#{0,3}\s*chapter\b/i.test(section.heading) ? "chapter" : "section"
+        })).map((section) => ({ ...section, kind: classifyManuscriptSection(section.heading) })),
         notes,
         analysedAt: new Date().toISOString()
       };
@@ -222,6 +231,24 @@ export function createStudioApp() {
     });
 
     return { analysis, state: withDerived(state) };
+  }
+
+  /** Fill the author-facing structure from an older cached analysis without rewriting state. */
+  async function hydrateExistingManuscript(slug: string, state: StudioState): Promise<StudioState> {
+    if (!state.manuscript || state.manuscript.sections?.length) return state;
+    try {
+      const raw = await readFile(path.join(workspacePaths(slug).artifacts, "existing-manuscript.json"), "utf8");
+      const cached = JSON.parse(raw) as { analysis?: { chapters?: Array<{ index: number; heading: string; wordCount: number }> } };
+      const sections: ExistingManuscriptSection[] = (cached.analysis?.chapters ?? []).map((section) => ({
+        index: section.index,
+        heading: section.heading,
+        wordCount: section.wordCount,
+        kind: classifyManuscriptSection(section.heading)
+      }));
+      return { ...state, manuscript: { ...state.manuscript, sections } };
+    } catch {
+      return state;
+    }
   }
 
   async function analyseProject(slug: string) {
@@ -283,6 +310,26 @@ export function createStudioApp() {
     return { analysis, state: withDerived(next) };
   }
 
+  async function writeFormattingReference(slug: string, state: StudioState): Promise<void> {
+    const documents: Array<{ source: string; text: string }> = [];
+    for (const source of state.sources) {
+      // Older Drive caches were plain text exports, so refresh only this
+      // formatting measurement from the selected files when Drive is in use.
+      const text = state.resourceMethod === "drive"
+        ? await drive.readFileText(source.driveId).catch(() => readCached(slug, source.driveId))
+        : await readCached(slug, source.driveId);
+      if (text) documents.push({ source: source.name, text });
+    }
+    if (!documents.length) return;
+    const paths = workspacePaths(slug);
+    await mkdir(paths.artifacts, { recursive: true });
+    await writeFile(
+      path.join(paths.artifacts, "formatting-references.md"),
+      renderFormattingReference(measureFormatting(documents)),
+      "utf8"
+    );
+  }
+
   async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string; role?: "analysis" | "drafting"; resumeSessionId?: string | null; authMethod?: "subscription" | "api_key" | null }) {
     if (isRunning()) throw new HttpError(409, "A run is already in progress.");
     if (pendingOutcome) {
@@ -290,6 +337,7 @@ export function createStudioApp() {
       pendingOutcome = null;
     }
     explicitlyHalted.delete(slug);
+    await writeFormattingReference(slug, state);
     await resolveFixedRuntimeErrors(slug);
     const role = options.role ?? "drafting";
     const provider = role === "analysis"
@@ -382,21 +430,25 @@ export function createStudioApp() {
   type OutputKind = "book" | "chapter";
   interface OutputFile {
     kind: OutputKind;
-    format: "md" | "docx";
+    format: "md" | "docx" | "pdf";
     chapter: number | null;
     label: string;
     fileName: string;
     path: string;
   }
 
-  async function resolveOutput(slug: string, state: StudioState, kind: OutputKind, format: "md" | "docx", requestedChapter?: number): Promise<OutputFile | null> {
+  async function resolveOutput(slug: string, state: StudioState, kind: OutputKind, format: "md" | "docx" | "pdf", requestedChapter?: number): Promise<OutputFile | null> {
     const paths = workspacePaths(slug);
     if (kind === "book") {
-      const fileName = format === "docx" ? "manuscript.docx" : "manuscript.md";
+      const fileName = format === "docx" ? "manuscript.docx" : format === "pdf" ? "manuscript.pdf" : "manuscript.md";
       const filePath = path.join(paths.final, fileName);
-      if (format === "docx" && !existsSync(filePath)) {
+      if (format === "docx") {
         const markdownPath = path.join(paths.final, "manuscript.md");
         if (existsSync(markdownPath)) await generateMarkdownDocx(await readFile(markdownPath, "utf8"), filePath);
+      }
+      if (format === "pdf") {
+        const markdownPath = path.join(paths.final, "manuscript.md");
+        if (existsSync(markdownPath)) await generateMarkdownPdf(await readFile(markdownPath, "utf8"), filePath);
       }
       return existsSync(filePath) ? { kind, format, chapter: null, label: "Final manuscript", fileName, path: filePath } : null;
     }
@@ -422,10 +474,11 @@ export function createStudioApp() {
       if (!markdownName) continue;
       if (format === "md") return { kind, format, chapter: number, label: `Chapter ${number}`, fileName: markdownName, path: path.join(paths.chapters, markdownName) };
       const markdownPath = path.join(paths.chapters, markdownName);
-      const docxName = markdownName.replace(/\.md$/i, ".docx");
-      const docxPath = path.join(paths.chapters, docxName);
-      if (!existsSync(docxPath)) await generateMarkdownDocx(await readFile(markdownPath, "utf8"), docxPath);
-      return { kind, format, chapter: number, label: `Chapter ${number}`, fileName: docxName, path: docxPath };
+       const outputName = markdownName.replace(/\.md$/i, format === "docx" ? ".docx" : ".pdf");
+       const outputPath = path.join(paths.chapters, outputName);
+       if (format === "docx") await generateMarkdownDocx(await readFile(markdownPath, "utf8"), outputPath);
+       else await generateMarkdownPdf(await readFile(markdownPath, "utf8"), outputPath);
+       return { kind, format, chapter: number, label: `Chapter ${number}`, fileName: outputName, path: outputPath };
     }
     return null;
   }
@@ -709,8 +762,9 @@ export function createStudioApp() {
       res.json({ state: null, projects: await listProjects(), kinds: sourceKindLabels, kindCounts: sourceKindCounts, kindPurpose: sourceKindPurpose, narrationOptions, povOptions, tenseOptions });
       return;
     }
+    const reconciled = await reconcileRun(slug);
     res.json({
-      state: withDerived(await reconcileRun(slug)),
+      state: withDerived(await hydrateExistingManuscript(slug, reconciled)),
       projects: await listProjects(),
       // Sent with the state so the client never keeps its own copy to drift.
       kinds: sourceKindLabels,
@@ -743,7 +797,7 @@ export function createStudioApp() {
     if (typeof projectName === "string" && projectName.trim()) {
       await touchProject(slug, { title: projectName.trim() });
     }
-    res.json(withDerived(state));
+    res.json(withDerived(await hydrateExistingManuscript(slug, state)));
   }));
 
   app.patch("/api/project/series-order", route(async (req, res) => {
@@ -1011,6 +1065,7 @@ export function createStudioApp() {
       connected: status.authorized,
       configured: status.configured,
       canBrowse: status.canBrowse ?? false,
+      canWriteExisting: status.canWriteExisting ?? false,
       needsReauthorization: status.needsReauthorization ?? false,
       reason: status.detail,
       next: status.configured ? (status.authorized ? "ready" : "connect") : "configure"
@@ -1127,6 +1182,7 @@ export function createStudioApp() {
       current.styleCorpus.continuedAt = null;
       resetAnalysis(current);
     });
+    await writeFormattingReference(slug, state);
     res.json(withDerived(state));
   }));
 
@@ -1195,6 +1251,7 @@ export function createStudioApp() {
       current.styleCorpus.continuedAt = null;
       resetAnalysis(current);
     });
+    await writeFormattingReference(slug, next);
 
     await appendLog(slug, "audit", {
       timestamp: new Date().toISOString(),
@@ -1275,6 +1332,7 @@ export function createStudioApp() {
   app.post("/api/style/build", route(async (req, res) => {
     const slug = await requireSlug();
     const state = await loadState(slug);
+    await writeFormattingReference(slug, state);
 
     if (req.body?.excluded !== undefined && !Array.isArray(req.body.excluded)) {
       throw new HttpError(400, "excluded must be an array of document ids.");
@@ -2305,7 +2363,7 @@ export function createStudioApp() {
   app.get("/api/run/output/download", route(async (req, res) => {
     const slug = await requireSlug();
     const kind = req.query.kind === "book" ? "book" : req.query.kind === "chapter" ? "chapter" : null;
-    const format = req.query.format === "docx" ? "docx" : req.query.format === "md" ? "md" : null;
+    const format = req.query.format === "docx" ? "docx" : req.query.format === "pdf" ? "pdf" : req.query.format === "md" ? "md" : null;
     if (!kind || !format) throw new HttpError(400, "Choose a valid output.");
     const chapter = typeof req.query.chapter === "string" ? Number(req.query.chapter) : undefined;
     const file = await resolveOutput(slug, await loadState(slug), kind, format, chapter);
@@ -2313,8 +2371,55 @@ export function createStudioApp() {
     res.download(file.path, file.fileName);
   }));
 
-  function outputDownloadUrl(file: OutputFile): string {
-    const params = new URLSearchParams({ kind: file.kind, format: file.format });
+  app.post("/api/run/output/post", route(async (req, res) => {
+    const slug = await requireSlug();
+    const destination = req.body?.destination === "update_draft" ? "update_draft" : req.body?.destination === "target_folder" ? "target_folder" : null;
+    if (!destination) throw new HttpError(400, "Choose a Drive destination.");
+    const state = await loadState(slug);
+    if (isRunning() || state.run.status === "running") throw new HttpError(409, "Wait for the writing run to finish before posting the book.");
+
+    const markdown = await resolveOutput(slug, state, "book", "md");
+    const docx = await resolveOutput(slug, state, "book", "docx");
+    if (!markdown || !docx) throw new HttpError(404, "The complete book DOCX is not available yet.");
+
+    let file;
+    if (destination === "target_folder") {
+      if (!state.drive.targetFolderId) throw new HttpError(409, "Choose a Drive target folder first.");
+      const status = await driveAuthStatus();
+      if (!status.authorized) throw new HttpError(409, "Connect Google Drive before posting the book.");
+      file = await drive.uploadBinaryFile({
+        folderId: state.drive.targetFolderId,
+        name: docx.fileName,
+        base64Content: (await readFile(docx.path)).toString("base64"),
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        overwrite: req.body?.overwrite === true
+      });
+    } else {
+      if (!state.manuscript) throw new HttpError(409, "There is no selected draft to update.");
+      const status = await driveAuthStatus();
+      if (!status.authorized || !status.canWriteExisting) {
+        throw new HttpError(409, "Updating the selected Google Doc requires document write access. Reconnect with the Google Docs scope, or add the full DOCX to the target folder instead.");
+      }
+      const source = await drive.getMetadata(state.manuscript.driveId);
+      if (source.mimeType !== "application/vnd.google-apps.document") {
+        throw new HttpError(409, "The selected draft is not a Google Doc. Add the full DOCX to the target folder instead.");
+      }
+      file = await drive.replaceGoogleDocument(state.manuscript.driveId, await readFile(markdown.path, "utf8"));
+    }
+
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "output_post",
+      stageName: "Book output",
+      agent: "author",
+      event: destination === "target_folder" ? "full_docx_posted" : "selected_draft_updated",
+      data: { destination, driveId: file.id, name: file.name }
+    });
+    res.json({ destination, file, fullBook: true });
+  }));
+
+  function outputDownloadUrl(file: OutputFile, format = file.format): string {
+    const params = new URLSearchParams({ kind: file.kind, format });
     if (file.chapter) params.set("chapter", String(file.chapter));
     return `/api/run/output/download?${params.toString()}`;
   }
@@ -2558,6 +2663,12 @@ export function sourcesCheck(sources: SelectedSource[]): SourcesCheck {
 
 function withDerived(state: StudioState) {
   return { ...state, phase: derivePhase(state), blocking: blockingQuestions(state).length };
+}
+
+function classifyManuscriptSection(heading: string): ExistingManuscriptSection["kind"] {
+  if (/^\s*#{0,3}\s*prologue\b/i.test(heading)) return "prologue";
+  if (/^\s*#{0,3}\s*chapter\b/i.test(heading)) return "chapter";
+  return "section";
 }
 
 interface FlatNode {

@@ -175,6 +175,14 @@
     font-size: 13px; line-height: 1.65; }
   .output-preview.truncated { max-height: 260px; }
   a.btn { display: inline-block; text-decoration: none; }
+  .download-menu { position: relative; }
+  .download-menu summary { list-style: none; cursor: pointer; }
+  .download-menu summary::-webkit-details-marker { display: none; }
+  .download-options { position: absolute; right: 0; z-index: 4; min-width: 118px; margin-top: 4px;
+    padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+    box-shadow: 0 10px 24px rgba(0,0,0,.15); }
+  .download-options a { display: block; padding: 7px 9px; white-space: nowrap; color: var(--text); text-decoration: none; font-size: 12px; }
+  .download-options a:hover { background: var(--surface-2); }
   .analysis-finding { min-height: 76px; resize: vertical; }
 
   #view.readonly .choice, #view.readonly .chip, #view.readonly .doc-x,
@@ -1313,9 +1321,13 @@ function viewConnect() {
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
       <div><b>What you are granting</b>
-        <p><b>Read access to your Drive</b>, so the Studio can show your folders and you can pick the ones
-        to use. Plus write access limited to files Canon Quill creates, which is how finished chapters get
-        back to your target folder. It cannot modify or delete anything else.</p>
+         <p><b>Read access to your Drive</b>, so the Studio can show your folders and you can pick the ones
+         to use. Plus write access limited to files Canon Quill creates, which is how finished chapters get
+         back to your target folder. It cannot modify or delete anything else unless you separately enable
+         the existing-document update option.</p>
+         <p style="margin-top:6px">To update the selected Google Doc in place, add
+         <code>https://www.googleapis.com/auth/documents</code> to <code>CANON_QUILL_DRIVE_SCOPES</code>, restart,
+         and reconnect. The safer default is to add a new full DOCX to the target folder.</p>
         <p style="margin-top:6px">To grant less, set <code>CANON_QUILL_DRIVE_SCOPES</code> to just
         <code>https://www.googleapis.com/auth/drive.file</code> and restart. Browsing stops working and you
         paste folder links instead.</p></div></div>` : ""}
@@ -1324,6 +1336,7 @@ function viewConnect() {
        <div class="sectionlabel" style="padding:0;margin:0 0 8px">Google Drive</div>
        <div class="row" style="margin-bottom:6px"><b>Connected</b><span class="pill good">Ready</span></div>
        <p class="sub" style="margin:0 0 12px">Pick the folders holding your past books, character notes, timelines and references.</p>
+       <div class="hint" style="margin-bottom:12px">${d.canWriteExisting ? "Existing Google Doc updates are enabled." : "Finished DOCX files can be added to a target folder. Updating an existing Google Doc needs the optional document write scope."}</div>
        <button onclick="chooseResourceMethod('drive')">Select sources</button>
        <div class="hint" style="margin-top:10px"><button class="text-link" onclick="showDriveRecovery = true; render()">Reconnect</button></div>
       ${showDriveRecovery ? `<div class="card" style="margin-top:10px">
@@ -2688,6 +2701,7 @@ function stopQuestionPolling() {
 function enterChapters() {
   startChapterPolling();
   loadRuntime();
+  loadDrive();
   loadPreparationStatus();
   loadRunOutput();
   if (S?.run?.status === "running") startRunPolling();
@@ -3432,11 +3446,19 @@ function outputCard() {
   const files = runOutput.files || [];
   const grouped = [...new Map(files.map((file) => [`${file.kind}-${file.chapter ?? "book"}`, []])).keys()]
     .map((key) => files.filter((file) => `${file.kind}-${file.chapter ?? "book"}` === key));
-  const fileLink = (file) => {
-    const view = file.format === "md"
-      ? `<a class="btn ghost sm" href="/api/run/output/view?kind=${file.kind}${file.chapter ? `&chapter=${file.chapter}` : ""}" target="_blank" rel="noopener">View as PDF</a>`
-      : `<a class="btn ghost sm" href="${esc(file.downloadUrl)}" download>Download DOCX</a>`;
-    return view;
+  const downloadUrlFor = (file, format) => {
+    const url = new URL(file.downloadUrl, window.location.origin);
+    url.searchParams.set("format", format);
+    return `${url.pathname}${url.search}`;
+  };
+  const outputActions = (group) => {
+    const file = group.find((entry) => entry.format === "md") || group[0];
+    const viewUrl = `/api/run/output/view?kind=${file.kind}${file.chapter ? `&chapter=${file.chapter}` : ""}`;
+    return `<a class="btn ghost sm" href="${viewUrl}" target="_blank" rel="noopener">View</a>
+      ${editAction(file)}
+      <details class="download-menu"><summary class="btn ghost sm">Download</summary>
+        <div class="download-options"><a href="${esc(downloadUrlFor(file, "docx"))}" download>DOCX</a><a href="${esc(downloadUrlFor(file, "pdf"))}" download>PDF</a></div>
+      </details>`;
   };
   const editAction = (file) => file.kind === "chapter" && file.chapter
     ? `<button class="ghost sm" onclick="redoChapterModal(${file.chapter})">Edit with instructions</button>`
@@ -3444,7 +3466,7 @@ function outputCard() {
       ? `<button class="ghost sm" onclick="retouchBookModal()">Edit with instructions</button>`
       : "";
   const fileGroup = (group) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
-    <span>${esc(group[0].label)}</span><span class="row">${editAction(group[0])}${group.map(fileLink).join("")}</span></div>`;
+    <span>${esc(group[0].label)}</span><span class="row">${outputActions(group)}</span></div>`;
   const finalFiles = files.filter((file) => file.kind === "book");
   const chapterGroups = grouped.filter((group) => group[0].kind === "chapter");
   const finalPreview = primary.kind === "book" && primary.preview
@@ -3456,11 +3478,71 @@ function outputCard() {
        <button class="alert-close" aria-label="Dismiss ${esc(primary.label)} alert" title="Dismiss" onclick="dismissOutputAlert('${alertKey}')">×</button>
        <div><b>${esc(primary.label)} is ready</b><p>Your finished ${primary.kind === "book" ? "book" : "chapter"} has passed its run and is available in the files below.</p></div>
      </div>`;
+  const canPostToDrive = Boolean(S?.drive?.connected && (S.drive.targetFolderId || S.manuscript));
   return `${readyAlert}
-    ${(finalFiles.length || chapterGroups.length) ? `<div class="card" style="margin-top:12px">
-       ${finalFiles.length ? `<div><div class="spread"><h3 style="margin:0 0 4px">Final book</h3></div>${fileGroup(finalFiles)}${finalPreview}</div>` : ""}
+     ${(finalFiles.length || chapterGroups.length) ? `<div class="card" style="margin-top:12px">
+        ${finalFiles.length ? `<div><div class="spread"><h3 style="margin:0 0 4px">Final book</h3>${canPostToDrive ? '<button class="ghost sm" onclick="postBookModal()">Send to Drive</button>' : ""}</div>${fileGroup(finalFiles)}${finalPreview}</div>` : ""}
       ${chapterGroups.length ? `<div style="${finalFiles.length ? "margin-top:18px;" : ""}"><h3 style="margin:0 0 4px">Chapters</h3>${chapterGroups.map(fileGroup).join("")}</div>` : ""}
     </div>` : ""}`;
+}
+
+function postBookModal() {
+  const canUpdate = Boolean(S?.manuscript);
+  showModal({
+    title: "Send the full book to Drive",
+    body: `<p>The DOCX is generated from the complete final manuscript, including the previous chapters and any prologue or epilogue already in the draft.</p>
+      <label>Destination</label>
+      <div class="choices" style="margin-top:6px">
+        <label class="choice on"><input type="radio" name="drive-output-destination" value="target_folder" checked style="margin-right:8px"><span><b>Add the full DOCX to the target folder</b><p>Creates <code>manuscript.docx</code> in ${esc(S.drive.targetFolderName || "the selected Drive folder")}. Existing files are never overwritten automatically.</p></span></label>
+        ${canUpdate ? `<label class="choice"><input type="radio" name="drive-output-destination" value="update_draft" style="margin-right:8px"><span><b>Update the selected draft file</b><p>Replaces the contents of “${esc(S.manuscript.name)}” while keeping its Drive file. This requires the Google Docs write scope.</p></span></label>` : ""}
+      </div>
+      ${canUpdate && DRIVE && !DRIVE.canWriteExisting ? '<div class="info warn" style="margin-top:12px"><div><b>Selected-draft update is not enabled</b><p>Reconnect Google Drive with document write access, or use the target-folder DOCX option.</p></div></div>' : ""}`,
+    actions: `<button onclick="postBookToDrive(this)">Send full book</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function postBookToDrive(btn) {
+  const destination = document.querySelector('input[name="drive-output-destination"]:checked')?.value || "target_folder";
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Sending…';
+  try {
+    await api("/api/run/output/post", { method: "POST", body: { destination } });
+    closeModal();
+    toast(destination === "update_draft" ? "The selected draft was updated." : "The full book DOCX was added to the Drive target folder.");
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+    btn.textContent = "Send full book";
+  }
+}
+
+function existingDraftSectionsCard() {
+  const m = S?.manuscript;
+  if (!m) return "";
+  const sections = m.sections || [];
+  const rows = sections.map((section) => {
+    const label = section.kind === "prologue"
+      ? "Prologue"
+      : section.kind === "chapter"
+        ? section.heading.replace(/^\s*#{0,3}\s*/i, "")
+        : section.heading.replace(/^\s*#{0,3}\s*/i, "") || `Section ${section.index}`;
+    return `<div class="chap">
+      <div class="num">${section.index}</div>
+      <div><div class="t">${esc(label)}</div><div class="s">Already in the selected draft</div></div>
+      <span class="pill">${plural(section.wordCount, "word", null, section.wordCount.toLocaleString())}</span>
+    </div>`;
+  }).join("");
+  const epilogue = m.epilogueHeading
+    ? `<div class="chap"><div class="num">•</div><div><div class="t">Epilogue</div><div class="s">${esc(m.epilogueHeading)}</div></div><span class="pill">${m.epilogueWords ? plural(m.epilogueWords, "word", null, m.epilogueWords.toLocaleString()) : "in draft"}</span></div>`
+    : "";
+  if (!rows && !epilogue) return "";
+  return `<div class="card" style="padding:0;border-color:var(--rule)">
+    <div style="padding:14px 16px 8px"><b>Already in the selected draft</b>
+      <div class="hint" style="margin-top:4px">These sections stay part of the full book. Canon Quill is continuing after them, not starting a new book at the next chapter.</div>
+    </div>
+    ${rows}${epilogue}
+  </div>`;
 }
 
 function dismissOutputAlert(key) {
@@ -3729,15 +3811,17 @@ function viewChapters() {
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
   const boardTitle = route === "preparation" ? "Preparation" : "Chapters";
+  const existingDraftCard = existingDraftSectionsCard();
   const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   // A file can appear before the orchestrator has finished its writing and
   // editing passes. Keep it out of the author-facing output until the run ends.
   const finishedOutput = run.status === "running" ? "" : outputCard();
 
   if (!cs.length) return `<h1>${boardTitle}</h1>
-    ${haltCard}
-     ${haltCard || live ? "" : route === "preparation" ? '<p class="sub">The package is built before a chapter plan is opened. Review it below when it is ready.</p>' : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
-    ${packageReviewed ? directionsCard(pending, dirs) : ""}
+     ${haltCard}
+      ${haltCard || live ? "" : route === "preparation" ? '<p class="sub">The package is built before a chapter plan is opened. Review it below when it is ready.</p>' : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
+     ${existingDraftCard}
+     ${packageReviewed ? directionsCard(pending, dirs) : ""}
     ${writingCard}
     ${finishedOutput}
     `;
@@ -3761,6 +3845,8 @@ function viewChapters() {
       ? `The draft analysis finds a complete ending after Chapter ${S.manuscript.chapterCount}. The next chapter is Chapter ${S.manuscript.chapterCount + 1}.`
       : `The draft analysis finds that Chapter ${S.manuscript.chapterCount} is unfinished. Canon Quill will finish it before starting Chapter ${S.manuscript.chapterCount + 1}.`}</p></div>
   </div>` : ""}
+
+  ${existingDraftCard}
 
   ${haltCard}
 

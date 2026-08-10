@@ -93,6 +93,8 @@ const AGENT = "book-orchestrator";
 const MAX_EVENTS = 4000;
 const NESTED_POLL_MS = 1500;
 const NESTED_STALL_MS = 5 * 60_000;
+const PARENT_WATCHDOG_MS = 30_000;
+const PARENT_STALL_MS = 5 * 60_000;
 
 interface NestedMonitor {
   child: ChildProcess;
@@ -115,6 +117,7 @@ interface ActiveRun {
   slug: string;
   child: ChildProcess | null;
   heartbeat?: NodeJS.Timeout;
+  watchdog?: NodeJS.Timeout;
   nested?: NestedMonitor;
   runtime: RuntimeId;
   command: string;
@@ -123,6 +126,9 @@ interface ActiveRun {
   stopReason?: "cancelled" | "stalled";
   onProgress?: (progress: RunProgress) => void;
   onEvent?: (event: RunEvent) => void;
+  lastOutputAt: number;
+  lastMeaningfulAt: number;
+  repeatedLookup: { text: string; since: number } | null;
 }
 
 let active: ActiveRun | null = null;
@@ -168,6 +174,7 @@ interface EventMeta {
 }
 
 function emit(kind: RunEvent["kind"], text: string, meta?: EventMeta): void {
+  const now = Date.now();
   const stripped = stripAnsi(text);
   if (!meta?.sessionId && active?.nested) active.nested.lastParentEventAt = Date.now();
   const key = meta?.sessionId ?? "orchestrator";
@@ -175,12 +182,23 @@ function emit(kind: RunEvent["kind"], text: string, meta?: EventMeta): void {
   setAgentStatus(key, meta?.done || isDoneSignal(stripped) ? "done" : "working");
   if (meta?.done) setAgentStatus("orchestrator", "working");
   if (progress?.activity === "waiting") setProgress({ ...progress, activity: "working" });
+  const priorProgress = progress;
   const explicit = readProgress(stripped);
   const update = explicit ?? inferProgress(stripped);
   if (update) setProgress(update, Boolean(explicit));
   if (!meta?.sessionId && /handing over to|delegating to/i.test(stripped)) setAgentStatus("orchestrator", "waiting");
   const clean = humanizeRuntimeText(redactSensitiveText(removeProgressMarker(stripped))).trim();
   if (!clean) return;
+  if (active) {
+    active.lastOutputAt = now;
+    const progressBoundary = Boolean(update && (!priorProgress || update.phase !== priorProgress.phase || update.percent > priorProgress.percent));
+    if (isRepeatedLookup(clean)) {
+      if (!active.repeatedLookup || active.repeatedLookup.text !== clean) active.repeatedLookup = { text: clean, since: now };
+    } else {
+      active.repeatedLookup = null;
+    }
+    if (!isRepeatedLookup(clean) || progressBoundary) active.lastMeaningfulAt = now;
+  }
   const event = { seq: ++seq, at: new Date().toISOString(), kind, text: clean.slice(0, 600), ...meta };
   events.push(event);
   active?.onEvent?.(event);
@@ -203,6 +221,10 @@ function setAgentStatus(key: string, status: RunAgentStatus): void {
   if (agent.done && status !== "done") return;
   agent.status = status;
   agent.done = status === "done";
+}
+
+function isRepeatedLookup(text: string): boolean {
+  return /^(?:Searching|Checking) the workspace\.?$/i.test(text.trim());
 }
 
 export function isDoneSignal(text: string): boolean {
@@ -358,6 +380,7 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     `Read workspaces/${options.slug}/artifacts/project-analysis.json and`,
     `workspaces/${options.slug}/artifacts/decision-log.md. Use Glob before reading optional preparation artifacts such as`,
     "project-brief.md, chapter-plan.md, and preparation-manifest.json; only Read files that Glob found.",
+    `If workspaces/${options.slug}/artifacts/formatting-references.md exists, read it before drafting. It measures formatting from every selected source, including uploaded and Drive-extracted references, not only the voice corpus. Preserve evidence-backed bold dialogue, quotation-mark treatment, italic thoughts, headings, and other marked conventions in the new Markdown prose.`,
     "When the run note begins PREPARATION_REPAIR, missing preparation artifacts are expected work, not errors: continue from the existing source records and delegate the repair.",
     "Read any preparation notes in project.json alongside those documents; treat them as author instructions for what must be corrected or preserved.",
     "The Studio owns workspaces/<book>/logs/**. Never edit or write anything under logs; it records runtime and phase history itself.",
@@ -490,7 +513,20 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
   lastRuntime = runtime;
   lastCommand = command;
   lastStartedAt = new Date().toISOString();
-  active = { slug: options.slug, child: null, runtime, command, startedAt: lastStartedAt, stopping: false, onProgress: options.onProgress, onEvent: options.onEvent };
+  const now = Date.now();
+  active = {
+    slug: options.slug,
+    child: null,
+    runtime,
+    command,
+    startedAt: lastStartedAt,
+    stopping: false,
+    onProgress: options.onProgress,
+    onEvent: options.onEvent,
+    lastOutputAt: now,
+    lastMeaningfulAt: now,
+    repeatedLookup: null
+  };
   active.onProgress?.(progress);
 
   emit("system", `Starting ${runtimeLabel(runtime)}${options.model ? ` on ${options.model}` : ""}.`);
@@ -513,6 +549,19 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
     setAgentStatus("orchestrator", "waiting");
   }, 30_000);
   active.heartbeat.unref();
+  active.watchdog = setInterval(() => {
+    if (!active || active.child !== child || active.stopping) return;
+    const quietFor = Date.now() - active.lastOutputAt;
+    const repeatedFor = active.repeatedLookup ? Date.now() - active.repeatedLookup.since : 0;
+    const meaningfulQuietFor = Date.now() - active.lastMeaningfulAt;
+    if (quietFor > PARENT_STALL_MS || (repeatedFor > PARENT_STALL_MS && meaningfulQuietFor > PARENT_STALL_MS)) {
+      active.stopping = true;
+      active.stopReason = "stalled";
+      emit("error", "The writing runtime stopped making meaningful progress. The run was stopped automatically.");
+      child.kill("SIGTERM");
+    }
+  }, PARENT_WATCHDOG_MS);
+  active.watchdog.unref();
 
   const stdout = lineReader((line) => translate(runtime, line));
   const stderr = lineReader((line) => {
@@ -562,6 +611,7 @@ export function stopRun(reason: "cancelled" | "stalled" = "cancelled"): boolean 
 function finish(outcome: RunOutcome, onExit: (outcome: RunOutcome) => void): void {
   if (!active) return;
   if (active.heartbeat) clearInterval(active.heartbeat);
+  if (active.watchdog) clearInterval(active.watchdog);
   stopNestedMonitor(active.nested);
   for (const agent of agentStates.values()) setAgentStatus(agent.key, "done");
   active = null;

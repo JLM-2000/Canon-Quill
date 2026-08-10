@@ -160,6 +160,13 @@ export interface Direction {
 }
 
 /** Existing manuscript and continuation policy. */
+export interface ExistingManuscriptSection {
+  index: number;
+  heading: string;
+  wordCount: number;
+  kind: "prologue" | "chapter" | "section";
+}
+
 export interface ExistingManuscript {
   driveId: string;
   name: string;
@@ -173,6 +180,8 @@ export interface ExistingManuscript {
   backMatterWords?: number;
   epilogueHeading?: string;
   epilogueWords?: number;
+  /** Cached structure used to show the material already in a continuation. */
+  sections?: ExistingManuscriptSection[];
   /** Author clarification for the continuation agent. */
   notes?: string;
   analysedAt: string;

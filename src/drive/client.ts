@@ -4,6 +4,7 @@ import type { DriveFileSummary, DriveTreeNode, UploadBinaryFileInput, WriteTextF
 
 const driveApiBase = "https://www.googleapis.com/drive/v3/";
 const driveUploadBase = "https://www.googleapis.com/upload/drive/v3/";
+const docsApiBase = "https://docs.googleapis.com/v1/";
 const googleDocMime = "application/vnd.google-apps.document";
 const googleFolderMime = "application/vnd.google-apps.folder";
 
@@ -118,6 +119,13 @@ export class SafeDriveClient {
 
     if (mimeType === googleFolderMime) throw new Error("Cannot read a folder as text.");
 
+    if (mimeType === googleDocMime) {
+      const html = await this.requestText(
+        driveUrl(`files/${encodeURIComponent(fileId)}/export`, { mimeType: "text/html" })
+      );
+      return htmlToMarkdown(html);
+    }
+
     if (mimeType.startsWith("application/vnd.google-apps.")) {
       return this.requestText(
         driveUrl(`files/${encodeURIComponent(fileId)}/export`, { mimeType: "text/plain" })
@@ -149,6 +157,25 @@ export class SafeDriveClient {
       mimeType: input.mimeType,
       overwrite: input.overwrite
     });
+  }
+
+  /** Replace the body of an existing native Google Doc, keeping its Drive ID. */
+  async replaceGoogleDocument(documentId: string, markdown: string): Promise<DriveFileSummary> {
+    const document = await this.requestJson<{ body?: { content?: Array<{ endIndex?: number }> } }>(
+      docsUrl(`documents/${encodeURIComponent(documentId)}`)
+    );
+    const endIndex = Math.max(...(document.body?.content ?? []).map((part) => Number(part.endIndex ?? 0)), 2);
+    const requests: Array<Record<string, unknown>> = [];
+    if (endIndex > 2) {
+      requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: endIndex - 1 } } });
+    }
+    requests.push({ insertText: { location: { index: 1 }, text: markdownToPlainText(markdown) } });
+    await this.requestJson(docsUrl(`documents/${encodeURIComponent(documentId)}:batchUpdate`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requests })
+    });
+    return this.getMetadata(documentId);
   }
 
   private async uploadContent(input: {
@@ -241,6 +268,10 @@ function uploadUrl(path: string, params?: Record<string, string | number | boole
   return withParams(new URL(path, driveUploadBase), params);
 }
 
+function docsUrl(path: string, params?: Record<string, string | number | boolean>): URL {
+  return withParams(new URL(path, docsApiBase), params);
+}
+
 function withParams(url: URL, params?: Record<string, string | number | boolean>): URL {
   for (const [key, value] of Object.entries(params ?? {})) {
     url.searchParams.set(key, String(value));
@@ -267,6 +298,47 @@ function multipartBody(metadata: unknown, content: Buffer, mimeType: string): { 
 
 function escapeDriveQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function markdownToPlainText(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#{1,6}\s+/, "").replace(/\*\*|\*|`/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd() + "\n";
+}
+
+function htmlToMarkdown(html: string): string {
+  return decodeEntities(
+    html
+      .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<span([^>]*)>([\s\S]*?)<\/span>/gi, (_match, attributes: string, content: string) => {
+        if (/font-weight\s*:\s*(?:bold|[7-9]00)/i.test(attributes)) return `**${content}**`;
+        if (/font-style\s*:\s*italic/i.test(attributes)) return `*${content}*`;
+        return content;
+      })
+      .replace(/<(strong|b)(?:\s[^>]*)?>/gi, "**")
+      .replace(/<\/(strong|b)>/gi, "**")
+      .replace(/<(em|i)(?:\s[^>]*)?>/gi, "*")
+      .replace(/<\/(em|i)>/gi, "*")
+      .replace(/<h([1-6])(?:\s[^>]*)?>([\s\S]*?)<\/h\1>/gi, (_match, level: string, content: string) => `${"#".repeat(Number(level))} ${content}\n\n`)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div|li|tr|table|ul|ol)>/gi, "\n\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
 }
 
 async function responseError(response: Response): Promise<string> {

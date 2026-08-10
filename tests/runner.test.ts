@@ -78,6 +78,8 @@ describe("runtime command", () => {
     expect(prompt).toContain("workspaces/the-tide-house/project.json");
     expect(prompt).toContain("Start at chapter one.");
     expect(prompt).toContain("CANON_QUILL_PROGRESS");
+    expect(prompt).toContain("formatting-references.md");
+    expect(prompt).toContain("Drive-extracted references");
     expect(prompt).toContain("Never edit or write anything under logs");
     expect(buildPrompt({ projectName: "The Tide House", slug: "the-tide-house", resumeSessionId: "session-123" }))
       .toContain("resuming the provider conversation");
