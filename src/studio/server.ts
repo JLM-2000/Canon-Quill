@@ -462,7 +462,7 @@ export function createStudioApp() {
       .find((candidate) => existsSync(candidate));
     if (!markdownPath) return null;
 
-    const validationPath = [`chapter-${padded}-validation.md`, `chapter-${number}-validation.md`, `chapter-${padded}-validation.json`, `chapter-${number}-validation.json`]
+    const validationPath = [`chapter-${padded}-validation.md`, `chapter-${number}-validation.md`, `chapter-${padded}-validation.json`, `chapter-${number}-validation.json`, `chapter-${padded}-validation-report.json`, `chapter-${number}-validation-report.json`]
       .map((name) => path.join(chapterDirectory, name))
       .find((candidate) => existsSync(candidate));
     if (!validationPath) return null;
