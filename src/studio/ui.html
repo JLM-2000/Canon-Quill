@@ -2924,7 +2924,7 @@ async function startPreparationRun(btn) {
     runProgress = null;
     resetRunProgressDisplay();
     runOutput = null;
-    dismissedOutputAlerts.clear();
+    resetDismissedOutputAlerts();
     render();
     startRunPolling();
     toast(`${r.runtimeLabel || "The runtime"} is preparing the book.`);
@@ -3012,7 +3012,7 @@ async function startWriting(btn) {
     runProgress = null;
     resetRunProgressDisplay();
     runOutput = null;
-    dismissedOutputAlerts.clear();
+    resetDismissedOutputAlerts();
     render();
     startRunPolling();
     toast(`${r.runtimeLabel || "The runtime"} is working.`);
@@ -3397,6 +3397,35 @@ function preparationProgressDetail(progress) {
   }
 }
 
+function outputAlertStorageKey(key) {
+  return S?.slug ? `canon-quill-output-alert:${S.slug}:${key}` : null;
+}
+
+function isOutputAlertDismissed(key) {
+  if (dismissedOutputAlerts.has(key)) return true;
+  const storageKey = outputAlertStorageKey(key);
+  try {
+    if (storageKey && localStorage.getItem(storageKey) === "dismissed") {
+      dismissedOutputAlerts.add(key);
+      return true;
+    }
+  } catch { /* local storage is optional */ }
+  return false;
+}
+
+function resetDismissedOutputAlerts() {
+  const prefix = S?.slug ? `canon-quill-output-alert:${S.slug}:` : null;
+  if (prefix) {
+    try {
+      for (let index = localStorage.length - 1; index >= 0; index--) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(prefix)) localStorage.removeItem(key);
+      }
+    } catch { /* local storage is optional */ }
+  }
+  dismissedOutputAlerts.clear();
+}
+
 function outputCard() {
   const primary = runOutput?.primary;
   if (!primary) return "";
@@ -3423,7 +3452,7 @@ function outputCard() {
        ${primary.truncated ? '<div class="hint" style="margin-top:7px">Preview shortened here. The download contains the complete output.</div>' : ""}`
     : "";
   const alertKey = `${primary.kind}-${primary.chapter ?? "book"}`;
-  const readyAlert = dismissedOutputAlerts.has(alertKey) ? "" : `<div class="info ok finished-alert">
+  const readyAlert = isOutputAlertDismissed(alertKey) ? "" : `<div class="info ok finished-alert">
        <button class="alert-close" aria-label="Dismiss ${esc(primary.label)} alert" title="Dismiss" onclick="dismissOutputAlert('${alertKey}')">×</button>
        <div><b>${esc(primary.label)} is ready</b><p>Your finished ${primary.kind === "book" ? "book" : "chapter"} has passed its run and is available in the files below.</p></div>
      </div>`;
@@ -3436,6 +3465,9 @@ function outputCard() {
 
 function dismissOutputAlert(key) {
   dismissedOutputAlerts.add(key);
+  const storageKey = outputAlertStorageKey(key);
+  try { if (storageKey) localStorage.setItem(storageKey, "dismissed"); }
+  catch { /* local storage is optional */ }
   render();
 }
 
@@ -3465,7 +3497,7 @@ async function startRetouch(btn) {
     runProgress = null;
     resetRunProgressDisplay();
     runOutput = null;
-    dismissedOutputAlerts.clear();
+    resetDismissedOutputAlerts();
     render();
     startRunPolling();
     toast("Retouching has started.");
@@ -3969,7 +4001,7 @@ async function resumeRun(btn) {
     runProgress = null;
     resetRunProgressDisplay();
     runOutput = null;
-    dismissedOutputAlerts.clear();
+    resetDismissedOutputAlerts();
     render();
     startRunPolling();
     toast(r.resumeAt ? `Resuming at chapter ${r.resumeAt}.` : "Resumed.");

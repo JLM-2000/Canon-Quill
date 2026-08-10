@@ -188,6 +188,7 @@ describe("studio api", () => {
     expect(html).toContain("chapterGroups.map(fileGroup)");
     expect(html).toContain("finished-alert");
     expect(html).toContain("dismissOutputAlert");
+    expect(html).toContain("localStorage");
     expect(html).toContain("Ready to analyse");
     expect(html).toContain("startProjectAnalysis");
     expect(html).toContain("Prepare everything");
