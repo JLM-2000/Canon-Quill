@@ -3879,9 +3879,20 @@ async function redoChapter(number, btn) {
     S = direction.state;
     const plannedChapter = (S.chapters || []).some((chapter) => chapter.number === number);
     if (plannedChapter) S = await api(`/api/chapters/${number}/status`, { method: "POST", body: { status: "needs_work" } });
+    const started = await api("/api/run/start", { method: "POST", body: { chapter: number } });
+    S = started;
     closeModal();
+    runEvents = [];
+    runAgents = [];
+    selectedRunAgent = "orchestrator";
+    runLatest = 0;
+    runProgress = null;
+    resetRunProgressDisplay();
+    runOutput = null;
+    resetDismissedOutputAlerts();
     render();
-    toast(plannedChapter ? "Chapter marked for redo with your instructions." : `Redo note saved for Chapter ${number}.`);
+    startRunPolling();
+    toast(`Redo started for Chapter ${number}.`);
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 

@@ -211,7 +211,8 @@ describe("studio api", () => {
     expect(html).toContain("function enterPreparation()");
     expect(html).toContain("output-icon-button");
     expect(html).toContain("const plannedChapter");
-    expect(html).toContain("Redo note saved for Chapter");
+    expect(html).toContain('const started = await api("/api/run/start"');
+    expect(html).toContain("Redo started for Chapter");
     expect(html).toContain('direction.scope === "book"');
     expect(html).toContain("Edit final book with instructions");
     expect(html).toContain('name === "view"');
