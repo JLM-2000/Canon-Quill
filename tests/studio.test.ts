@@ -244,7 +244,7 @@ describe("studio api", () => {
     expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
   });
 
-  it("lists chapter downloads and provides a print-friendly document view", async () => {
+  it("lists chapter downloads and provides a downloadable document view", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");
     state.draftingMode = "whole_book";
@@ -260,7 +260,7 @@ describe("studio api", () => {
     expect(output.body.files.some((file: any) => file.format === "docx" && file.chapter === 1)).toBe(true);
     const view = await fetch(`${base}/api/run/output/view?kind=chapter&chapter=1`);
     expect(view.status).toBe(200);
-    expect(await view.text()).toContain("Print / Save PDF");
+    expect(await view.text()).toContain(">Download</a>");
   });
 
   it("serves view and downloads for chapters already in the selected draft", async () => {
@@ -278,11 +278,15 @@ describe("studio api", () => {
     };
     await save(state);
     await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
-    await writeFile(path.join(workspacePaths("test-book").driveCache, "draft-source.json"), JSON.stringify({ text: "CHAPTER I\n\nAlready written." }), "utf8");
+    await writeFile(path.join(workspacePaths("test-book").driveCache, "draft-source.json"), JSON.stringify({ text: "CHAPTER I\n\n**Already written.**\n\n*The thought stayed.*" }), "utf8");
 
     const view = await fetch(`${base}/api/manuscript/sections/1/view`);
     expect(view.status).toBe(200);
-    expect(await view.text()).toContain("Already written.");
+    const viewText = await view.text();
+    expect(viewText).toContain("Already written.");
+    expect(viewText).toContain("<strong>Already written.</strong>");
+    expect(viewText).toContain("<em>The thought stayed.</em>");
+    expect(viewText).toContain(">Download</a>");
 
     const docx = await fetch(`${base}/api/manuscript/sections/1/download?format=docx`);
     expect(docx.status).toBe(200);

@@ -1517,7 +1517,7 @@ export function createStudioApp() {
       main{max-width:760px;margin:0 auto 60px;padding:58px clamp(24px,6vw,72px);background:var(--paper);border:1px solid var(--rule);box-shadow:0 20px 60px rgba(64,45,26,.16)}
       h1,h2,h3{font-weight:500;line-height:1.15} h1{font-size:42px;margin:0 0 34px} h2{margin-top:42px;padding-top:24px;border-top:1px solid var(--rule);color:var(--accent)}
       p,li{font-size:18px;line-height:1.78} table{width:100%;border-collapse:collapse;margin:24px 0}th,td{border:1px solid var(--rule);padding:8px 9px;text-align:left;vertical-align:top}th{background:#f3ebdf} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
-      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
+      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar a{display:inline-block;padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;text-decoration:none}
       @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p,li{font-size:12pt}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">Print / Save PDF</button></div><header>Canon Quill · ${escapeHtml(name)}</header><main>${renderMarkdown(content)}</main></body></html>`);
   }));
@@ -2109,7 +2109,10 @@ export function createStudioApp() {
   async function existingSection(slug: string, state: StudioState, index: number): Promise<{ markdown: string; heading: string }> {
     if (!state.manuscript) throw new HttpError(404, "No existing draft has been selected.");
     if (!Number.isInteger(index) || index < 1) throw new HttpError(400, "Unknown draft section.");
-    const text = await readCached(slug, state.manuscript.driveId);
+    const cached = () => readCached(slug, state.manuscript!.driveId);
+    const text = state.resourceMethod === "drive"
+      ? await drive.readFileText(state.manuscript.driveId).catch(cached)
+      : await cached();
     if (!text) throw new HttpError(404, "The selected draft text is not cached.");
     const analysis = analyseManuscript(text);
     const section = analysis.chapters[index - 1];
@@ -2122,6 +2125,7 @@ export function createStudioApp() {
     const slug = await requireSlug();
     const state = await loadState(slug);
     const section = await existingSection(slug, state, Number(req.params.index));
+    const pdfUrl = `/api/manuscript/sections/${encodeURIComponent(req.params.index)}/download?format=pdf`;
     res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(section.heading)}</title><style>
       :root{color-scheme:light;--paper:#fffdf8;--ink:#201914;--muted:#7c6f64;--rule:#e8decf;--accent:#8f5838}
       body{margin:0;background:#eee7dc;color:var(--ink);font-family:Georgia,'Times New Roman',serif}
@@ -2129,9 +2133,9 @@ export function createStudioApp() {
       main{max-width:760px;margin:0 auto 60px;padding:58px clamp(24px,6vw,72px);background:var(--paper);border:1px solid var(--rule);box-shadow:0 20px 60px rgba(64,45,26,.16)}
       h1,h2,h3{font-weight:500;line-height:1.15} h1{font-size:42px;margin:0 0 34px} h2{margin-top:42px;padding-top:24px;border-top:1px solid var(--rule);color:var(--accent)}
       p{font-size:18px;line-height:1.78;margin:0 0 1.15em} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
-      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
+      .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar a{display:inline-block;padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;text-decoration:none}
       @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p{font-size:12pt}}
-    </style></head><body><div class="toolbar"><button onclick="window.print()">Print</button></div><header>Canon Quill · ${escapeHtml(section.heading)}</header><main>${renderMarkdown(section.markdown)}</main></body></html>`);
+    </style></head><body><div class="toolbar"><a href="${escapeHtml(pdfUrl)}" download>Download</a></div><header>Canon Quill · ${escapeHtml(section.heading)}</header><main>${renderMarkdown(section.markdown)}</main></body></html>`);
   }));
 
   app.get("/api/manuscript/sections/:index/download", route(async (req, res) => {
@@ -2389,6 +2393,7 @@ export function createStudioApp() {
     const file = await resolveOutput(slug, await loadState(slug), kind, "md", chapter);
     if (!file) throw new HttpError(404, "That output is not available yet.");
     const markdown = await readFile(file.path, "utf8");
+    const pdfUrl = outputDownloadUrl(file, "pdf");
     res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(file.label)}</title><style>
       :root{color-scheme:light;--paper:#fffdf8;--ink:#201914;--muted:#7c6f64;--rule:#e8decf;--accent:#8f5838}
       body{margin:0;background:#eee7dc;color:var(--ink);font-family:Georgia,'Times New Roman',serif}
@@ -2398,7 +2403,7 @@ export function createStudioApp() {
       p{font-size:18px;line-height:1.78;margin:0 0 1.15em} blockquote{margin:24px 0;padding-left:20px;border-left:3px solid var(--accent);font-style:italic;color:#4c3d33}
       .toolbar{position:fixed;right:18px;top:18px;font:13px ui-sans-serif,system-ui,sans-serif}.toolbar button{padding:8px 12px;border:1px solid #c8b9a7;border-radius:6px;background:#fffdf8;color:#39291e;cursor:pointer}
       @media print{body{background:white}.toolbar,header{display:none}main{margin:0;max-width:none;border:0;box-shadow:none;padding:0}p{font-size:12pt}}
-    </style></head><body><div class="toolbar"><button onclick="window.print()">Print / Save PDF</button></div><header>Canon Quill · ${escapeHtml(file.label)}</header><main>${renderMarkdown(markdown)}</main></body></html>`);
+    </style></head><body><div class="toolbar"><a href="${escapeHtml(pdfUrl)}" download>Download</a></div><header>Canon Quill · ${escapeHtml(file.label)}</header><main>${renderMarkdown(markdown)}</main></body></html>`);
   }));
 
   app.get("/api/run/output/download", route(async (req, res) => {
