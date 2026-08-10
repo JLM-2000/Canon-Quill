@@ -272,6 +272,20 @@ describe("studio api", () => {
     expect(hidden.status).toBe(404);
   });
 
+  it("exposes the completed base chapter after the run finishes", async () => {
+    const { loadState: load, saveState: save } = await import("../src/studio/state.js");
+    const state = await load("test-book");
+    state.run = { ...state.run, status: "complete", chapter: 2, startedAt: new Date().toISOString() };
+    await save(state);
+    await mkdir(workspacePaths("test-book").chapters, { recursive: true });
+    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-02.md"), "# Chapter 2\n\nFinal.", "utf8");
+    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-02-validation.md"), "Transition: pass_chapter_by_chapter\n", "utf8");
+
+    const output = await call("/api/run/output");
+    expect(output.body.files.some((file: any) => file.kind === "chapter" && file.chapter === 2 && file.format === "md")).toBe(true);
+    expect(output.body.primary.chapter).toBe(2);
+  });
+
   it("serves view and downloads for chapters already in the selected draft", async () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");

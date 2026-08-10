@@ -454,7 +454,10 @@ export function createStudioApp() {
   async function finalChapterMarkdownPath(slug: string, state: StudioState, number: number): Promise<string | null> {
     const chapterDirectory = workspacePaths(slug).chapters;
     const padded = String(number).padStart(2, "0");
-    const markdownPath = [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`]
+    const finalNames = state.run.status === "complete"
+      ? [`chapter-${padded}.md`, `chapter-${number}.md`, `chapter-${padded}-edited.md`, `chapter-${number}-edited.md`]
+      : [`chapter-${padded}-edited.md`, `chapter-${number}-edited.md`];
+    const markdownPath = finalNames
       .map((name) => path.join(chapterDirectory, name))
       .find((candidate) => existsSync(candidate));
     if (!markdownPath) return null;
@@ -531,7 +534,10 @@ export function createStudioApp() {
 
   async function allChapterOutputs(slug: string, state: StudioState): Promise<OutputFile[]> {
     const paths = workspacePaths(slug);
-    const numbers = new Set<number>(state.chapters.map((chapter) => chapter.number));
+    const numbers = new Set<number>([
+      ...state.chapters.map((chapter) => chapter.number),
+      ...(state.run.chapter ? [state.run.chapter] : [])
+    ]);
     try {
       for (const name of await readdir(paths.chapters)) {
         const match = /^chapter-(\d+)-(?:draft|edited)\.md$/i.exec(name);
