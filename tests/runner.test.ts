@@ -3,6 +3,7 @@ import {
   buildCommand,
   buildPrompt,
   describeClaudeEvent,
+  describeNestedPart,
   humanizeRuntimeText,
   inferReason,
   orchestratorRules
@@ -20,6 +21,11 @@ describe("runtime command", () => {
     expect(args[args.length - 1]).toBe("Write the book.");
   });
 
+  it("resumes Claude Code in the saved provider session", () => {
+    const { args } = buildCommand("claude-code", { ...base, resumeSessionId: "session-123" });
+    expect(args[args.indexOf("--resume") + 1]).toBe("session-123");
+  });
+
   it("passes the tool allowlist as one value so it cannot swallow the prompt", () => {
     const { args } = buildCommand("claude-code", base);
     const allowed = args[args.indexOf("--allowedTools") + 1];
@@ -29,7 +35,8 @@ describe("runtime command", () => {
 
   it("confines writing to the workspaces the agent file allows", () => {
     const rules = orchestratorRules(process.cwd());
-    expect(rules).toContain("Edit(workspaces/**)");
+     expect(rules).toContain("Edit(workspaces/**/artifacts/**)");
+     expect(rules).not.toContain("Edit(workspaces/**)");
     // Only Edit rules are matched by file permission checks, so a Write rule
     // would silently grant nothing and every write would be refused.
     expect(rules.some((rule) => rule.startsWith("Write("))).toBe(false);
@@ -60,18 +67,46 @@ describe("runtime command", () => {
     expect(args[args.indexOf("-m") + 1]).toBe("openai/gpt-5.6-sol");
   });
 
+  it("resumes OpenCode in the saved provider session", () => {
+    const { args } = buildCommand("opencode", { ...base, provider: "openai", resumeSessionId: "session-456" });
+    expect(args[args.indexOf("--session") + 1]).toBe("session-456");
+  });
+
   it("tells the agent which book and carries the author's note", () => {
     const prompt = buildPrompt({ projectName: "The Tide House", slug: "the-tide-house", note: "Start at chapter one." });
     expect(prompt).toContain("The Tide House");
     expect(prompt).toContain("workspaces/the-tide-house/project.json");
     expect(prompt).toContain("Start at chapter one.");
     expect(prompt).toContain("CANON_QUILL_PROGRESS");
+    expect(prompt).toContain("Never edit or write anything under logs");
+    expect(buildPrompt({ projectName: "The Tide House", slug: "the-tide-house", resumeSessionId: "session-123" }))
+      .toContain("resuming the provider conversation");
   });
 });
 
 describe("reading the runtime stream", () => {
+  it("describes nested agent text and tool activity without exposing tool output", () => {
+    expect(describeNestedPart({ type: "text", text: "Reading the selected material." })).toBe("Reading the selected material.");
+    expect(describeNestedPart({ type: "tool", tool: "Read", state: { status: "running", input: { file_path: "/tmp/source.md" } } }))
+      .toBe("Reading source.md.");
+    expect(describeNestedPart({ type: "reasoning", text: "private reasoning" })).toBeNull();
+  });
+
   it("hides cache filenames from the runtime activity log", () => {
     expect(humanizeRuntimeText("Reading 1a7c6Etd4EvPmW-Qdi3Aaqrr0vCbJZ-wj1ukfLfbKWQI.json.")).toBe("Reading a selected source document.");
+  });
+
+  it("hides historical contract times and shell details", () => {
+    expect(humanizeRuntimeText("Entry contract for `chapter_drafting` is satisfied: author unlocked writing at 08:46 (`writing_unlocked`)."))
+      .toBe("The saved writing contract and required preparation files are present.");
+    expect(humanizeRuntimeText("Running ls -la /workspace/book/.")).toBe("Checking workspace contents.");
+    expect(humanizeRuntimeText("Using Agent.")).toBe("Handing over to a specialist.");
+    expect(humanizeRuntimeText("Done. Cost so far: $11.01.")).toBe("Done.");
+  });
+
+  it("turns orchestrator CLI noise into short activity labels", () => {
+    expect(humanizeRuntimeText('✱ Glob "workspaces/example/artifacts/*" in . · 3 matches')).toBe("Searching the workspace.");
+    expect(humanizeRuntimeText("[•] Delegate the next phase")).toBe("Delegating the next phase");
   });
 
   it("turns tool calls into something a person can follow", () => {
@@ -94,6 +129,18 @@ describe("reading the runtime stream", () => {
     expect(described[1].kind).toBe("step");
   });
 
+  it("keeps delegation tool names out of the author-facing activity", () => {
+    const [event] = describeClaudeEvent({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Agent", input: { agent: "book-04-preparation" } }] }
+    });
+    expect(event.text).toContain("Handing over to book-04-preparation");
+  });
+
+  it("recognizes an explicit agent completion signal", () => {
+    expect(humanizeRuntimeText("done: true")).toBe("Finished.");
+  });
+
   it("reports a failed step as an error", () => {
     const described = describeClaudeEvent({
       type: "user",
@@ -108,6 +155,16 @@ describe("reading the runtime stream", () => {
     const [done] = describeClaudeEvent({ type: "result", subtype: "success", total_cost_usd: 1.234 });
     expect(done.kind).toBe("system");
     expect(done.text).toContain("$1.23");
+  });
+
+  it("hides provider cost telemetry for subscription runs", () => {
+    const [done] = describeClaudeEvent({ type: "result", subtype: "success", total_cost_usd: 11.01 }, { includeCost: false });
+    expect(done.text).toBe("Done.");
+  });
+
+  it("captures the provider session from Claude initialization", () => {
+    const [ready] = describeClaudeEvent({ type: "system", subtype: "init", model: "claude-opus-5", session_id: "session-789" });
+    expect(ready.runtimeSessionId).toBe("session-789");
   });
 
   it("ignores events with nothing to say", () => {

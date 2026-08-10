@@ -22,8 +22,9 @@ function renderBlock(block: string): string {
     const quote = trimmed
       .split(/\r?\n/)
       .map((line) => line.replace(/^>\s?/, ""))
+      .map(inline)
       .join("<br />");
-    return `<blockquote>${inline(quote)}</blockquote>`;
+    return `<blockquote>${quote}</blockquote>`;
   }
 
   if (/^[-*] /.test(trimmed)) {
@@ -37,7 +38,7 @@ function renderBlock(block: string): string {
 
   if (/^-{3,}$/.test(trimmed)) return "<hr />";
 
-  return `<p>${inline(trimmed.replace(/\r?\n/g, "<br />"))}</p>`;
+  return `<p>${lines.map(inline).join("<br />")}</p>`;
 }
 
 function isTable(lines: string[]): boolean {

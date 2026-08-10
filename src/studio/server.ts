@@ -283,7 +283,7 @@ export function createStudioApp() {
     return { analysis, state: withDerived(next) };
   }
 
-  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string; role?: "analysis" | "drafting" }) {
+  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string; role?: "analysis" | "drafting"; resumeSessionId?: string | null; authMethod?: "subscription" | "api_key" | null }) {
     if (isRunning()) throw new HttpError(409, "A run is already in progress.");
     if (pendingOutcome) {
       await pendingOutcome;
@@ -295,6 +295,9 @@ export function createStudioApp() {
     const provider = role === "analysis"
       ? state.engine.analysisProvider ?? state.engine.provider
       : state.engine.draftingProvider ?? state.engine.provider;
+    const authMethod = options.authMethod ?? (role === "analysis"
+      ? state.engine.analysisAuthMethod ?? state.engine.authMethod
+      : state.engine.draftingAuthMethod ?? state.engine.authMethod);
     if (!provider) throw new HttpError(400, "Choose a writing engine first.");
 
     const resolvedModels = resolveModels(await loadCatalog(), state.engine);
@@ -306,9 +309,11 @@ export function createStudioApp() {
         slug,
         projectName: state.projectName,
         provider,
+        authMethod,
         model,
         chapter,
         note: options.note,
+        resumeSessionId: options.resumeSessionId,
         onProgress: (progress) => {
           phaseLogQueue = phaseLogQueue.then(() => appendLog(slug, "phase", {
             timestamp: new Date().toISOString(),
@@ -349,7 +354,8 @@ export function createStudioApp() {
         reason: null,
         detail: null,
         haltedAt: null,
-        startedAt: new Date().toISOString()
+        startedAt: new Date().toISOString(),
+        providerSessionId: options.resumeSessionId ?? null
       };
     });
     await appendLog(slug, "audit", {
@@ -495,13 +501,14 @@ export function createStudioApp() {
     try {
       await updateState(slug, (current) => {
         current.run = outcome.ok
-          ? { ...current.run, status: "complete", reason: null, detail: null, haltedAt: null }
+          ? { ...current.run, status: "complete", reason: null, detail: null, haltedAt: null, providerSessionId: outcome.providerSessionId }
           : {
             ...current.run,
             status: "halted",
             reason: outcome.reason ?? "other",
             detail: outcome.detail ? redactSensitiveText(outcome.detail).slice(0, 2000) : null,
-            haltedAt: new Date().toISOString()
+            haltedAt: new Date().toISOString(),
+            providerSessionId: outcome.providerSessionId
           };
       });
     } catch { /* the run is over either way; the board reloads from disk */ }
@@ -603,7 +610,10 @@ export function createStudioApp() {
 
     child.unref();
     res.json({ restarting: true, pid: child.pid });
-    setTimeout(() => process.exit(0), 300);
+    setTimeout(() => {
+      stopRun();
+      process.exit(0);
+    }, 300);
   }));
 
   // --- Projects -------------------------------------------------------------
@@ -1468,6 +1478,28 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
+  app.post("/api/preparation/continue", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const current = await loadState(slug);
+    if (!current.projectAnalysis.completed || !current.projectAnalysis.continuedAt) {
+      throw new HttpError(409, "Continue the project analysis before preparation.");
+    }
+    if (pendingPlannedQuestions(current).length > 0 || current.questions.some((question) => question.answer === undefined)) {
+      throw new HttpError(409, "Finish the preparation questions first.");
+    }
+    const state = await updateState(slug, (next) => {
+      next.conversationStartedAt ??= new Date().toISOString();
+    });
+    await appendLog(slug, "audit", {
+      timestamp: new Date().toISOString(),
+      stage: "preparation",
+      stageName: "Preparation",
+      agent: "author",
+      event: "preparation_opened"
+    });
+    res.json(withDerived(state));
+  }));
+
   app.post("/api/preparation/review", route(async (_req, res) => {
     const slug = await requireSlug();
     if (!preparationStatus(slug).ready) throw new HttpError(409, "Finish preparation before reviewing it.");
@@ -1482,15 +1514,32 @@ export function createStudioApp() {
     res.json(withDerived(state));
   }));
 
-  app.post("/api/preparation/run", route(async (_req, res) => {
+  app.post("/api/preparation/run", route(async (req, res) => {
     const slug = await requireSlug();
     const current = await loadState(slug);
     const preparation = preparationStatus(slug);
     if (preparation.ready && current.preparationReviewed) throw new HttpError(409, "Preparation is already ready and reviewed.");
+    const savedNotes = Object.entries(current.preparationNotes)
+      .filter(([, note]) => note.trim())
+      .map(([name]) => name);
+    const noted = Array.isArray(req.body?.documents)
+      ? req.body.documents.filter((name: unknown): name is string => typeof name === "string" && savedNotes.includes(name))
+      : savedNotes;
+    const excludedNotes = savedNotes.filter((name) => !noted.includes(name));
+    const generalNote = typeof req.body?.generalNote === "string" ? req.body.generalNote.trim().slice(0, 4000) : "";
+    const scope = noted.length
+      ? `Only revise the selected preparation documents (${noted.join(", ")}) and documents directly affected by those notes. Preserve every other existing preparation document unchanged.`
+      : generalNote
+        ? "Use the author's general preparation instruction to identify only the preparation documents that need attention and preserve unrelated existing documents unchanged."
+        : "There are no author document notes or general repair instructions. Create only missing preparation documents and preserve every existing document unchanged.";
+    const excluded = excludedNotes.length
+      ? ` Saved notes on these documents are out of scope for this run: ${excludedNotes.join(", ")}. Do not apply them now.`
+      : "";
+    const general = generalNote ? ` General author instruction for this run: ${generalNote}` : "";
     const started = await launchRuntime(slug, current, {
       chapter: null,
       role: "analysis",
-      note: "PREPARATION_REPAIR: build the missing reference-extraction and preparation artifacts from the existing project analysis, decision log, cached sources, and style artifacts. Do not draft prose. Stop at preflight review once the package is complete."
+      note: `PREPARATION_REPAIR: build or repair the preparation package from the existing project analysis, decision log, cached sources, style artifacts, and saved document notes. ${scope}${excluded}${general} Do not draft prose. Stop at preflight review once the package is complete.`
     });
     res.json(started);
   }));
@@ -2040,6 +2089,25 @@ export function createStudioApp() {
     res.status(201).json({ direction, state: withDerived(state) });
   }));
 
+  app.patch("/api/directions/:id", route(async (req, res) => {
+    const slug = await requireSlug();
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) throw new HttpError(400, "An instruction is required.");
+    if (text.length > 4000) throw new HttpError(400, "That is too long for an instruction. Keep it to the point.");
+    const scope = req.body?.scope === "chapter" ? "chapter" : "book";
+    let updated: StudioState["directions"][number] | undefined;
+    const state = await updateState(slug, (current) => {
+      const direction = (current.directions ?? []).find((item) => item.id === req.params.id);
+      if (!direction) throw new HttpError(404, "Instruction not found.");
+      if (direction.appliedAt) throw new HttpError(409, "Applied instructions are historical and cannot be edited.");
+      direction.text = text;
+      direction.scope = scope;
+      direction.chapter = scope === "chapter" ? Number(req.body?.chapter) || undefined : undefined;
+      updated = direction;
+    });
+    res.json({ direction: updated, state: withDerived(state) });
+  }));
+
   /** An agent marks an instruction as taken into account. */
   app.post("/api/directions/:id/applied", route(async (req, res) => {
     const slug = await requireSlug();
@@ -2065,7 +2133,7 @@ export function createStudioApp() {
   /** Record a provider run halt. */
   app.post("/api/run/halt", route(async (req, res) => {
     const slug = await requireSlug();
-    const reasons = ["no_credit", "rate_limited", "invalid_credentials", "provider_error", "cancelled", "other"];
+    const reasons = ["no_credit", "rate_limited", "invalid_credentials", "provider_error", "stalled", "cancelled", "other"];
     const reason = reasons.includes(req.body?.reason) ? req.body.reason : "other";
     const detail = typeof req.body?.detail === "string" ? redactSensitiveText(req.body.detail).slice(0, 2000) : null;
 
@@ -2077,7 +2145,8 @@ export function createStudioApp() {
         reason,
         detail,
         haltedAt: new Date().toISOString(),
-        startedAt: current.run?.startedAt ?? null
+        startedAt: current.run?.startedAt ?? null,
+        providerSessionId: current.run?.providerSessionId ?? null
       };
     });
 
@@ -2286,7 +2355,8 @@ export function createStudioApp() {
     const updated = await launchRuntime(slug, state, {
       chapter: preparationRun ? null : next?.number ?? null,
       role: preparationRun ? "analysis" : "drafting",
-      note: preparationRun ? "PREPARATION_REPAIR: continue preparing the package. Do not draft prose." : undefined
+      note: preparationRun ? "PREPARATION_REPAIR: continue preparing the package. Do not draft prose." : undefined,
+      resumeSessionId: state.run.providerSessionId
     });
 
     res.json({ resumed: true, resumeAt: next?.number ?? null, state: updated, runtime: updated.runtime, runtimeLabel: updated.runtimeLabel, model: updated.model });
@@ -2338,6 +2408,7 @@ export function startStudio(options: StudioServerOptions = {}) {
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    stopRun();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref();
   };

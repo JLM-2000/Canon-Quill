@@ -12,4 +12,11 @@ describe("formatted Markdown preview", () => {
     expect(html).toContain("<hr />");
     expect(html).not.toContain("&lt;br");
   });
+
+  it("renders source line breaks as HTML breaks instead of visible text", () => {
+    const html = renderMarkdown("First line<br />Second line");
+
+    expect(html).toContain("First line<br />Second line");
+    expect(html).not.toContain("&lt;br");
+  });
 });

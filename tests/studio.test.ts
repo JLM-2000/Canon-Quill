@@ -181,22 +181,39 @@ describe("studio api", () => {
     expect(html).toContain("requestAnimationFrame(() => window.scrollTo");
     expect(html).toContain("analysis-finding");
     expect(html).toContain("Continuation point");
-    expect(html).toContain("Show technical details");
+    expect(html).not.toContain("Show technical details");
+    expect(html).not.toContain("Hide technical details");
     expect(html).toContain("outputCard");
+    expect(html).toContain('run.status === "running" ? "" : outputCard()');
+    expect(html).toContain("chapterGroups.map(fileGroup)");
+    expect(html).toContain("finished-alert");
+    expect(html).toContain("dismissOutputAlert");
     expect(html).toContain("Ready to analyse");
     expect(html).toContain("startProjectAnalysis");
     expect(html).toContain("Prepare everything");
     expect(html).toContain("Preparation package:");
-    expect(html).toContain("Show completed and pending documents");
+    expect(html).not.toContain("Show completed and pending documents");
+    expect(html).toContain("Preparation usually takes around 15 minutes");
     expect(html).toContain("openPreparationDocument");
     expect(html).toContain("runConsoleAtBottom");
     expect(html).toContain("Preparation stopped");
     expect(html).toContain("formatElapsed");
     expect(html).not.toContain("artifacts still missing");
     expect(html).toContain("Review the preparation");
-    expect(html).toContain("Continue to instructions");
-    expect(html).toContain("Retouch final book");
-    expect(html).toContain("View / print PDF");
+    expect(html).toContain("Reprepare affected documents");
+    expect(html).toContain("Documents with saved notes");
+    expect(html).toContain("Related documents checked automatically");
+    expect(html).toContain("Request a preparation repair?");
+    expect(html).toContain("prep-rerun-general-note");
+    expect(html).toContain("Preparation complete");
+    expect(html).toContain('preparation: S.writingConfirmed ? "chapters"');
+    expect(html).toContain("function enterPreparation()");
+    expect(html).toContain("Edit with instructions");
+    expect(html).toContain("Edit final book with instructions");
+    expect(html).toContain("View as PDF");
+    expect(html).toContain("addDirectionModal");
+    expect(html).toContain("editDirectionModal");
+    expect(html).toContain('size: "writing-modal"');
   });
 
   it("previews and downloads the final manuscript through an allowlisted output", async () => {
@@ -467,7 +484,10 @@ describe("studio api", () => {
     state.conversationStartedAt = new Date().toISOString();
     state.questions = [];
     await save(state);
-    expect((await call("/api/state")).body.state.phase).toBe("preflight");
+    expect((await call("/api/state")).body.state.phase).toBe("preparation");
+    const opened = await call("/api/preparation/continue", { method: "POST" });
+    expect(opened.status).toBe(200);
+    expect(opened.body.phase).toBe("preparation");
     const confirmed = await call("/api/writing/confirm", { method: "POST" });
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.writingConfirmed).toBe(true);
@@ -1498,6 +1518,18 @@ describe("directions", () => {
     const { body } = await call("/api/directions");
     expect(body.pending).toHaveLength(0);
     expect(body.directions[0].appliedTo).toBe(4);
+  });
+
+  it("edits a pending instruction", async () => {
+    const created = await call("/api/directions", { method: "POST", body: { text: "Keep the opening quiet." } });
+    const edited = await call(`/api/directions/${created.body.direction.id}`, {
+      method: "PATCH",
+      body: { text: "Keep the opening tense.", scope: "chapter", chapter: 2 }
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.body.direction.text).toBe("Keep the opening tense.");
+    expect(edited.body.direction.scope).toBe("chapter");
+    expect(edited.body.direction.chapter).toBe(2);
   });
 
   it("removes an instruction", async () => {

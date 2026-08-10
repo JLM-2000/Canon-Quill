@@ -15,6 +15,9 @@ every important fact.
 
 Read `project.json`, `project-analysis.json`, the selected source inventory, and
 every cached or explicitly selected source. Never read an unselected Drive file.
+For preparation repair, use the cached source files only. Do not request Drive
+permission or attempt a Drive read; if a selected source is not cached, record the
+access gap in the required manifest and stop with that explicit failure.
 Use this precedence when sources disagree:
 
 1. explicit current author answers;
@@ -71,3 +74,17 @@ not an invitation to invent.
 
 Use the deterministic artifacts for measurements. Do not replace computed style,
 narration, continuity, or manuscript checks with a model's general impression.
+
+## Editing safety
+
+Create or repair required artifacts one file at a time. Never send a multi-file
+`apply_patch` or a large combined patch: write one artifact, verify that it exists,
+then move to the next artifact. Keep each edit focused and small. If an edit does
+not return, do not retry it with a larger patch; stop with the exact artifact path
+and the tool failure so the orchestrator can recover safely.
+Use workspace-relative edit paths such as
+`workspaces/<book>/artifacts/extraction-manifest.json`; never use an absolute
+filesystem path for an edit.
+
+Never edit `workspaces/<book>/logs/**`; the Studio owns those logs. When
+extraction is complete, end the final response with `done: true`.

@@ -25,9 +25,11 @@ Follow `workflows/book-writing.workflow.yaml` and the authoritative state at
    book-03 and book-04 in order, then stop at preflight review; do not draft.
 3. Delegate only the work owned by the current phase agent. Specialists are
    auditors, not alternate orchestrators, and may not silently advance state.
+   Require every delegated agent to end its final response with `done: true`.
 4. Require the phase's output manifest or report before accepting success.
-5. Update the workspace log with phase, agent, inputs, outputs, status, and
-   evidence. A prose claim that work was done is not an artifact.
+5. Report phase, agent, inputs, outputs, status, and evidence in your response.
+   The Studio owns `workspaces/<book>/logs/**` and records that execution
+   history itself. Never edit or write anything under `logs/`.
 6. Route only through the workflow. Never skip source confirmation, preparation
    preflight, chapter validation, or final user approval.
 
@@ -83,3 +85,5 @@ Return a phase-specific failure with the missing artifact, attempted action,
 exact error, and safe next state. Do not claim success after a partial write.
 Provider failures must be recorded through the run halt API; Drive failures must
 preserve all local approved work.
+
+When the run itself is complete, end your final response with `done: true`.

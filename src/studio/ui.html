@@ -88,6 +88,9 @@
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     max-width: 640px; width: 100%; max-height: 82vh; overflow-y: auto; padding: 20px; }
   .modal.document-modal { max-width: min(1180px, 96vw); max-height: 94vh; padding: 24px 28px; }
+  .modal.writing-modal { max-width: min(820px, 96vw); max-height: none; overflow: visible; padding: 24px 28px; }
+  .modal.writing-modal .estimate { margin: 8px 0; padding: 10px; }
+  .modal.writing-modal .estimate h4 { margin-bottom: 5px; }
   .modal h3 { margin: 0 0 4px; font-size: 16px; }
   .commit { border-left: 2px solid var(--border); padding: 4px 0 4px 10px; margin: 6px 0; font-size: 12.5px; }
   .commit code { font-size: 11px; }
@@ -129,18 +132,36 @@
   .hint { color: var(--faint); font-size: 12px; margin-top: 4px; }
 
   .runlog { background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
-    max-height: 320px; overflow-y: auto; padding: 8px 10px; font-size: 12.5px; }
+    height: 320px; max-height: 320px; overflow: hidden; padding: 8px 10px; font-size: 12.5px; }
   .runline { display: flex; gap: 8px; padding: 2px 0; color: var(--muted); }
   .runline .t { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
-  .runline.step { color: var(--text); }
+  .runline.step { color: var(--muted); }
   .runline.system { color: var(--accent); }
   .runline.error { color: var(--bad); }
+  .run-console-layout { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
+  .run-agent-nav { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 5px; overflow-y: auto; min-height: 0; }
+  .run-agent-nav button { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 8px; padding-left: calc(8px + var(--agent-depth, 0) * 14px); text-align: left; background: transparent; color: var(--muted); font-size: 12px; }
+  .run-agent-nav button:hover, .run-agent-nav button.active { background: var(--bg); color: var(--text); }
+  .run-agent-nav .agent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-agent-nav .agent-kind { display: block; color: var(--faint); font-size: 10px; margin-top: 1px; }
+  .agent-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--good) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 15%, transparent); }
+  .agent-dot.working { background: var(--good) !important; }
+  .agent-dot.waiting { background: #4f8cff !important; box-shadow: 0 0 0 3px color-mix(in srgb, #4f8cff 18%, transparent); }
+  .agent-dot.done { background: #4b5563 !important; box-shadow: none; }
+  .run-agent-view { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .run-agent-view-head { display: flex; align-items: baseline; gap: 8px; padding: 7px 9px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+  .run-agent-view-head .agent-kind { color: var(--faint); font-size: 11px; }
+  .run-agent-view .run-agent-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 5px 9px; }
+  @media (max-width: 600px) { .run-console-layout { grid-template-columns: 1fr; } .run-agent-nav { display: flex; gap: 4px; overflow-x: auto; } .run-agent-nav button { min-width: 150px; } }
+  .run-status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 15%, transparent); }
+  .run-status-dot.waiting { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+  .run-status-dot.stopped { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 15%, transparent); }
   .run-progress { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
   .run-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .run-progress-head b { font-size: 13px; }
   .run-progress-head span { color: var(--muted); font-family: var(--mono); font-size: 11px; }
   .run-progress .meter { width: 100%; height: 6px; margin-top: 9px; }
-  .run-progress .meter i { background: var(--accent); transition: width .25s ease; }
+  .run-progress .meter i { background: var(--accent); transition: none; }
   .run-progress-detail { color: var(--muted); font-size: 12px; margin-top: 7px; }
   .estimate { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 12px 0; }
   .estimate h4 { margin: 0 0 8px; font-size: 12.5px; }
@@ -149,8 +170,6 @@
   .estimate-grid b { display: block; font-size: 15px; }
   .estimate-grid span { color: var(--muted); font-size: 11px; }
   .estimate .hint { margin-top: 9px; }
-  .console-toggle { display: inline-flex; align-items: center; gap: 5px; }
-  .console-toggle svg { width: 14px; height: 14px; }
   .output-preview { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 12px;
     max-height: 420px; overflow: auto; white-space: pre-wrap; font-family: var(--serif, Georgia, serif);
     font-size: 13px; line-height: 1.65; }
@@ -195,6 +214,9 @@
   .prep-doc label, .prep-doc textarea { margin: 10px 12px 0; width: calc(100% - 24px); box-sizing: border-box; }
   .prep-doc textarea { margin-bottom: 0; }
   .prep-doc .row { padding: 0 12px 12px; }
+  .prep-note-editor { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; }
+  .prep-note-editor textarea { flex: 1; min-width: 0; width: auto; margin: 0; box-sizing: border-box; }
+  .prep-note-editor button { flex: none; white-space: nowrap; }
   .prep-status { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 11px 12px; margin: 10px 0; }
   .prep-status-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .prep-status-head code { color: var(--faint); font: 11px var(--mono); }
@@ -205,8 +227,11 @@
   .prep-status-grid li + li { margin-top: 2px; }
   .prep-status-grid .done { color: var(--good); }
   .prep-status-grid .pending { color: var(--warn); }
-  .prep-status-details { margin-top: 9px; color: var(--muted); font-size: 12px; }
-  .prep-status-details summary { cursor: pointer; color: var(--accent); }
+  .prep-rerun-list { display: grid; gap: 6px; margin-top: 8px; }
+  .prep-rerun-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 9px; background: var(--bg); border-radius: 6px; font-size: 12px; }
+  .prep-rerun-item input { width: auto; margin: 2px 0 0; flex: none; }
+  .prep-rerun-item b { display: block; }
+  .prep-rerun-item span { display: block; color: var(--faint); font-size: 11px; margin-top: 1px; }
   .prep-live-docs { margin-top: 12px; }
   .prep-live-docs h3 { margin: 0 0 7px; font-size: 12.5px; }
   .prep-live-docs .items { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
@@ -288,6 +313,9 @@
     border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
   .info .ic { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--faint); }
   .info.ok .ic { color: var(--good); }
+  .finished-alert { position: relative; border-color: var(--good); padding-right: 42px; }
+  .finished-alert .alert-close { position: absolute; top: 7px; right: 7px; background: none; border: none; color: var(--faint); padding: 2px 6px; font-size: 18px; line-height: 1; }
+  .finished-alert .alert-close:hover { color: var(--text); }
   .info.warn .ic { color: var(--warn); }
   /* Only the leading title is a block. Scoping this to every bold turned any
      emphasis inside a sentence into its own line. */
@@ -314,7 +342,10 @@
     font-size: 12.5px; position: relative; padding-right: 30px; }
   .dir.applied { opacity: .6; }
   .dir .dir-m { color: var(--faint); font-size: 11px; margin-top: 3px; }
-  .dir .doc-x { position: absolute; top: 6px; right: 6px; }
+  .dir-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 3px; }
+  .icon-button { width: 27px; height: 27px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
+  .icon-button svg { width: 14px; height: 14px; }
+  .dir-actions .doc-x { position: static; }
 
   /* chapters */
   .chap { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center;
@@ -332,12 +363,14 @@
   td.num, th.num { text-align: right; font-family: var(--mono); }
 
   .empty { color: var(--faint); text-align: center; padding: 34px 16px; }
+  .toast-stack { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(90vw, 520px); pointer-events: none; }
   .toast {
-    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    position: static; transform: none;
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-    padding: 10px 16px 10px 13px; border-radius: 8px; font-size: 13px; z-index: 70;
-    box-shadow: 0 8px 28px rgba(0,0,0,.35); max-width: min(90vw, 520px);
+    padding: 10px 16px 10px 13px; border-radius: 8px; font-size: 13px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35); max-width: 100%;
     display: flex; gap: 9px; align-items: flex-start; border-left-width: 3px;
+    pointer-events: auto;
   }
   .toast svg { width: 15px; height: 15px; flex: none; margin-top: 1px; }
   .toast.success { border-left-color: var(--good); }
@@ -362,6 +395,11 @@
     .app { grid-template-columns: 1fr; }
     aside { position: static; width: 100%; min-width: 0; height: auto; flex-direction: row; overflow-x: auto; }
     main { padding: 18px; }
+    .prep-note-editor { align-items: stretch; flex-direction: column; }
+    .prep-note-editor button { align-self: flex-end; }
+  }
+  @media (max-height: 700px) {
+    .modal.writing-modal { max-height: calc(100vh - 24px); overflow-y: auto; }
   }
 </style>
 </head>
@@ -402,9 +440,12 @@ let projectAnalysisLoading = false;
 let seriesDragId = null;
 let collapsedGroups = { "Set up": false, Prepare: false, Write: false };
 let chapterChat = null;
-let showRunConsole = false;
 let runProgress = null;
+let runAgents = [];
+let displayedRunPercent = null;
+let runPercentAnimation = null;
 let runOutput = null;
+let dismissedOutputAlerts = new Set();
 let sourceAnalysisStarted = false;
 
 // Filled from /api/state so there is only ever one definition of these.
@@ -426,6 +467,7 @@ const PHASES = [
   { id: "style",       label: "Style corpus",   group: "Prepare" },
   { id: "intake_analysis", label: "Project analysis", group: "Prepare" },
   { id: "questions",   label: "Questions",      group: "Prepare" },
+  { id: "preparation", label: "Preparation",   group: "Prepare" },
   { id: "chapters",    label: "Chapters",       group: "Write" }
 ];
 
@@ -454,14 +496,25 @@ const TOAST_ICONS = {
  */
 function toast(msg, kind = "success") {
   const type = kind === true ? "error" : kind === false ? "success" : kind;
+  let stack = document.getElementById("toast-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "toast-stack";
+    stack.className = "toast-stack";
+    stack.setAttribute("aria-live", "polite");
+    document.body.appendChild(stack);
+  }
   const el = document.createElement("div");
   el.className = `toast ${type}`;
   el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"
     stroke-linecap="round" stroke-linejoin="round">${TOAST_ICONS[type] || TOAST_ICONS.info}</svg>
     <span></span>`;
   el.querySelector("span").textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), type === "error" ? 7000 : type === "warn" ? 5500 : 3500);
+  stack.appendChild(el);
+  setTimeout(() => {
+    el.remove();
+    if (!stack.childElementCount) stack.remove();
+  }, type === "error" ? 7000 : type === "warn" ? 5500 : 3500);
 }
 
 let VERSION = null;
@@ -768,7 +821,8 @@ function isDone(id) {
     // Closing the preparation gate finishes this step, whether it took
     // questions or none. An untouched step is not green.
     case "questions": return !!S.writingConfirmed
-      || ((S.questions || []).length > 0 && !S.questions.some((q) => q.blocking && q.answer === undefined));
+      || (!!S.conversationStartedAt && !(S.questions || []).some((q) => q.answer === undefined));
+    case "preparation": return !!S.preparationReviewed;
     case "chapters":  return S.chapters.length > 0 && S.chapters.every((c) => c.status === "approved");
   }
   return false;
@@ -779,9 +833,9 @@ function phaseOrder() {
   const projectStart = effectiveProjectStart();
   if (!projectStart) return ["start"];
   if (projectStart === "from_scratch") {
-    return ["start", "engine", "intake", "draft", "intake_analysis", "questions", "chapters"];
+      return ["start", "engine", "intake", "draft", "intake_analysis", "questions", "preparation", "chapters"];
   }
-  const order = ["start", "engine", "connect", "sources", "analyze", "intake", "draft", "style", "intake_analysis", "questions", "chapters"];
+  const order = ["start", "engine", "connect", "sources", "analyze", "intake", "draft", "style", "intake_analysis", "questions", "preparation", "chapters"];
   return order.filter((id) => id !== "style" || S.sources.some((source) => source.kinds?.includes("past_book")));
 }
 
@@ -798,7 +852,7 @@ function engineAssignmentsReady() {
 function furthestReached() {
   if (!S) return 0;
   const map = { start: "start", engine: "engine", connect: "connect", sources: "sources", analyze: "analyze",
-    intake: "intake", draft: "draft", preparation: "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
+    intake: "intake", draft: "draft", preparation: S.conversationStartedAt ? "preparation" : "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
     review: "chapters", export: "chapters", complete: "chapters" };
   const current = map[S.phase] || "engine";
   return Math.max(phaseOrder().indexOf(current), 0);
@@ -827,7 +881,8 @@ function go(r) {
   if (r === "style" && S.styleCorpus.built) loadFingerprint();
   if (r === "questions") { loadQuestions(); startQuestionPolling(); }
   else stopQuestionPolling();
-  if (r === "chapters") enterChapters(); else stopChapterPolling();
+  if (r === "preparation") enterPreparation();
+  if (r === "chapters") enterChapters(); else if (r !== "preparation") stopChapterPolling();
 }
 
 function toggleNavGroup(group) {
@@ -855,10 +910,13 @@ function render() {
   rememberRunConsolePosition(document.getElementById("runlog"));
   v.innerHTML = ({
     start: viewStart, engine: viewEngine, connect: viewConnect, sources: viewSources, analyze: viewAnalyze,
-    intake: viewIntake, draft: viewDraft, style: viewStyle, intake_analysis: viewIntakeAnalysis, questions: viewQuestions, chapters: viewChapters
+    intake: viewIntake, draft: viewDraft, style: viewStyle, intake_analysis: viewIntakeAnalysis, questions: viewQuestions, preparation: viewChapters, chapters: viewChapters
   }[route] || viewConnect)();
   applyPreparationLock(v);
   requestAnimationFrame(restoreRunConsolePosition);
+  if (isRunBoard() && S?.run?.status === "running") {
+    requestAnimationFrame(() => animateRunProgress(progressForRun(S.run).percent));
+  }
 }
 
 function applyPreparationLock(view) {
@@ -1191,7 +1249,7 @@ async function setEngine(patch) {
     PREP_RUNTIME = null;
     await reload();
     loadEngine();
-    if (route === "chapters") { loadRuntime(); loadPreparationRuntime(); }
+    if (isRunBoard()) { loadRuntime(); loadPreparationRuntime(); }
   }
   catch (e) { toast(e.message, "error"); }
 }
@@ -2636,6 +2694,13 @@ function enterChapters() {
   else if (["halted", "complete"].includes(S?.run?.status)) pollRun();
 }
 
+function enterPreparation() {
+  loadPreparationStatus();
+  loadPreparationRuntime();
+  if (S?.run?.status === "running") startRunPolling();
+  else if (["halted", "complete"].includes(S?.run?.status)) pollRun();
+}
+
 function startChapterPolling() {
   if (chapterPoll) return;
   chapterPoll = setInterval(pollChapters, 5000);
@@ -2682,15 +2747,25 @@ async function answer(id, text) {
 async function continueToChapters(btn) {
   btn.disabled = true;
   try {
-    S = await api("/api/writing/confirm", { method: "POST" });
-    stopQuestionPolling();
-    collapsedGroups["Set up"] = true;
-    collapsedGroups.Prepare = true;
-    route = "chapters";
+    if (route === "questions") {
+      S = await api("/api/preparation/continue", { method: "POST" });
+      stopQuestionPolling();
+      route = "preparation";
+      await loadPreparationStatus();
+      await loadPreparationRuntime();
+    } else {
+      S = await api("/api/writing/confirm", { method: "POST" });
+      stopQuestionPolling();
+      collapsedGroups["Set up"] = true;
+      collapsedGroups.Prepare = true;
+      route = "chapters";
+    }
     render();
-    startChapterPolling();
-    loadRuntime();
-    loadPreparationStatus();
+    if (route === "chapters") {
+      startChapterPolling();
+      loadRuntime();
+      loadPreparationStatus();
+    }
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
@@ -2708,7 +2783,10 @@ let PREP_RUNTIME = null;
 let PREPARATION = null;
 let PREP_DOCS = null;
 let WRITING_ESTIMATE = null;
-let PREPARATION_CHECKLIST_OPEN = false;
+
+function isRunBoard() {
+  return route === "preparation" || route === "chapters";
+}
 
 async function loadRuntime() {
   try { RUNTIME = await api("/api/run/runtime"); if (route === "chapters") render(); }
@@ -2724,13 +2802,13 @@ async function loadPreparationStatus() {
     const loaded = PREP_DOCS?.filter((doc) => doc.available).length ?? -1;
     if ((PREPARATION.ready || PREPARATION.present?.length) && loaded !== PREPARATION.present.length) await loadPreparationDocuments();
     const documentsChanged = (PREP_DOCS?.filter((doc) => doc.available).length ?? -1) !== previousDocuments;
-    if (route === "chapters" && (JSON.stringify(PREPARATION) !== previousStatus || documentsChanged)) render();
+    if (isRunBoard() && (JSON.stringify(PREPARATION) !== previousStatus || documentsChanged)) render();
   }
   catch { /* the preparation card will explain itself when the status is unavailable */ }
 }
 
 async function loadPreparationRuntime() {
-  try { PREP_RUNTIME = await api("/api/run/runtime?role=analysis"); if (route === "chapters") render(); }
+  try { PREP_RUNTIME = await api("/api/run/runtime?role=analysis"); if (isRunBoard()) render(); }
   catch { /* the preparation card will explain the engine requirement */ }
 }
 
@@ -2745,14 +2823,14 @@ function showPreparationRequired(status) {
     body: `<p>Canon Quill will prepare the project before writing prose.</p>
       <p class="hint">The run has not started and no provider time was used.</p>
       ${preparationChecklist(status)}
-      <p class="hint">Preparation may take several minutes. It reads the selected material, builds the package, and stops before prose drafting.</p>`,
+      <p class="hint">Preparation usually takes around 15 minutes to get everything ready. It reads the selected material, builds the package, and stops before prose drafting.</p>`,
     actions: `<button onclick="startPreparationRun(this)">Prepare everything</button>
       <button class="ghost" onclick="closeModal(); reopenPreparationFromMissing(this)">Reopen preparation</button>
       <button class="ghost" onclick="closeModal()">Close</button>`
   });
 }
 
-function preparationChecklist(status, collapsed = false) {
+function preparationChecklist(status) {
   const present = status?.present || [];
   const missing = status?.missing || [];
   const total = present.length + missing.length;
@@ -2766,7 +2844,7 @@ function preparationChecklist(status, collapsed = false) {
       <div><b>Pending</b>${list(missing, "pending", "All required documents are present")}</div>
     </div>
   </div>`;
-  return collapsed ? `<details class="prep-status-details" ${PREPARATION_CHECKLIST_OPEN ? "open" : ""} ontoggle="PREPARATION_CHECKLIST_OPEN = this.open"><summary>Show completed and pending documents</summary>${content}</details>` : content;
+  return content;
 }
 
 function preparationDocumentsCard() {
@@ -2781,16 +2859,16 @@ function preparationDocumentsCard() {
 function openPreparationDocument(index) {
   const doc = PREP_DOCS?.[index];
   if (!doc?.available) return;
-  const running = S.run?.status === "running";
   showModal({
     title: doc.name,
     size: "document-modal",
-    body: `${running ? '<div class="info"><div><b>Preparation is still running</b><p>Reading is live. A note saved here will be available to the next preparation session or the final review.</p></div></div>' : ""}
-      <div class="prep-reader prep-rendered">${doc.rendered || esc(doc.content || "")}</div>
-      <label>Edit note for this document</label>
-      <textarea id="prep-live-note" rows="4" placeholder="What should be corrected or preserved?">${esc(doc.note || "")}</textarea>`,
-    actions: `<button onclick="savePreparationDocumentNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Save note</button>
-      <a class="btn ghost sm" href="/api/preparation/documents/${encodeURIComponent(doc.name)}/view" target="_blank" rel="noopener">View / print PDF</a>
+    body: `<div class="prep-reader prep-rendered">${doc.rendered || esc(doc.content || "")}</div>
+      <label>Notes for this document</label>
+      <div class="hint">Saved with this document for the next preparation run or final review.</div>
+       <div class="prep-note-editor"><textarea id="prep-live-note" rows="4" placeholder="What should be corrected or preserved?">${esc(doc.note || "")}</textarea>
+         <div class="row"><button onclick="savePreparationDocumentNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Save note</button>
+         ${doc.note?.trim() ? `<button class="ghost" onclick="deletePreparationNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Delete saved note</button>` : ""}</div></div>`,
+    actions: `<a class="btn ghost sm" href="/api/preparation/documents/${encodeURIComponent(doc.name)}/view" target="_blank" rel="noopener">View as PDF</a>
       <button class="ghost" onclick="closeModal()">Close</button>`
   });
 }
@@ -2807,28 +2885,53 @@ async function savePreparationDocumentNote(index, name, btn) {
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
+async function deletePreparationNote(index, name, btn) {
+  btn.disabled = true;
+  try {
+    S = await api(`/api/preparation/documents/${encodeURIComponent(name)}`, { method: "PATCH", body: { note: "" } });
+    if (PREP_DOCS[index]) PREP_DOCS[index].note = "";
+    PREPARATION.reviewed = false;
+    closeModal();
+    render();
+    toast("Saved note deleted. The document was not changed.");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+}
+
 async function startPreparationRun(btn) {
+  const generalNote = document.getElementById("prep-rerun-general-note")?.value?.trim() || "";
+  if (btn.dataset.requireNote === "true" && !generalNote) {
+    toast("Write a general preparation instruction first.", "warn");
+    return;
+  }
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Starting…';
   try {
     PREPARATION = { ...(PREPARATION || {}), ready: false, missing: PREPARATION?.missing || [], present: PREPARATION?.present || [] };
     PREP_DOCS = null;
-    const r = await api("/api/preparation/run", { method: "POST" });
+    const selected = btn.dataset.rerun === "true"
+      ? [...document.querySelectorAll("#prep-rerun-documents input:checked")].map((input) => input.value)
+      : null;
+    const body = selected ? { documents: selected, generalNote: generalNote || undefined } : { generalNote };
+    const r = await api("/api/preparation/run", { method: "POST", body });
     S = r;
     PREP_RUNTIME = { runtime: r.runtime, label: r.runtimeLabel, model: r.model };
     closeModal();
-    route = "chapters";
+    route = "preparation";
     runEvents = [];
+    runAgents = [];
+    selectedRunAgent = "orchestrator";
     runLatest = 0;
     runProgress = null;
+    resetRunProgressDisplay();
     runOutput = null;
+    dismissedOutputAlerts.clear();
     render();
     startRunPolling();
     toast(`${r.runtimeLabel || "The runtime"} is preparing the book.`);
   } catch (e) {
     toast(e.message, "error");
     btn.disabled = false;
-    btn.textContent = "Prepare everything";
+    btn.textContent = btn.dataset.startLabel || "Prepare everything";
   }
 }
 
@@ -2855,6 +2958,7 @@ async function startWritingModal() {
   const dirs = (S.directions || []).filter((d) => !d.appliedAt);
   showModal({
     title: "Start writing?",
+    size: "writing-modal",
     body: `<p class="hint" style="margin:0 0 12px">${r.label
       ? `This starts <b>${esc(r.label)}</b>${r.model ? ` on <b>${esc(r.model)}</b>` : ""} in this project folder, on the
          orchestrator agent. It works through the phases the book still needs, writing into this book's
@@ -2902,10 +3006,13 @@ async function startWriting(btn) {
     S = r;
     closeModal();
     runEvents = [];
+    runAgents = [];
+    selectedRunAgent = "orchestrator";
     runLatest = 0;
     runProgress = null;
+    resetRunProgressDisplay();
     runOutput = null;
-    showRunConsole = false;
+    dismissedOutputAlerts.clear();
     render();
     startRunPolling();
     toast(`${r.runtimeLabel || "The runtime"} is working.`);
@@ -2933,10 +3040,11 @@ let runPoll = null;
 let elapsedTicker = null;
 let runConsoleScrollTop = 0;
 let runConsoleAtBottom = true;
+let selectedRunAgent = "orchestrator";
 
 function startRunPolling() {
   if (runPoll) return;
-  runPoll = setInterval(pollRun, 1500);
+  runPoll = setInterval(pollRun, 1000);
   elapsedTicker = setInterval(updateElapsed, 1000);
   pollRun();
 }
@@ -2954,19 +3062,19 @@ function stopRunPolling() {
 
 async function pollRun() {
   try {
-    if (PREPARATION && !PREPARATION.ready) await loadPreparationStatus();
+    if (isRunBoard() && (route === "preparation" || S?.run?.role === "analysis")) await loadPreparationStatus();
     const snapshot = await api(`/api/run/events?since=${runLatest}`);
     const progressChanged = JSON.stringify(snapshot.progress || null) !== JSON.stringify(runProgress || null);
+    const agentsChanged = JSON.stringify(snapshot.agents || []) !== JSON.stringify(runAgents || []);
     runProgress = snapshot.progress || runProgress;
+    runAgents = snapshot.agents || runAgents;
     if (snapshot.events.length) {
       runEvents = [...runEvents, ...snapshot.events].slice(-400);
       runLatest = snapshot.latest;
     }
-    if (progressChanged && route === "chapters") updateRunProgress();
-    else if (snapshot.active && route === "chapters") {
-      if (snapshot.events.length && showRunConsole) renderRunLog();
-      updateElapsed();
-    }
+    if (snapshot.events.length || agentsChanged) renderRunLog();
+    if (progressChanged && isRunBoard()) updateRunProgress();
+    if (snapshot.active && isRunBoard()) updateElapsed();
     if (!snapshot.active) {
        stopRunPolling();
        await loadRunOutput();
@@ -2979,9 +3087,125 @@ async function pollRun() {
 function renderRunLog() {
   const log = document.getElementById("runlog");
   if (!log) { render(); return; }
-  rememberRunConsolePosition(log);
-  log.innerHTML = runEvents.map(runLine).join("");
-  restoreRunConsolePosition(log);
+  rememberRunConsolePosition(log.querySelector(".run-agent-thread") || log);
+  log.innerHTML = runLogHtml();
+  restoreRunConsolePosition(log.querySelector(".run-agent-thread") || log);
+}
+
+function runAgentGroups() {
+  const groups = new Map();
+  for (const agent of runAgents) {
+    groups.set(agent.key, { key: agent.key, agent: agent.agent, depth: agent.depth, status: agent.status, events: [] });
+  }
+  for (const event of runEvents) {
+    const key = event.sessionId || "orchestrator";
+    if (!groups.has(key)) groups.set(key, { key, agent: event.agent || "Orchestrator", depth: event.depth || 0, status: undefined, events: [] });
+    if (event.agent && groups.get(key).agent === "Subagent") groups.get(key).agent = event.agent;
+    groups.get(key).events.push(event);
+  }
+  if (!groups.size) groups.set("orchestrator", { key: "orchestrator", agent: "Orchestrator", depth: 0, status: "working", events: [] });
+  if (!groups.has(selectedRunAgent)) selectedRunAgent = groups.keys().next().value;
+  return [...groups.values()];
+}
+
+function runAgentStatus(group) {
+  if (S?.run?.status !== "running") return "done";
+  const last = group.events.at(-1);
+  if (last && /(?:finished|completed|done|stopped|failed|error)/i.test(last.text || "")) return "done";
+  if (group.status) return group.status;
+  if (group.key === "orchestrator") return runProgress?.activity === "waiting" ? "waiting" : "working";
+  if (!last) return "waiting";
+  if (/(?:finished|completed|done|stopped|failed|error)/i.test(last.text)) return "done";
+  return Date.now() - Date.parse(last.at) > 30_000 ? "waiting" : "working";
+}
+
+function runAgentKind(depth) {
+  return depth === 0 ? "Main agent" : depth === 1 ? "Subagent" : "Sub-subagent";
+}
+
+function runLogHtml() {
+  const groups = runAgentGroups();
+  const selected = groups.find((group) => group.key === selectedRunAgent) || groups[0];
+  const nav = groups.map((group) => {
+    const status = runAgentStatus(group);
+    return `<button class="${group.key === selected.key ? "active" : ""}" style="--agent-depth:${Math.min(group.depth, 4)}" onclick="selectRunAgent('${esc(group.key)}')" title="${esc(group.agent)}">
+      <span class="agent-dot ${status}" aria-label="${agentStatusLabel(status)}" title="${agentStatusLabel(status)}"></span>
+      <span class="agent-label"><b>${esc(group.agent)}</b><span class="agent-kind">${runAgentKind(group.depth)} · ${agentStatusLabel(status)} · ${group.events.length} updates</span></span>
+    </button>`;
+  }).join("");
+  const status = runAgentStatus(selected);
+  return `<div class="run-console-layout">
+    <nav class="run-agent-nav" aria-label="Runtime agents">${nav}</nav>
+    <section class="run-agent-view">
+       <div class="run-agent-view-head"><b>${esc(selected.agent)}</b><span class="agent-kind">${runAgentKind(selected.depth)} · ${agentStatusLabel(status)}</span></div>
+      <div class="run-agent-thread" onscroll="rememberRunConsolePosition(this)">${compactRunEvents(selected.events).map(runLine).join("") || '<div class="runline"><span>Waiting for the first step.</span></div>'}</div>
+    </section>
+  </div>`;
+}
+
+function agentStatusLabel(status) {
+  return status === "working" ? "active" : status;
+}
+
+function selectRunAgent(key) {
+  selectedRunAgent = key;
+  renderRunLog();
+}
+
+function compactRunEvents(events) {
+  const compact = [];
+  for (const event of events) {
+    const text = friendlyRunText(event);
+    if (!text) continue;
+    const previous = compact.at(-1);
+    if (previous && previous.text === text && Date.parse(event.at) - Date.parse(previous.event.at) < 12_000) {
+      previous.count += 1;
+    } else {
+      compact.push({ event, text, count: 1 });
+    }
+  }
+  return compact;
+}
+
+function friendlyRunText(event) {
+  const text = event.text || "";
+  if (/^Done\.\s+(?:Cost so far|Provider-reported API usage):/i.test(text)) return "Done.";
+  if (/^Entry contract for .* is satisfied:/i.test(text)) return "The saved writing contract and required preparation files are present.";
+  if (/^Running\s+(?:ls|dir)\b/i.test(text)) return "Checking workspace contents.";
+  if (/^Searching for (?:workspaces|artifacts)\//i.test(text)) return "Searching the workspace.";
+  if (/^Using Agent\.?$/i.test(text)) return "Handing over to a specialist.";
+  if (/^# Todos$/.test(text)) return "Workflow checklist.";
+  const todo = /^\[([•✓ ])\]\s*(.+)$/.exec(text);
+  if (todo) return friendlyTodoText(todo[1], todo[2]);
+  if (/^>\s*book-orchestrator\s*[·•]/i.test(text)) return "Orchestrator session ready.";
+  if (/^✗\s+(?:Read|Glob|Grep)\b/i.test(text)) return "A workspace lookup failed; checking the available artifacts.";
+  if (/^(?:→|✱)\s+Read\s+workflows\//i.test(text)) return "Reading the workflow.";
+  if (/^(?:→|✱)\s+Read\s+workspaces\/[^/]+\/project\.json/i.test(text)) return "Reading project state.";
+  if (/^(?:→|✱)\s+Read\s+workspaces\/?$/i.test(text) || /^(?:→|✱)\s+Read\s+\.$/i.test(text)) return "Checking workspace structure.";
+  if (/^(?:→|✱)\s+Read\s+workspaces\//i.test(text)) return "Reading selected preparation material.";
+  if (/^(?:→|✱)\s+(?:Glob|Grep)\b/i.test(text)) return "Searching the workspace.";
+  if (/^(?:Completed: )?Using\s+(?:read|glob|grep)\.?$/i.test(text)) return "Checking selected material.";
+  if (/^(?:Completed: )?Using\s+apply_patch\.?$/i.test(text)) return "Updating a preparation artifact.";
+  if (event.agent && /^(?:You own phase|Continue the workspace|You are the phase)/i.test(text)) return "";
+  const tool = /^(?:Completed: )?Using (glob|grep|read|write|edit|bash)\.?$/i.exec(text);
+  if (tool) {
+    const labels = { glob: "Searching the workspace.", grep: "Checking source evidence.", read: "Reading selected material.", write: "Writing an artifact.", edit: "Updating an artifact.", bash: "Running an allowed check." };
+    return labels[tool[1].toLowerCase()] || text;
+  }
+  return text;
+}
+
+function friendlyTodoText(marker, item) {
+  const action = item
+    .replace(/^Read\b/i, "Reading")
+    .replace(/^Verify\b/i, "Checking")
+    .replace(/^Delegate\b/i, "Delegating")
+    .replace(/^Record\b/i, "Recording")
+    .replace(/^Run\b/i, "Running")
+    .replace(/^Stop\b/i, "Stopping");
+  if (marker === "✓") return `Completed: ${action}`;
+  if (marker === " ") return `Next: ${action}`;
+  return action;
 }
 
 function rememberRunConsolePosition(log) {
@@ -2990,7 +3214,7 @@ function rememberRunConsolePosition(log) {
   runConsoleAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
 }
 
-function restoreRunConsolePosition(log = document.getElementById("runlog")) {
+function restoreRunConsolePosition(log = document.querySelector("#runlog .run-agent-thread")) {
   if (!log) return;
   log.scrollTop = runConsoleAtBottom ? log.scrollHeight : runConsoleScrollTop;
 }
@@ -3002,8 +3226,16 @@ function updateElapsed() {
 }
 
 function runLine(event) {
-  const time = new Date(event.at).toLocaleTimeString();
-  return `<div class="runline ${event.kind}"><span class="t">${time}</span><span>${esc(event.text)}</span></div>`;
+  const source = event.event || event;
+  const text = event.text || friendlyRunText(source) || source.text;
+  const suffix = event.count > 1 ? ` (×${event.count})` : "";
+  const time = new Date(source.at).toLocaleTimeString();
+  return `<div class="runline ${displayRunKind(source)}"><span class="t">${time}</span><span>${esc(text)}${suffix}</span></div>`;
+}
+
+function displayRunKind(event) {
+  if (event.kind !== "error") return event.kind;
+  return /^\s*✗\b|^\s*(?:Error|Failed|Permission denied):/i.test(event.text || "") ? "error" : "note";
 }
 
 function formatElapsed(totalSeconds) {
@@ -3028,14 +3260,18 @@ async function loadRunOutput() {
 }
 
 function progressForRun(run) {
+  if (run.role === "analysis" && run.status === "complete") return {
+    phase: "finishing", label: "Preparation complete", percent: 100,
+    detail: "The preparation package is ready for your review.", chapter: null, activity: "working"
+  };
   if (runProgress) return runProgress;
-  if (run.status === "complete") return { label: "Writing complete", percent: 100, detail: "The runtime finished. Checking the finished output.", chapter: run.chapter || null };
-  if (run.status === "halted") return { label: "Run stopped", percent: 0, detail: "The run stopped before it finished.", chapter: run.chapter || null };
-  return { label: "Getting started", percent: 5, detail: "Starting the writing runtime.", chapter: run.chapter || null };
+  if (run.status === "complete") return { label: "Writing complete", percent: 100, detail: "The runtime finished. Checking the finished output.", chapter: run.chapter || null, activity: "working" };
+  if (run.status === "halted") return { label: "Run stopped", percent: 0, detail: "The run stopped before it finished.", chapter: run.chapter || null, activity: "waiting" };
+  return { label: "Getting started", percent: 5, detail: "Starting the writing runtime.", chapter: run.chapter || null, activity: "working" };
 }
 
 function runPhaseLabel(run, progress) {
-  const preparing = run.status === "running" && ((PREPARATION && !PREPARATION.ready) || S.phase === "preparation");
+  const preparing = run.role === "analysis" && run.status === "running";
   if (preparing) return "Preparing everything";
   if (progress.chapter && progress.phase === "writing_chapter") return `Writing Chapter ${progress.chapter}`;
   if (progress.chapter && progress.phase === "editing_chapter") return `Editing Chapter ${progress.chapter}`;
@@ -3050,7 +3286,7 @@ function updateRunProgress() {
     return;
   }
   const progress = progressForRun(run);
-  const preparing = run.status === "running" && ((PREPARATION && !PREPARATION.ready) || S.phase === "preparation");
+  const preparing = run.role === "analysis" && run.status === "running";
   const title = preparing
     ? "Preparing book"
     : run.status === "running"
@@ -3059,27 +3295,75 @@ function updateRunProgress() {
   const detail = preparing ? preparationProgressDetail(progress) : progress.detail;
   const titleElement = document.getElementById("run-title");
   const labelElement = document.getElementById("run-progress-label");
-  const percentElement = document.getElementById("run-progress-percent");
-  const meter = document.getElementById("run-progress-meter");
   const detailElement = document.getElementById("run-progress-detail");
+  const statusDot = document.getElementById("run-status-dot");
+  const activity = runActivityStatus(run, progress);
   if (titleElement) titleElement.textContent = title;
   if (labelElement) labelElement.textContent = runPhaseLabel(run, progress);
-  if (percentElement) percentElement.textContent = `${Math.round(progress.percent)}%`;
-  if (meter) meter.style.width = `${Math.max(0, Math.min(100, progress.percent))}%`;
+  animateRunProgress(progress.percent);
   if (detailElement) detailElement.textContent = detail;
+  if (statusDot) {
+    statusDot.className = `run-status-dot ${activity.className}`;
+    statusDot.title = activity.label;
+    statusDot.setAttribute("aria-label", activity.label);
+  }
+}
+
+function resetRunProgressDisplay() {
+  if (runPercentAnimation !== null) cancelAnimationFrame(runPercentAnimation);
+  runPercentAnimation = null;
+  displayedRunPercent = null;
+}
+
+function animateRunProgress(target) {
+  const goal = Math.max(0, Math.min(100, Number(target) || 0));
+  if (displayedRunPercent === null) displayedRunPercent = goal;
+  const from = displayedRunPercent;
+  if (goal <= from) {
+    displayedRunPercent = goal;
+    paintRunProgress(goal);
+    return;
+  }
+  if (runPercentAnimation !== null) cancelAnimationFrame(runPercentAnimation);
+  const started = performance.now();
+  const duration = Math.min(3200, 800 + (goal - from) * 45);
+  const frame = (now) => {
+    const ratio = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - ratio, 3);
+    displayedRunPercent = from + (goal - from) * eased;
+    paintRunProgress(displayedRunPercent);
+    if (ratio < 1) runPercentAnimation = requestAnimationFrame(frame);
+    else runPercentAnimation = null;
+  };
+  runPercentAnimation = requestAnimationFrame(frame);
+}
+
+function paintRunProgress(value) {
+  const percent = Math.max(0, Math.min(100, value));
+  const percentElement = document.getElementById("run-progress-percent");
+  const meter = document.getElementById("run-progress-meter");
+  if (percentElement) percentElement.textContent = `${Math.round(percent)}%`;
+  if (meter) meter.style.width = `${percent}%`;
+}
+
+function runActivityStatus(run, progress) {
+  if (run.status !== "running") return { className: "stopped", label: "Run stopped" };
+  return { className: "working", label: "Run active" };
 }
 
 function runPanel(run) {
   const running = run.status === "running";
-  const preparing = running && ((PREPARATION && !PREPARATION.ready) || S.phase === "preparation");
+  const preparing = running && run.role === "analysis";
   const elapsed = run.startedAt ? Math.floor((Date.now() - Date.parse(run.startedAt)) / 1000) : 0;
   const progress = progressForRun(run);
+  const renderedPercent = displayedRunPercent === null ? progress.percent : Math.min(progress.percent, displayedRunPercent);
   const phaseLabel = runPhaseLabel(run, progress);
   const workText = S?.draftingMode === "whole_book" ? "the whole book" : "the book";
   const progressDetail = preparing
     ? preparationProgressDetail(progress)
     : progress.detail;
   const runtimeInfo = preparing ? (PREP_RUNTIME || RUNTIME) : RUNTIME;
+  const activity = runActivityStatus(run, progress);
   return `<div class="card" ${running ? 'style="border-color:var(--accent)"' : ""}>
     <div class="row spread" style="margin-bottom:10px">
       <div class="row">
@@ -3088,31 +3372,19 @@ function runPanel(run) {
         ${runtimeInfo?.label ? `<span class="pill">${esc(runtimeInfo.label)}</span>` : ""}
          ${runtimeInfo?.model ? `<span class="pill">${esc(runtimeInfo.model)}</span>` : ""}
        </div>
-       ${running ? `<div class="row" style="gap:6px"><span id="run-elapsed" class="pill" aria-label="Elapsed time">${formatElapsed(elapsed)}</span><button class="ghost sm" onclick="stopWriting(this)">Stop</button></div>` : ""}
+       ${running ? `<div class="row" style="gap:6px"><span id="run-status-dot" class="run-status-dot ${activity.className}" title="${activity.label}" aria-label="${activity.label}"></span><span id="run-elapsed" class="pill" aria-label="Elapsed time">${formatElapsed(elapsed)}</span><button class="ghost sm" onclick="stopWriting(this)">Stop</button></div>` : ""}
     </div>
     <div class="run-progress" aria-live="polite">
-       <div class="run-progress-head"><b id="run-progress-label">${esc(phaseLabel)}</b><span id="run-progress-percent">${Math.round(progress.percent)}%</span></div>
-        <div class="meter"><i id="run-progress-meter" style="width:${Math.max(0, Math.min(100, progress.percent))}%"></i></div>
+       <div class="run-progress-head"><b id="run-progress-label">${esc(phaseLabel)}</b><span id="run-progress-percent">${Math.round(renderedPercent)}%</span></div>
+         <div class="meter"><i id="run-progress-meter" style="width:${Math.max(0, Math.min(100, renderedPercent))}%"></i></div>
         <div id="run-progress-detail" class="run-progress-detail">${esc(progressDetail)}</div>
-       ${preparing && PREPARATION ? preparationChecklist(PREPARATION, true) : ""}
-       ${preparing ? preparationDocumentsCard() : ""}
-     </div>
-    <div class="row" style="margin-top:10px;justify-content:flex-end">
-      <button class="ghost sm console-toggle" title="Show the runtime console" aria-label="Show the runtime console"
-         onclick="toggleRunConsole()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 5h16v14H4z"/><path d="m7 9 3 3-3 3M12 15h5"/>
-         </svg>${showRunConsole ? "Hide technical details" : "Show technical details"}
-      </button>
-    </div>
-     ${showRunConsole ? `<div id="runlog" class="runlog" onscroll="rememberRunConsolePosition(this)">${runEvents.map(runLine).join("") || '<div class="runline"><span>Waiting for the first step.</span></div>'}</div>` : ""}
+        ${preparing && PREPARATION ? preparationChecklist(PREPARATION) : ""}
+        ${preparing ? preparationDocumentsCard() : ""}
+        ${preparing ? '<div class="hint" style="margin-top:8px">Preparation usually takes around 15 minutes to get everything ready.</div>' : ""}
+      </div>
+      <div id="runlog" class="runlog" onscroll="rememberRunConsolePosition(this)">${runLogHtml()}</div>
     ${running ? '<div class="hint" style="margin-top:8px">Leave this open or close it: the runtime keeps going either way, and the board updates as chapters land.</div>' : ""}
   </div>`;
-}
-
-function toggleRunConsole() {
-  showRunConsole = !showRunConsole;
-  render();
 }
 
 function preparationProgressDetail(progress) {
@@ -3133,29 +3405,43 @@ function outputCard() {
     .map((key) => files.filter((file) => `${file.kind}-${file.chapter ?? "book"}` === key));
   const fileLink = (file) => {
     const view = file.format === "md"
-      ? `<a class="btn ghost sm" href="/api/run/output/view?kind=${file.kind}${file.chapter ? `&chapter=${file.chapter}` : ""}" target="_blank" rel="noopener">View / print PDF</a>`
+      ? `<a class="btn ghost sm" href="/api/run/output/view?kind=${file.kind}${file.chapter ? `&chapter=${file.chapter}` : ""}" target="_blank" rel="noopener">View as PDF</a>`
       : `<a class="btn ghost sm" href="${esc(file.downloadUrl)}" download>Download DOCX</a>`;
     return view;
   };
+  const editAction = (file) => file.kind === "chapter" && file.chapter
+    ? `<button class="ghost sm" onclick="redoChapterModal(${file.chapter})">Edit with instructions</button>`
+    : file.kind === "book"
+      ? `<button class="ghost sm" onclick="retouchBookModal()">Edit with instructions</button>`
+      : "";
   const fileGroup = (group) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
-    <span>${esc(group[0].label)}</span><span class="row">${group.map(fileLink).join("")}</span></div>`;
+    <span>${esc(group[0].label)}</span><span class="row">${editAction(group[0])}${group.map(fileLink).join("")}</span></div>`;
   const finalFiles = files.filter((file) => file.kind === "book");
   const chapterGroups = grouped.filter((group) => group[0].kind === "chapter");
-  return `<div class="card" style="border-color:var(--good)">
-    <div class="spread" style="margin-bottom:10px">
-      <div><b>${esc(primary.label)} is ready</b><div class="hint">Your finished ${primary.kind === "book" ? "book" : "chapter"} is available below.</div></div>
-      ${fileLink(primary)}
-    </div>
-    ${primary.preview ? `<div class="output-preview ${primary.truncated ? "truncated" : ""}">${esc(primary.preview)}</div>
-      ${primary.truncated ? '<div class="hint" style="margin-top:7px">Preview shortened here. The download contains the complete output.</div>' : ""}` : '<div class="hint">The output is ready to download.</div>'}
-    ${finalFiles.length ? `<div style="margin-top:18px"><div class="spread"><h3 style="margin:0 0 4px">Final book</h3><button class="ghost sm" onclick="retouchBookModal()">Retouch final book</button></div>${fileGroup(finalFiles)}</div>` : ""}
-    ${chapterGroups.length ? `<div style="margin-top:18px"><h3 style="margin:0 0 4px">Chapters</h3>${chapterGroups.map(fileGroup).join("")}</div>` : ""}
-  </div>`;
+  const finalPreview = primary.kind === "book" && primary.preview
+    ? `<div class="output-preview ${primary.truncated ? "truncated" : ""}">${esc(primary.preview)}</div>
+       ${primary.truncated ? '<div class="hint" style="margin-top:7px">Preview shortened here. The download contains the complete output.</div>' : ""}`
+    : "";
+  const alertKey = `${primary.kind}-${primary.chapter ?? "book"}`;
+  const readyAlert = dismissedOutputAlerts.has(alertKey) ? "" : `<div class="info ok finished-alert">
+       <button class="alert-close" aria-label="Dismiss ${esc(primary.label)} alert" title="Dismiss" onclick="dismissOutputAlert('${alertKey}')">×</button>
+       <div><b>${esc(primary.label)} is ready</b><p>Your finished ${primary.kind === "book" ? "book" : "chapter"} has passed its run and is available in the files below.</p></div>
+     </div>`;
+  return `${readyAlert}
+    ${(finalFiles.length || chapterGroups.length) ? `<div class="card" style="margin-top:12px">
+       ${finalFiles.length ? `<div><div class="spread"><h3 style="margin:0 0 4px">Final book</h3></div>${fileGroup(finalFiles)}${finalPreview}</div>` : ""}
+      ${chapterGroups.length ? `<div style="${finalFiles.length ? "margin-top:18px;" : ""}"><h3 style="margin:0 0 4px">Chapters</h3>${chapterGroups.map(fileGroup).join("")}</div>` : ""}
+    </div>` : ""}`;
+}
+
+function dismissOutputAlert(key) {
+  dismissedOutputAlerts.add(key);
+  render();
 }
 
 function retouchBookModal() {
   showModal({
-    title: "Retouch final book",
+    title: "Edit final book with instructions",
     body: `<p>The existing final manuscript will be read again and revised through the normal editing and validation gates. Nothing is changed until the retouching run writes a new result.</p>
       <textarea id="retouch-note" rows="5" placeholder="Make the dialogue less explanatory. Tighten the final three chapters. Keep the ending but deepen the emotional turn."></textarea>`,
     actions: `<button onclick="startRetouch(this)">Start retouching</button>
@@ -3173,9 +3459,13 @@ async function startRetouch(btn) {
     S = r;
     closeModal();
     runEvents = [];
+    runAgents = [];
+    selectedRunAgent = "orchestrator";
     runLatest = 0;
     runProgress = null;
+    resetRunProgressDisplay();
     runOutput = null;
+    dismissedOutputAlerts.clear();
     render();
     startRunPolling();
     toast("Retouching has started.");
@@ -3197,11 +3487,11 @@ function startCard(hasPlan, mode, nextChapter) {
   </div>`;
 
   return `<div class="card spread" style="border-color:var(--accent)">
-    <div><b>Ready when you are</b>
-      <p class="sub" style="margin:6px 0 0">${esc(r.label)}${r.model ? ` on ${esc(r.model)}` : ""} runs the
-      orchestrator in this folder. ${hasPlan
-        ? "It picks up at the first chapter that is not approved."
-        : "Its first job is the chapter plan."}</p></div>
+     <div><b>Chapter preparation and writing</b>
+       <p class="sub" style="margin:6px 0 0">Your preparation is approved. ${esc(r.label)}${r.model ? ` on ${esc(r.model)}` : ""} runs
+       the orchestrator in this folder. ${hasPlan
+         ? "It picks up at the first chapter that is not approved."
+         : "It prepares the chapter plan from the approved package before drafting prose."}</p></div>
     <button onclick="startWritingModal()">${mode === "chapter_by_chapter" && nextChapter ? `Start Chapter ${nextChapter}` : "Start writing"}</button>
   </div>`;
 }
@@ -3219,7 +3509,7 @@ function preparationCard() {
     <p class="sub" style="margin:6px 0 10px">Canon Quill will read the selected material, build the project brief, bibles, chapter plan and validation rubric, then stop before prose drafting.</p>
     ${preparationChecklist(PREPARATION)}
     ${preparationDocumentsCard()}
-    <p class="hint" style="margin:0 0 10px">This may take several minutes.</p>
+     <p class="hint" style="margin:0 0 10px">Preparation usually takes around 15 minutes to get everything ready.</p>
     <button onclick="startPreparationRun(this)">Prepare everything</button>
   </div>`;
 }
@@ -3228,21 +3518,98 @@ function preparationReviewCard() {
   if (!PREP_DOCS) return `<div class="card" style="text-align:center;padding:30px 20px"><span class="spin spin-lg"></span><h3 style="margin:14px 0 6px">Loading preparation documents…</h3><p class="sub">The package is ready to read.</p></div>`;
   return `<div class="card" style="border-color:var(--accent)">
     <h2 style="margin-top:0">Review the preparation</h2>
-    <p class="sub">These are the documents the writer will use. Open each one, read it, and add a note if anything needs to be redone. When everything is right, continue to your writing instructions.</p>
+    <p class="sub">These are the documents the writer will use. Open each one, read it, and add a note if anything needs to be redone. When everything is right, Continue to see the chapter preparation and writing instructions.</p>
+    <div class="run-progress" aria-label="Preparation complete">
+      <div class="run-progress-head"><b>Preparation complete</b><span>100%</span></div>
+      <div class="meter"><i style="width:100%"></i></div>
+      <div class="run-progress-detail">The package is ready for your approval. Prose drafting has not started.</div>
+    </div>
     <div class="prep-docs">
       ${PREP_DOCS.map((doc, index) => `<details class="prep-doc">
         <summary><b>${esc(doc.name)}</b><span class="hint">Read document</span></summary>
          <div class="prep-reader prep-rendered">${doc.rendered || esc(doc.content || "")}</div>
          <label>Notes for this document</label>
-        <textarea id="prep-note-${index}" rows="3" placeholder="This character relationship is wrong. Recheck the ending evidence. Keep the chapter plan's order.">${esc(doc.note || "")}</textarea>
-        <div class="row" style="margin-top:8px;justify-content:flex-end"><button class="ghost sm" onclick="savePreparationNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Save note</button></div>
+         <div class="hint">Saved with this document for the next preparation run or final review.</div>
+         <div class="prep-note-editor"><textarea id="prep-note-${index}" rows="3" placeholder="This character relationship is wrong. Recheck the ending evidence. Keep the chapter plan's order.">${esc(doc.note || "")}</textarea>
+           <div class="row"><button class="ghost sm" onclick="savePreparationNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Save note</button>
+           ${doc.note?.trim() ? `<button class="ghost sm" onclick="deletePreparationNote(${index}, '${esc(doc.name).replace(/'/g, "\\'")}', this)">Delete saved note</button>` : ""}</div></div>
       </details>`).join("")}
     </div>
     <div class="row" style="margin-top:16px">
-      <button onclick="continuePreparationReview(this)">Continue to instructions</button>
-      <button class="ghost" onclick="startPreparationRun(this)">Prepare everything again</button>
+      <button onclick="continuePreparationReview(this)">Continue</button>
+      <button class="ghost" onclick="prepareAgainModal()">Reprepare affected documents</button>
     </div>
   </div>`;
+}
+
+function prepareAgainModal() {
+  const noted = Object.entries(S?.preparationNotes || {})
+    .filter(([, note]) => String(note || "").trim())
+    .map(([name]) => name);
+  const hasNotes = noted.length > 0;
+  showModal({
+    title: hasNotes ? "Reprepare affected documents?" : "Request a preparation repair?",
+    body: hasNotes
+      ? `<p>This does not rebuild the whole preparation package.</p>
+        <p>Preparation documents are connected. A correction to a character, setting, plot, or style document can require a matching change in the chapter plan, validation rubric, or manifest.</p>
+        <p>Select the notes to apply now. Canon Quill will also check related documents and update them only if the selected correction requires it. Documents unrelated to your selections will not be changed.</p>
+        ${preparationRerunScopeHtml(noted)}
+        <p class="hint">This run repairs preparation only and stops before prose drafting.</p>`
+      : `<div class="info warn"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg><div><b>No document notes are saved</b><p>There is no document-specific repair to apply right now.</p></div></div>
+        <p>If something needs changing, write a general preparation instruction below. Canon Quill will use it to identify the documents that need attention and leave unrelated documents alone.</p>
+        <label>General preparation instruction</label>
+        <textarea id="prep-rerun-general-note" rows="5" placeholder="Recheck the causality between the central conflict and the chapter plan. Preserve the character voice and all approved decisions."></textarea>
+        <div class="hint">This instruction is for this repair run only. It will not be saved as a document note.</div>`,
+    actions: `<button data-rerun="${hasNotes}" data-require-note="${!hasNotes}" data-start-label="${hasNotes ? "Reprepare affected documents" : "Start preparation repair"}" onclick="startPreparationRun(this)">${hasNotes ? "Reprepare affected documents" : "Start preparation repair"}</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+const PREPARATION_DEPENDENCIES = {
+  "project-brief.md": ["book-bible.md", "plot-bible.md", "chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"],
+  "book-bible.md": ["plot-bible.md", "chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"],
+  "character-bible.md": ["book-bible.md", "plot-bible.md", "chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"],
+  "world-bible.md": ["book-bible.md", "plot-bible.md", "chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"],
+  "plot-bible.md": ["chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"],
+  "style-guide.md": ["chapter-plan.md", "validation-rubric.md", "preparation-manifest.json"],
+  "chapter-plan.md": ["validation-rubric.md", "preparation-manifest.json"],
+  "validation-rubric.md": ["preparation-manifest.json"],
+  "preparation-manifest.json": []
+};
+
+function preparationDocumentNames() {
+  return PREP_DOCS?.map((doc) => doc.name)
+    || [...new Set([...(PREPARATION?.present || []), ...(PREPARATION?.missing || [])])];
+}
+
+function preparationAffectedDocuments(selected) {
+  const affected = new Set();
+  for (const name of selected) for (const dependent of PREPARATION_DEPENDENCIES[name] || []) affected.add(dependent);
+  return [...affected].filter((name) => !selected.includes(name));
+}
+
+function preparationRerunScopeHtml(noted, selected = noted) {
+  const selectedSet = new Set(selected);
+  const affected = preparationAffectedDocuments(selected);
+  const allNames = preparationDocumentNames();
+  const deferred = noted.filter((name) => !selectedSet.has(name));
+  const preserved = allNames.filter((name) => !noted.includes(name) && !affected.includes(name));
+  const notes = noted.length
+    ? `<div><b>Documents with saved notes</b><div id="prep-rerun-documents" class="prep-rerun-list">${noted.map((name) => `<label class="prep-rerun-item"><input type="checkbox" value="${esc(name)}" ${selectedSet.has(name) ? "checked" : ""} onchange="refreshPreparationRerunScope()"><span><b>${esc(name)}</b><span>Apply this note in the current repair</span></span></label>`).join("")}</div></div>`
+    : `<div class="hint">No document notes are saved. Only missing preparation documents would be created.</div>`;
+  return `<div id="prep-rerun-scope" class="prep-status">
+    ${notes}
+    ${affected.length ? `<div style="margin-top:12px"><b>Related documents checked automatically</b><ul>${affected.map((name) => `<li>${esc(name)}</li>`).join("")}</ul></div>` : ""}
+    ${deferred.length ? `<div style="margin-top:12px"><b>Saved notes for a later run</b><ul>${deferred.map((name) => `<li>${esc(name)}</li>`).join("")}</ul></div>` : ""}
+    ${preserved.length ? `<div style="margin-top:12px"><b>Not part of this repair</b><ul>${preserved.map((name) => `<li>${esc(name)}</li>`).join("")}</ul></div>` : ""}
+  </div>`;
+}
+
+function refreshPreparationRerunScope() {
+  const selected = [...document.querySelectorAll("#prep-rerun-documents input:checked")].map((input) => input.value);
+  const noted = [...document.querySelectorAll("#prep-rerun-documents input")].map((input) => input.value);
+  const scope = document.getElementById("prep-rerun-scope");
+  if (scope) scope.outerHTML = preparationRerunScopeHtml(noted, selected);
 }
 
 async function savePreparationNote(index, name, btn) {
@@ -3261,7 +3628,13 @@ async function continuePreparationReview(btn) {
   btn.disabled = true;
   try {
     S = await api("/api/preparation/review", { method: "POST" });
+    S = await api("/api/writing/confirm", { method: "POST" });
+    collapsedGroups["Set up"] = true;
+    collapsedGroups.Prepare = true;
+    route = "chapters";
     render();
+    startChapterPolling();
+    loadRuntime();
   } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
@@ -3277,6 +3650,7 @@ function viewChapters() {
     rate_limited: ["Session or usage limit reached", "The writing session reached a provider limit. Wait for the session or plan limit to reset, then resume. Your saved work is safe."],
     invalid_credentials: ["Credentials rejected", "The key or sign-in was refused. It may have been revoked, deleted or replaced. Fix it under Writing engine, then resume."],
     provider_error: ["The provider failed", "Something went wrong on their side. Usually worth resuming after a moment."],
+    stalled: ["Runtime stalled", "The orchestrator stopped responding after delegated agent activity. The run was stopped automatically; resume to restore its saved provider conversation."],
     cancelled: ["Stopped by you", "Resume whenever you are ready."],
     other: ["Drafting stopped", "The run did not finish."]
   };
@@ -3289,6 +3663,7 @@ function viewChapters() {
       rate_limited: ["Preparation session limit reached", "The preparation session reached a provider limit. Wait for it to reset, then resume preparation."],
       invalid_credentials: ["Preparation credentials rejected", "Fix the selected preparation provider under Writing engine, then resume preparation."],
       provider_error: ["Preparation provider failed", "The preparation provider stopped unexpectedly. Resume preparation when it is available again."],
+      stalled: ["Preparation runtime stalled", "The orchestrator stopped responding after delegated reference extraction. The run was stopped automatically; resume preparation to restore its saved provider conversation."],
       cancelled: ["Preparation stopped", "Resume preparation whenever you are ready."],
       other: ["Preparation stopped", "Preparation did not finish. The documents already written are still available to read."]
     };
@@ -3306,8 +3681,8 @@ function viewChapters() {
       <p class="sub" style="margin:0 0 8px">${help}</p>
       ${run.detail ? `<div class="steplog">${esc(run.detail)}</div>` : ""}
       <p class="hint" style="margin:10px 0 0">${preparationHalt
-        ? "Everything prepared so far is kept. Resuming starts a fresh session and continues from the saved package."
-        : "Everything written so far is kept. Resuming starts a fresh session at the first chapter that is not finished, reading the workspace to find where it got to."}</p>
+         ? "Everything prepared so far is kept. Resume restores the saved provider conversation when available and continues from the saved package."
+         : "Everything written so far is kept. Resume restores the saved provider conversation when available and continues at the first chapter that is not approved, using the saved workspace as its authority."}</p>
       <div class="row" style="margin-top:12px">
          <button onclick="resumeRunModal()">${preparationHalt ? "Resume preparation" : "Resume"}</button>
         ${["invalid_credentials", "no_credit", "rate_limited"].includes(run.reason)
@@ -3316,17 +3691,20 @@ function viewChapters() {
     </div>`;
   })() : "";
 
-  const live = run.status === "running" || runEvents.length > 0;
+  const live = run.status === "running";
   // A halted run offers Resume, which is the same act as starting.
   const packageReviewed = Boolean(PREPARATION?.ready && S.preparationReviewed);
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
+  const boardTitle = route === "preparation" ? "Preparation" : "Chapters";
   const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
-  const finishedOutput = outputCard();
+  // A file can appear before the orchestrator has finished its writing and
+  // editing passes. Keep it out of the author-facing output until the run ends.
+  const finishedOutput = run.status === "running" ? "" : outputCard();
 
-  if (!cs.length) return `<h1>Chapters</h1>
+  if (!cs.length) return `<h1>${boardTitle}</h1>
     ${haltCard}
-    ${haltCard || live ? "" : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
+     ${haltCard || live ? "" : route === "preparation" ? '<p class="sub">The package is built before a chapter plan is opened. Review it below when it is ready.</p>' : '<p class="sub">No chapter plan yet. The first run builds one from the approved preparation, then writes into it.</p>'}
     ${packageReviewed ? directionsCard(pending, dirs) : ""}
     ${writingCard}
     ${finishedOutput}
@@ -3334,8 +3712,10 @@ function viewChapters() {
 
   const approved = cs.filter((c) => c.status === "approved").length;
   return `
-  <h1>Chapters</h1>
-  <p class="sub">${mode === "chapter_by_chapter"
+  <h1>${boardTitle}</h1>
+  <p class="sub">${route === "preparation"
+      ? "Review the preparation package before opening the writing instructions."
+      : mode === "chapter_by_chapter"
       ? "<b>Chapter-by-chapter mode.</b> Each chapter stops here for your approval before the next one starts."
       : mode === "whole_book"
         ? "<b>Whole-book mode.</b> All chapters are drafted and validated in one pass; you review the finished manuscript."
@@ -3456,36 +3836,45 @@ function directionsCard(pending, all) {
   const applied = all.filter((d) => d.appliedAt);
   return `
   <div class="card" style="margin-top:14px">
-    <label>Instructions for the writing <span class="pill" style="margin-left:6px">optional</span></label>
-    <div class="hint" style="margin-bottom:8px">Nothing to add? Leave it empty. This is here for when you
-    want something taken into account from here on: a change of direction, a note about a character,
-    something to stop doing. The drafting agent reads these before each chapter and marks them applied.</div>
-    <textarea id="direction" rows="3" placeholder="Keep the protagonist's chapters colder. Stop explaining the central mystery in dialogue."></textarea>
-    <div class="row" style="margin-top:8px">
-      <button onclick="addDirection(this)">Add instruction</button>
-      <select id="dirscope" style="width:auto">
-        <option value="book">From now on</option>
-        <option value="chapter">Next chapter only</option>
-      </select>
+    <div class="spread">
+      <div><b>Instructions for the writing</b><span class="pill" style="margin-left:6px">optional</span>
+        <div class="hint" style="margin-top:3px">Saved instructions appear here and are read before the next writing run.</div></div>
+      <button class="ghost sm" onclick="addDirectionModal()">Add instruction</button>
     </div>
 
     ${pending.length ? `<div style="margin-top:14px">
-      <b style="font-size:12.5px">Waiting to be applied</b>
+      <b style="font-size:12.5px">Saved for the next run</b>
       ${pending.map((d) => `<div class="dir">
         <div>${esc(d.text)}</div>
         <div class="dir-m">${d.scope === "chapter" ? "next chapter only" : "from now on"} · ${new Date(d.createdAt).toLocaleString()}</div>
-        <button class="doc-x" title="Remove" onclick="removeDirection('${d.id}')">✕</button>
+        <div class="dir-actions"><button class="ghost icon-button" title="Edit instruction" aria-label="Edit instruction" onclick="editDirectionModal('${d.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 4.5-1 10.8-10.8a2.1 2.1 0 0 0-3-3L5.5 16z"/><path d="m14.5 6.5 3 3"/></svg></button>
+          <button class="doc-x" title="Delete instruction" aria-label="Delete instruction" onclick="removeDirection('${d.id}')">✕</button></div>
       </div>`).join("")}
     </div>` : ""}
 
     ${applied.length ? `<div style="margin-top:14px">
-      <b style="font-size:12.5px;color:var(--faint)">Applied (${applied.length})</b>
+      <b style="font-size:12.5px;color:var(--faint)">Already applied (${applied.length})</b>
       ${applied.slice(-4).map((d) => `<div class="dir applied">
         <div>${esc(d.text)}</div>
         <div class="dir-m">applied${d.appliedTo ? ` at chapter ${d.appliedTo}` : ""} · ${new Date(d.appliedAt).toLocaleString()}</div>
       </div>`).join("")}
-    </div>` : ""}
+    </div>` : !pending.length ? '<div class="hint" style="margin-top:12px">No saved instructions yet.</div>' : ""}
   </div>`;
+}
+
+function addDirectionModal() {
+  showModal({
+    title: "Add writing instruction",
+    body: `<p class="hint">Save a note for the drafting agent. It will appear in the instruction list and remain there until applied or removed.</p>
+      <textarea id="direction" rows="4" placeholder="Keep the protagonist's chapters colder. Stop explaining the central mystery in dialogue."></textarea>
+      <label style="margin-top:12px">Applies</label>
+      <select id="dirscope">
+        <option value="book">From now on</option>
+        <option value="chapter">Next chapter only</option>
+      </select>`,
+    actions: `<button onclick="addDirection(this)">Save instruction</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
 }
 
 async function addDirection(btn) {
@@ -3497,11 +3886,42 @@ async function addDirection(btn) {
   btn.disabled = true;
   try {
     const r = await api("/api/directions", { method: "POST", body: { text, scope } });
-    S = r.state; if (box) box.value = "";
+    S = r.state;
+    closeModal();
     render();
     toast("Instruction added. It will be applied before the next chapter.");
   } catch (e) { toast(e.message, "error"); }
   finally { btn.disabled = false; }
+}
+
+function editDirectionModal(id) {
+  const direction = (S.directions || []).find((item) => item.id === id);
+  if (!direction || direction.appliedAt) return;
+  showModal({
+    title: "Edit writing instruction",
+    body: `<textarea id="direction-edit" rows="4">${esc(direction.text)}</textarea>
+      <label style="margin-top:12px">Applies</label>
+      <select id="dirscope-edit">
+        <option value="book" ${direction.scope === "book" ? "selected" : ""}>From now on</option>
+        <option value="chapter" ${direction.scope === "chapter" ? "selected" : ""}>Next chapter only</option>
+      </select>`,
+    actions: `<button onclick="saveDirectionEdit('${id}', this)">Save changes</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>`
+  });
+}
+
+async function saveDirectionEdit(id, btn) {
+  const text = document.getElementById("direction-edit")?.value?.trim();
+  if (!text) { toast("Write the instruction first.", "warn"); return; }
+  const scope = document.getElementById("dirscope-edit")?.value || "book";
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/directions/${id}`, { method: "PATCH", body: { text, scope } });
+    S = r.state;
+    closeModal();
+    render();
+    toast("Instruction updated.");
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; }
 }
 
 async function removeDirection(id) {
@@ -3523,7 +3943,7 @@ async function resumeRunModal() {
     }
     showModal({
       title: preparationRun ? "Resume preparation?" : "Resume writing?",
-      body: `<p class="hint">This starts a fresh provider session. It will read the saved workspace, decisions, artifacts, and recorded runtime conversation before continuing.</p>
+      body: `<p class="hint">This restores the saved provider conversation when available. It also reads the saved workspace, decisions, artifacts, and recorded runtime conversation before continuing. If the provider cannot restore its session, the saved workspace remains the authority.</p>
         ${preparationChecklist(status)}
         ${preparationRun ? '<p class="hint">Preparation will continue building the missing documents and stop again before prose drafting.</p>' : writingEstimateCard(WRITING_ESTIMATE)}`,
       actions: `<button onclick="resumeRun(this)">${preparationRun ? "Resume preparation" : "Resume writing"}</button>
@@ -3543,10 +3963,13 @@ async function resumeRun(btn) {
     S = r.state;
     closeModal();
     runEvents = [];
+    runAgents = [];
+    selectedRunAgent = "orchestrator";
     runLatest = 0;
     runProgress = null;
+    resetRunProgressDisplay();
     runOutput = null;
-    showRunConsole = false;
+    dismissedOutputAlerts.clear();
     render();
     startRunPolling();
     toast(r.resumeAt ? `Resuming at chapter ${r.resumeAt}.` : "Resumed.");
@@ -3575,7 +3998,7 @@ async function setStatus(number, status) {
   loadVersion(true);
   setInterval(() => loadVersion(true), 10 * 60 * 1000);
   if (S) {
-    const persistedRoute = { preparation: "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
+     const persistedRoute = { preparation: S.writingConfirmed ? "chapters" : S.conversationStartedAt ? "preparation" : "style", intake_analysis: "intake_analysis", preflight: "questions", writing: "chapters",
       review: "chapters", export: "chapters", complete: "chapters" }[S.phase] || S.phase;
     route = PHASES.some((p) => p.id === persistedRoute) ? persistedRoute : "connect";
     render();
@@ -3583,8 +4006,9 @@ async function setStatus(number, status) {
     if (route === "engine") loadEngine();
     if (route === "connect") loadDrive();
     if (route === "style" && S.styleCorpus.built) loadFingerprint();
-    if (route === "questions") { loadQuestions(); startQuestionPolling(); }
-    if (route === "chapters") enterChapters();
+     if (route === "questions") { loadQuestions(); startQuestionPolling(); }
+     if (route === "preparation") enterPreparation();
+     if (route === "chapters") enterChapters();
   }
 })();
 </script>

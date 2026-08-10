@@ -47,17 +47,17 @@ describe("classification", () => {
 
   it("recognises a person-named character document even when it is prose", () => {
     const result = classifySource({
-      name: "Julian Scott Reid",
-      text: "PHYSICAL APPEARANCE\nJulian is tall and athletic. His personality is guarded but loyal.\n\nPERSONALITY\nHe avoids conflict until someone he loves is threatened."
+      name: "Rafael Mercer",
+      text: "PHYSICAL APPEARANCE\nRafael is tall and athletic. His personality is guarded but loyal.\n\nPERSONALITY\nHe avoids conflict until someone he loves is threatened."
     });
     expect(result.kind).toBe("characters");
   });
 
   it("trusts an explicit Characters folder over prose shape", () => {
     const result = classifySource({
-      name: "Cassandro Giuliano Montfort",
-      path: "/His Golden Heart/Characters/Cassandro Giuliano Montfort",
-      text: "PHYSICAL APPEARANCE\nCassandro is tall and athletic. His personality is guarded but loyal."
+      name: "Rafael Mercer",
+      path: "/The River House/Characters/Rafael Mercer",
+      text: "PHYSICAL APPEARANCE\nRafael is tall and athletic. His personality is guarded but loyal."
     });
     expect(result.kind).toBe("characters");
     expect(result.reasons.join(" ")).toMatch(/folder path/i);

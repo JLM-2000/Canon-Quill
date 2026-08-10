@@ -126,6 +126,7 @@ export type HaltReason =
   | "rate_limited"
   | "invalid_credentials"
   | "provider_error"
+  | "stalled"
   | "cancelled"
   | "other";
 
@@ -140,6 +141,8 @@ export interface RunState {
   detail: string | null;
   haltedAt: string | null;
   startedAt: string | null;
+  /** Provider-native conversation session, when the runtime exposes one. */
+  providerSessionId: string | null;
 }
 
 /** Author instruction for the drafting agent. */
@@ -327,7 +330,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     preparationReviewed: false,
     preparationNotes: {},
     directions: [],
-    run: { status: "idle", role: null, chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null },
+    run: { status: "idle", role: null, chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null, providerSessionId: null },
     ledger: emptyLedger(projectName, 0),
     styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null, excluded: [], notes: "", documentStats: [] },
     createdAt: now,
@@ -372,7 +375,12 @@ export async function loadState(slug: string): Promise<StudioState> {
         findings: { ...base.projectAnalysis.findings, ...(parsed.projectAnalysis?.findings ?? {}) }
       },
       chapterChats: parsed.chapterChats ?? {},
-      run: { ...base.run, ...(parsed.run ?? {}), role: parsed.run?.role === "analysis" ? "analysis" as const : parsed.run?.role === "drafting" ? "drafting" as const : null },
+       run: {
+         ...base.run,
+         ...(parsed.run ?? {}),
+         role: parsed.run?.role === "analysis" ? "analysis" as const : parsed.run?.role === "drafting" ? "drafting" as const : null,
+         providerSessionId: typeof parsed.run?.providerSessionId === "string" ? parsed.run.providerSessionId : null
+       },
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       writingConfirmed: parsed.writingConfirmed ?? Boolean(parsed.chapters?.length),
       preparationReviewed: parsed.preparationReviewed ?? false,
@@ -475,7 +483,9 @@ export function derivePhase(state: StudioState): PhaseId {
   if (!state.projectAnalysis.completed) return "intake_analysis";
   if (!state.projectAnalysis.continuedAt) return "intake_analysis";
   if (!state.conversationStartedAt && state.questions.length === 0) return "preflight";
-  if (!state.writingConfirmed) return "preflight";
+  // Once intake is closed, preparation owns the handoff until the author has
+  // reviewed its package and explicitly unlocks drafting.
+  if (!state.writingConfirmed) return "preparation";
   return "writing";
 }
 

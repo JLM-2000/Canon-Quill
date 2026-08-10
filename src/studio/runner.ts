@@ -9,12 +9,16 @@ import { redactSensitiveText } from "./redact.js";
 
 export type RuntimeId = "claude-code" | "opencode";
 export type ProviderId = "anthropic" | "openai";
+export type AuthMethod = "subscription" | "api_key";
 
 export interface RunEvent {
   seq: number;
   at: string;
   kind: "system" | "step" | "note" | "error";
   text: string;
+  sessionId?: string;
+  agent?: string;
+  depth?: number;
 }
 
 export interface RunSnapshot {
@@ -23,8 +27,20 @@ export interface RunSnapshot {
   command: string | null;
   startedAt: string | null;
   events: RunEvent[];
+  agents: RunAgentSnapshot[];
+  providerSessionId: string | null;
   latest: number;
   progress: RunProgress | null;
+}
+
+export type RunAgentStatus = "working" | "waiting" | "done";
+
+export interface RunAgentSnapshot {
+  key: string;
+  agent: string;
+  depth: number;
+  status: RunAgentStatus;
+  done: boolean;
 }
 
 export type RunProgressPhase =
@@ -43,15 +59,18 @@ export interface RunProgress {
   percent: number;
   detail: string;
   chapter: number | null;
+  activity: "working" | "waiting";
 }
 
 export interface StartOptions {
   slug: string;
   projectName: string;
   provider: ProviderId;
+  authMethod?: AuthMethod | null;
   model?: string | null;
   chapter?: number | null;
   note?: string;
+  resumeSessionId?: string | null;
   cwd?: string;
   onExit: (outcome: RunOutcome) => void;
   onProgress?: (progress: RunProgress) => void;
@@ -62,23 +81,46 @@ export interface RunOutcome {
   ok: boolean;
   code: number | null;
   signal: string | null;
-  reason: "cancelled" | "no_credit" | "rate_limited" | "invalid_credentials" | "provider_error" | "other" | null;
+  reason: "cancelled" | "stalled" | "no_credit" | "rate_limited" | "invalid_credentials" | "provider_error" | "other" | null;
   detail: string | null;
   /** Everything the run said, for the phase log. */
   trace: RunEvent[];
   progress: RunProgress | null;
+  providerSessionId: string | null;
 }
 
 const AGENT = "book-orchestrator";
 const MAX_EVENTS = 4000;
+const NESTED_POLL_MS = 1500;
+const NESTED_STALL_MS = 5 * 60_000;
+
+interface NestedMonitor {
+  child: ChildProcess;
+  timer: NodeJS.Timeout;
+  url: string;
+  startedAt: number;
+  sessions: Map<string, {
+    agent: string;
+    depth: number;
+    status: RunAgentStatus;
+    lastActivityAt: number;
+  }>;
+  parts: Map<string, string>;
+  lastNestedUpdateAt: number;
+  lastParentEventAt: number;
+  stallReported: boolean;
+}
 
 interface ActiveRun {
   slug: string;
   child: ChildProcess | null;
+  heartbeat?: NodeJS.Timeout;
+  nested?: NestedMonitor;
   runtime: RuntimeId;
   command: string;
   startedAt: string;
   stopping: boolean;
+  stopReason?: "cancelled" | "stalled";
   onProgress?: (progress: RunProgress) => void;
   onEvent?: (event: RunEvent) => void;
 }
@@ -90,6 +132,10 @@ let lastRuntime: RuntimeId | null = null;
 let lastCommand: string | null = null;
 let lastStartedAt: string | null = null;
 let progress: RunProgress | null = null;
+let agentStates = new Map<string, RunAgentSnapshot>();
+let claudeTaskAgents = new Map<string, { agent: string; depth: number }>();
+let providerSessionId: string | null = null;
+let runAuthMethod: AuthMethod | null = null;
 
 /** Tests and dry runs record the command without starting anything. */
 function dryRun(): boolean {
@@ -107,22 +153,60 @@ export function runSnapshot(since = 0): RunSnapshot {
     command: active?.command ?? lastCommand,
     startedAt: active?.startedAt ?? lastStartedAt,
     events: events.filter((event) => event.seq > since),
+    agents: [...agentStates.values()],
+    providerSessionId,
     latest: seq,
     progress
   };
 }
 
-function emit(kind: RunEvent["kind"], text: string): void {
+interface EventMeta {
+  sessionId?: string;
+  agent?: string;
+  depth?: number;
+  done?: boolean;
+}
+
+function emit(kind: RunEvent["kind"], text: string, meta?: EventMeta): void {
   const stripped = stripAnsi(text);
+  if (!meta?.sessionId && active?.nested) active.nested.lastParentEventAt = Date.now();
+  const key = meta?.sessionId ?? "orchestrator";
+  ensureAgent(key, meta?.agent ?? (key === "orchestrator" ? "Orchestrator" : "Subagent"), meta?.depth ?? 0);
+  setAgentStatus(key, meta?.done || isDoneSignal(stripped) ? "done" : "working");
+  if (meta?.done) setAgentStatus("orchestrator", "working");
+  if (progress?.activity === "waiting") setProgress({ ...progress, activity: "working" });
   const explicit = readProgress(stripped);
   const update = explicit ?? inferProgress(stripped);
   if (update) setProgress(update, Boolean(explicit));
+  if (!meta?.sessionId && /handing over to|delegating to/i.test(stripped)) setAgentStatus("orchestrator", "waiting");
   const clean = humanizeRuntimeText(redactSensitiveText(removeProgressMarker(stripped))).trim();
   if (!clean) return;
-  const event = { seq: ++seq, at: new Date().toISOString(), kind, text: clean.slice(0, 600) };
+  const event = { seq: ++seq, at: new Date().toISOString(), kind, text: clean.slice(0, 600), ...meta };
   events.push(event);
   active?.onEvent?.(event);
   if (events.length > MAX_EVENTS) events = events.slice(-MAX_EVENTS);
+}
+
+function ensureAgent(key: string, agent: string, depth: number): void {
+  const existing = agentStates.get(key);
+  if (existing) {
+    if (agent !== "Subagent" && agent !== "Orchestrator") existing.agent = agent;
+    existing.depth = Math.min(existing.depth, depth);
+    return;
+  }
+  agentStates.set(key, { key, agent, depth, status: "working", done: false });
+}
+
+function setAgentStatus(key: string, status: RunAgentStatus): void {
+  const agent = agentStates.get(key);
+  if (!agent) return;
+  if (agent.done && status !== "done") return;
+  agent.status = status;
+  agent.done = status === "done";
+}
+
+export function isDoneSignal(text: string): boolean {
+  return /(?:^|\s)done\s*[:=]\s*true(?:\s|$)/i.test(text.trim());
 }
 
 function setProgress(update: RunProgress, notify = true): void {
@@ -133,7 +217,7 @@ function setProgress(update: RunProgress, notify = true): void {
     detail: redactSensitiveText(update.detail).slice(0, 240),
     chapter: update.chapter ?? progress?.chapter ?? null
   };
-  if (progress && next.phase === progress.phase && next.percent === progress.percent && next.detail === progress.detail) return;
+  if (progress && next.phase === progress.phase && next.percent === progress.percent && next.detail === progress.detail && next.activity === progress.activity) return;
   progress = next;
   if (notify || phaseChanged) active?.onProgress?.(next);
 }
@@ -159,7 +243,8 @@ function readProgress(text: string): RunProgress | null {
     label: defaults.label,
     percent: Number(match[2] ?? defaults.percent),
     detail: (match[4] ?? defaults.label).trim(),
-    chapter: match[3] ? Number(match[3]) : null
+    chapter: match[3] ? Number(match[3]) : null,
+    activity: "working"
   };
 }
 
@@ -181,7 +266,7 @@ function inferProgress(text: string): RunProgress | null {
   else if (/read|search|reference|canon|project/.test(lower)) phase = "gathering_info";
   if (!phase) return null;
   const defaults = PROGRESS_PHASES[phase];
-  return { phase, label: defaults.label, percent: defaults.percent, detail: text.trim().slice(0, 240), chapter };
+  return { phase, label: defaults.label, percent: defaults.percent, detail: text.trim().slice(0, 240), chapter, activity: "working" };
 }
 
 function stripAnsi(value: string): string {
@@ -190,6 +275,32 @@ function stripAnsi(value: string): string {
 
 export function humanizeRuntimeText(text: string): string {
   const trimmed = text.trim();
+  if (isDoneSignal(trimmed)) return "Finished.";
+  if (/^Done\.\s+Cost so far:/i.test(trimmed)) return "Done.";
+  if (/^Entry contract for .* is satisfied:/i.test(trimmed)) return "The saved writing contract and required preparation files are present.";
+  if (/^# Todos$/.test(trimmed)) return "";
+  const todo = /^\[([•✓ ])\]\s*(.+)$/.exec(trimmed);
+  if (todo) return humanizeTodo(todo[1], todo[2]);
+  if (/^>\s*book-orchestrator\s*[·•]/i.test(trimmed)) return "Orchestrator session ready.";
+  if (/^✗\s+(?:Read|Glob|Grep)\b/i.test(trimmed)) return "A workspace lookup failed; checking the available artifacts.";
+  const read = /^(?:→|✱)\s+Read\s+(.+?)(?:\s+\[offset=.*)?$/i.exec(trimmed);
+  if (read) {
+    const target = read[1].trim();
+    if (target === "." || target === "workspaces") return "Checking workspace structure.";
+    if (/^workflows\//i.test(target)) return "Reading the workflow.";
+    if (/^workspaces\/[^/]+\/project\.json$/i.test(target)) return "Reading project state.";
+    if (/^workspaces\//i.test(target)) return "Reading selected preparation material.";
+  }
+  if (/^(?:→|✱)\s+Read\s+workflows\//i.test(trimmed)) return "Reading the workflow.";
+  if (/^(?:→|✱)\s+Read\s+workspaces\/[^/]+\/project\.json/i.test(trimmed)) return "Reading project state.";
+  if (/^(?:→|✱)\s+Read\s+workspaces\/?$/i.test(trimmed) || /^(?:→|✱)\s+Read\s+\.$/i.test(trimmed)) return "Checking workspace structure.";
+  if (/^(?:→|✱)\s+Read\s+workspaces\//i.test(trimmed)) return "Reading selected preparation material.";
+  if (/^(?:→|✱)\s+(?:Glob|Grep)\b/i.test(trimmed)) return "Searching the workspace.";
+  if (/^Searching for (?:workspaces|artifacts)\//i.test(trimmed)) return "Searching the workspace.";
+  if (/^Running\s+(?:ls|dir)\b/i.test(trimmed)) return "Checking workspace contents.";
+  if (/^Using Agent\.?$/i.test(trimmed)) return "Handing over to a specialist.";
+  if (/^(?:Completed: )?Using\s+(?:read|glob|grep)\.?$/i.test(trimmed)) return "Checking selected material.";
+  if (/^(?:Completed: )?Using\s+apply_patch\.?$/i.test(trimmed)) return "Updating a preparation artifact.";
   if (/repair reference extraction.*book-03-reference-extraction agent/i.test(trimmed)) {
     return "Repairing reference extraction.";
   }
@@ -205,6 +316,19 @@ export function humanizeRuntimeText(text: string): string {
     return `${action} the preparation material.`;
   }
   return text;
+}
+
+function humanizeTodo(marker: string, item: string): string {
+  const action = item
+    .replace(/^Read\b/i, "Reading")
+    .replace(/^Verify\b/i, "Checking")
+    .replace(/^Delegate\b/i, "Delegating")
+    .replace(/^Record\b/i, "Recording")
+    .replace(/^Run\b/i, "Running")
+    .replace(/^Stop\b/i, "Stopping");
+  if (marker === "✓") return `Completed: ${action}`;
+  if (marker === " ") return `Next: ${action}`;
+  return action;
 }
 
 export function selectRuntime(provider: ProviderId): RuntimeId | null {
@@ -226,7 +350,7 @@ function onPath(binary: string): boolean {
   return dirs.some((dir) => names.some((name) => existsSync(path.join(dir, name))));
 }
 
-export function buildPrompt(options: { projectName: string; slug: string; note?: string }): string {
+export function buildPrompt(options: { projectName: string; slug: string; note?: string; resumeSessionId?: string | null }): string {
   const lines = [
     `Continue the Canon Quill book "${options.projectName}" (workspace ${options.slug}).`,
     `Read workspaces/${options.slug}/project.json first, then carry the book forward from whatever`,
@@ -236,10 +360,13 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     "project-brief.md, chapter-plan.md, and preparation-manifest.json; only Read files that Glob found.",
     "When the run note begins PREPARATION_REPAIR, missing preparation artifacts are expected work, not errors: continue from the existing source records and delegate the repair.",
     "Read any preparation notes in project.json alongside those documents; treat them as author instructions for what must be corrected or preserved.",
+    "The Studio owns workspaces/<book>/logs/**. Never edit or write anything under logs; it records runtime and phase history itself.",
     "Use every question and author answer as authoritative preparation input.",
     `Read workspaces/${options.slug}/logs/phase-log.json, audit-log.json, and errors-log.json when they exist;`,
     "use them as the execution history, including recorded messages from earlier runtime sessions, and stop if they expose an unresolved failure.",
-    "A provider switch starts a new session: do not assume the old model's hidden context is available; continue from the recorded workspace, decisions, artifacts, and runtime conversation.",
+    options.resumeSessionId
+      ? "This run is resuming the provider conversation identified by the saved session. Keep using that conversation while treating the workspace and its recorded artifacts as authoritative."
+      : "If no saved provider session is available, this is a new provider conversation. Continue from the recorded workspace, decisions, artifacts, and runtime conversation.",
     "The author approved the preparation gate in the Studio. Honour every author gate that remains:",
     "do not approve a chapter on their behalf, and stop with a clear report if an input is missing.",
     "At each meaningful boundary, report one progress line in exactly this form so the Studio can",
@@ -248,8 +375,9 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     "Use phases gathering_info, preparing_characters, planning_chapters, writing_chapter, editing_chapter,",
     "validating_chapter, compiling_book, and finishing. Report the phase before doing the work, and never",
     "claim a later phase until its required artifact exists.",
+    "When a delegated agent finishes, require its final response to end with done: true. End your own final response with done: true.",
     "",
-    "You can write only inside workspaces/, and the only shell commands you have are this project's",
+    "You can write only inside workspaces/<book>/artifacts/, and the only shell commands you have are this project's",
     "own checks. That is deliberate. Inspect files with Read, Glob and Grep, never by shelling out to",
     "python, node, curl or a pipeline: those are refused, and retrying them only spends the author's",
     "money. If you genuinely cannot proceed without something you are denied, stop and say so."
@@ -301,6 +429,7 @@ export function buildCommand(runtime: RuntimeId, options: {
   model?: string | null;
   prompt: string;
   cwd: string;
+  resumeSessionId?: string | null;
 }): { file: string; args: string[] } {
   if (runtime === "claude-code") {
     return {
@@ -313,6 +442,7 @@ export function buildCommand(runtime: RuntimeId, options: {
         // Variadic flag: one comma-separated value, or it swallows the prompt.
         "--allowedTools", orchestratorRules(options.cwd).join(","),
         ...(options.model ? ["--model", options.model] : []),
+        ...(options.resumeSessionId ? ["--resume", options.resumeSessionId] : []),
         options.prompt
       ]
     };
@@ -322,6 +452,7 @@ export function buildCommand(runtime: RuntimeId, options: {
     args: [
       "run",
       "--agent", AGENT,
+      ...(options.resumeSessionId ? ["--session", options.resumeSessionId] : []),
       ...(options.model ? ["-m", `${options.provider}/${options.model}`] : []),
       options.prompt
     ]
@@ -339,7 +470,7 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   const cwd = options.cwd ?? process.cwd();
   const prompt = buildPrompt(options);
-  const { file, args } = buildCommand(runtime, { provider: options.provider, model: options.model, prompt, cwd });
+  const { file, args } = buildCommand(runtime, { provider: options.provider, model: options.model, prompt, cwd, resumeSessionId: options.resumeSessionId });
   const command = `${file} ${args.map((arg) => (arg.includes(" ") ? `"${arg.split("\n")[0]}…"` : arg)).join(" ")}`;
 
   events = [];
@@ -349,8 +480,13 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
     label: PROGRESS_PHASES.gathering_info.label,
     percent: PROGRESS_PHASES.gathering_info.percent,
     detail: "Reading the approved project material and preparation package.",
-    chapter: options.chapter ?? null
+    chapter: options.chapter ?? null,
+    activity: "working"
   };
+  agentStates = new Map([["orchestrator", { key: "orchestrator", agent: "Orchestrator", depth: 0, status: "working", done: false }]]);
+  claudeTaskAgents = new Map();
+  providerSessionId = options.resumeSessionId ?? null;
+  runAuthMethod = options.authMethod ?? null;
   lastRuntime = runtime;
   lastCommand = command;
   lastStartedAt = new Date().toISOString();
@@ -370,40 +506,53 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   const child = spawn(file, args, { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   active.child = child;
+  if (runtime === "opencode") startNestedMonitor(cwd, Date.parse(active.startedAt));
+  active.heartbeat = setInterval(() => {
+    if (!active || active.child !== child || !progress) return;
+    if (progress.activity !== "waiting") setProgress({ ...progress, activity: "waiting" });
+    setAgentStatus("orchestrator", "waiting");
+  }, 30_000);
+  active.heartbeat.unref();
 
   const stdout = lineReader((line) => translate(runtime, line));
-  const stderr = lineReader((line) => emit("error", line));
+  const stderr = lineReader((line) => {
+    if (runtime === "opencode") translate(runtime, line);
+    else emit("error", line);
+  });
   child.stdout?.on("data", (chunk: Buffer) => stdout(chunk.toString("utf8")));
   child.stderr?.on("data", (chunk: Buffer) => stderr(chunk.toString("utf8")));
 
   child.on("error", (error: Error) => {
     emit("error", error.message);
-    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events], progress }, options.onExit);
+    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events], progress, providerSessionId }, options.onExit);
   });
 
   child.on("close", (code, signal) => {
-    const cancelled = active?.stopping === true;
-    const ok = code === 0 && !cancelled;
-    emit("system", cancelled ? "Stopped by you." : ok ? "The run finished." : `The run stopped with code ${code ?? "unknown"}.`);
+    const stopReason = active?.stopReason;
+    const stopped = active?.stopping === true;
+    const ok = code === 0 && !stopped;
+    emit("system", stopReason === "stalled" ? "Stopped automatically because the delegated run stalled." : stopped ? "Stopped by you." : ok ? "The run finished." : `The run stopped with code ${code ?? "unknown"}.`);
     finish({
       ok,
       code,
       signal,
-      reason: ok ? null : cancelled ? "cancelled" : inferReason(recentText()),
+      reason: ok ? null : stopped ? stopReason ?? "cancelled" : inferReason(recentText()),
       detail: ok ? null : recentText().slice(-1500) || null,
       trace: [...events],
-      progress
+      progress,
+      providerSessionId
     }, options.onExit);
   });
 
   return { runtime, command };
 }
 
-export function stopRun(): boolean {
+export function stopRun(reason: "cancelled" | "stalled" = "cancelled"): boolean {
   if (!active) return false;
   active.stopping = true;
+  active.stopReason = reason;
   if (!active.child) {
-    finish({ ok: false, code: null, signal: null, reason: "cancelled", detail: null, trace: [...events], progress }, () => undefined);
+    finish({ ok: false, code: null, signal: null, reason, detail: null, trace: [...events], progress, providerSessionId }, () => undefined);
     return true;
   }
   active.child.kill("SIGTERM");
@@ -412,8 +561,156 @@ export function stopRun(): boolean {
 
 function finish(outcome: RunOutcome, onExit: (outcome: RunOutcome) => void): void {
   if (!active) return;
+  if (active.heartbeat) clearInterval(active.heartbeat);
+  stopNestedMonitor(active.nested);
+  for (const agent of agentStates.values()) setAgentStatus(agent.key, "done");
   active = null;
   onExit(outcome);
+}
+
+function startNestedMonitor(cwd: string, startedAt: number): void {
+  if (!active) return;
+  const port = 45000 + (process.pid % 1000);
+  const child = spawn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1", "--pure"], {
+    cwd,
+    windowsHide: true,
+    stdio: "ignore"
+  });
+  const monitor: NestedMonitor = {
+    child,
+    timer: setInterval(() => void pollNestedSessions(monitor), NESTED_POLL_MS),
+    url: `http://127.0.0.1:${port}`,
+    startedAt,
+    sessions: new Map(),
+    parts: new Map(),
+    lastNestedUpdateAt: 0,
+    lastParentEventAt: Date.now(),
+    stallReported: false
+  };
+  monitor.timer.unref();
+  active.nested = monitor;
+  child.once("error", () => stopNestedMonitor(monitor));
+  void pollNestedSessions(monitor);
+}
+
+function stopNestedMonitor(monitor: NestedMonitor | undefined): void {
+  if (!monitor) return;
+  clearInterval(monitor.timer);
+  if (monitor.child.exitCode === null && !monitor.child.killed) monitor.child.kill("SIGTERM");
+}
+
+async function pollNestedSessions(monitor: NestedMonitor): Promise<void> {
+  if (!active || active.nested !== monitor) return;
+  try {
+    const sessions = await fetchJson<Array<Record<string, any>>>(`${monitor.url}/session`);
+    const current = new Map(sessions
+      .filter((session) => typeof session.id === "string")
+      .map((session) => [session.id, session]));
+    const nested = sessions.filter((session) => {
+      const created = Number(session.time?.created ?? 0);
+      return typeof session.id === "string" && Boolean(session.parentID) && created >= monitor.startedAt - 2_000;
+    });
+    const latestNestedUpdate = nested.reduce((latest, session) => Math.max(latest, Number(session.time?.updated ?? session.time?.created ?? 0)), 0);
+    if (latestNestedUpdate > monitor.lastNestedUpdateAt) monitor.lastNestedUpdateAt = latestNestedUpdate;
+    if (nested.length && monitor.lastNestedUpdateAt && !monitor.stallReported
+      && Date.now() - monitor.lastNestedUpdateAt > NESTED_STALL_MS
+      && Date.now() - monitor.lastParentEventAt > NESTED_STALL_MS) {
+      monitor.stallReported = true;
+      emit("error", "The orchestrator stopped responding after delegated agent activity. The run was stopped automatically.");
+      stopRun("stalled");
+      return;
+    }
+
+    for (const session of nested) {
+      const agent = typeof session.agent === "string" ? session.agent : "subagent";
+      const depth = sessionDepth(session, current);
+      if (!monitor.sessions.has(session.id)) {
+        monitor.sessions.set(session.id, { agent, depth, status: "working", lastActivityAt: Date.now() });
+        ensureAgent(session.id, agent, depth);
+        setAgentStatus("orchestrator", "waiting");
+        emit("step", `${agent} started.`, { sessionId: session.id, agent, depth });
+      }
+
+      const messages = await fetchJson<Array<Record<string, any>>>(`${monitor.url}/session/${encodeURIComponent(session.id)}/message`);
+      const state = monitor.sessions.get(session.id);
+      if (!state) continue;
+      let changed = false;
+      let done = sessionIsDone(session);
+      for (const [messageIndex, message] of messages.entries()) {
+        if (message.info?.role === "user") continue;
+        const messageId = typeof message.info?.id === "string" ? message.info.id : String(messageIndex);
+        const parts = Array.isArray(message.parts) ? message.parts : [];
+        for (const [partIndex, part] of parts.entries()) {
+          if (!part || typeof part !== "object") continue;
+          const text = describeNestedPart(part as Record<string, any>);
+          if (!text) continue;
+          const key = `${session.id}:${messageId}:${part.id ?? partIndex}`;
+          const previous = monitor.parts.get(key) ?? "";
+          if (text === previous) continue;
+          monitor.parts.set(key, text);
+          const delta = text.startsWith(previous) ? text.slice(previous.length).trim() : text;
+          if (delta) {
+            changed = true;
+            if (isDoneSignal(delta)) done = true;
+            emit(part.type === "tool" ? "step" : "note", delta, { sessionId: session.id, agent, depth, done: isDoneSignal(delta) });
+          }
+        }
+      }
+      if (done) {
+        state.status = "done";
+        setAgentStatus(session.id, "done");
+      } else if (changed) {
+        state.status = "working";
+        state.lastActivityAt = Date.now();
+        setAgentStatus(session.id, "working");
+      } else if (Date.now() - state.lastActivityAt > 30_000) {
+        state.status = "waiting";
+        setAgentStatus(session.id, "waiting");
+      }
+    }
+    if ([...monitor.sessions.values()].some((session) => session.status !== "done")) setAgentStatus("orchestrator", "waiting");
+    else if (monitor.sessions.size) setAgentStatus("orchestrator", "working");
+  } catch {
+    // The monitor is best effort. The parent runtime stream remains authoritative.
+  }
+}
+
+function sessionIsDone(session: Record<string, any>): boolean {
+  const status = String(session.status ?? session.state ?? "").toLowerCase();
+  if (/^(?:complete|completed|done|success|failed|error|cancelled|canceled|terminated)$/.test(status)) return true;
+  return [session.time?.completed, session.time?.finished, session.time?.ended]
+    .some((value) => Number(value) > 0);
+}
+
+function sessionDepth(session: Record<string, any>, all: Map<string, Record<string, any>>): number {
+  let depth = 0;
+  let parent = typeof session.parentID === "string" ? session.parentID : null;
+  const visited = new Set<string>();
+  while (parent && !visited.has(parent)) {
+    visited.add(parent);
+    depth += 1;
+    const parentSession = all.get(parent);
+    parent = typeof parentSession?.parentID === "string" ? parentSession.parentID : null;
+  }
+  return depth;
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`OpenCode monitor returned ${response.status}.`);
+  return response.json() as Promise<T>;
+}
+
+export function describeNestedPart(part: Record<string, any>): string | null {
+  if (part.type === "text" && typeof part.text === "string") {
+    const text = part.text.replace(/\s+/g, " ").trim();
+    return text ? text.slice(0, 600) : null;
+  }
+  if (part.type !== "tool") return null;
+  const state = part.state && typeof part.state === "object" ? part.state : {};
+  const action = describeTool(part.tool, state.input);
+  if (state.status === "error") return `Tool failed: ${action}`;
+  return action;
 }
 
 function recentText(): string {
@@ -443,7 +740,7 @@ function lineReader(onLine: (line: string) => void): (chunk: string) => void {
 function translate(runtime: RuntimeId, line: string): void {
   if (runtime !== "claude-code") {
     // OpenCode's own output is already written for a person to read.
-    emit("note", line);
+    emit(isOpenCodeError(line) ? "error" : "note", line);
     return;
   }
   let parsed: unknown;
@@ -453,17 +750,57 @@ function translate(runtime: RuntimeId, line: string): void {
     emit("note", line);
     return;
   }
-  for (const event of describeClaudeEvent(parsed)) emit(event.kind, event.text);
+  const raw = parsed as Record<string, any>;
+  if (raw.type === "assistant" && Array.isArray(raw.message?.content)) {
+    for (const block of raw.message.content) {
+      if (block?.type === "tool_use" && isDelegationTool(block.name) && typeof block.id === "string") {
+        claudeTaskAgents.set(block.id, { agent: String(block.input?.subagent_type ?? "Subagent"), depth: 1 });
+      }
+    }
+  }
+  for (const event of describeClaudeEvent(parsed, { includeCost: runAuthMethod === "api_key" })) {
+    if (event.runtimeSessionId) providerSessionId = event.runtimeSessionId;
+    const task = event.sessionId ? claudeTaskAgents.get(event.sessionId) : undefined;
+    emit(event.kind, event.text, event.sessionId ? { sessionId: event.sessionId, agent: event.agent ?? task?.agent, depth: event.depth ?? task?.depth, done: event.done } : { done: event.done });
+  }
+  if (raw.type === "user" && Array.isArray(raw.message?.content)) {
+    for (const block of raw.message.content) {
+      const task = typeof block?.tool_use_id === "string" ? claudeTaskAgents.get(block.tool_use_id) : undefined;
+      if (block?.type !== "tool_result" || !task) continue;
+      emit(block.is_error ? "error" : "note", block.is_error ? `A delegated step failed: ${flatten(block.content)}` : "", {
+        sessionId: block.tool_use_id,
+        agent: task.agent,
+        depth: task.depth,
+        done: true
+      });
+    }
+  }
 }
 
-interface Described { kind: RunEvent["kind"]; text: string }
+function isOpenCodeError(line: string): boolean {
+  return /^\s*✗\b/.test(line) || /^\s*(?:Error|Failed|Permission denied):/i.test(line);
+}
 
-export function describeClaudeEvent(value: unknown): Described[] {
+interface Described {
+  kind: RunEvent["kind"];
+  text: string;
+  sessionId?: string;
+  agent?: string;
+  depth?: number;
+  done?: boolean;
+  runtimeSessionId?: string;
+}
+
+export function describeClaudeEvent(value: unknown, options: { includeCost?: boolean } = {}): Described[] {
   const event = value as Record<string, any>;
   if (!event || typeof event !== "object") return [];
 
   if (event.type === "system" && event.subtype === "init") {
-    return [{ kind: "system", text: `Session ready${event.model ? ` on ${event.model}` : ""}.` }];
+    return [{
+      kind: "system",
+      text: `Session ready${event.model ? ` on ${event.model}` : ""}.`,
+      runtimeSessionId: typeof event.session_id === "string" ? event.session_id : typeof event.sessionId === "string" ? event.sessionId : undefined
+    }];
   }
 
   if (event.type === "assistant" && Array.isArray(event.message?.content)) {
@@ -473,7 +810,13 @@ export function describeClaudeEvent(value: unknown): Described[] {
         const text = block.text.replace(/\s+/g, " ").trim();
         if (text) described.push({ kind: "note", text });
       }
-      if (block?.type === "tool_use") described.push({ kind: "step", text: describeTool(block.name, block.input) });
+       if (block?.type === "tool_use") described.push({
+         kind: "step",
+         text: describeTool(block.name, block.input),
+          sessionId: isDelegationTool(block.name) && typeof block.id === "string" ? block.id : undefined,
+          agent: isDelegationTool(block.name) ? String(block.input?.subagent_type ?? block.input?.agent ?? "Subagent") : undefined,
+          depth: isDelegationTool(block.name) ? 1 : undefined
+       });
     }
     return described;
   }
@@ -485,9 +828,10 @@ export function describeClaudeEvent(value: unknown): Described[] {
   }
 
   if (event.type === "result") {
-    const cost = typeof event.total_cost_usd === "number" ? ` Cost so far: $${event.total_cost_usd.toFixed(2)}.` : "";
+    const cost = options.includeCost !== false && typeof event.total_cost_usd === "number"
+      ? ` Provider-reported API usage: $${event.total_cost_usd.toFixed(2)}.` : "";
     return event.subtype === "success"
-      ? [{ kind: "system", text: `Done.${cost}` }]
+      ? [{ kind: "system", text: `Done.${cost}`, done: true }]
       : [{ kind: "error", text: `Stopped: ${event.subtype ?? "unknown reason"}.${cost}` }];
   }
 
@@ -496,18 +840,32 @@ export function describeClaudeEvent(value: unknown): Described[] {
 
 function describeTool(name: unknown, input: Record<string, any> | undefined): string {
   const file = (value: unknown) => (typeof value === "string" ? path.basename(value) : "a file");
-  switch (name) {
-    case "Task": return `Handing over to ${input?.subagent_type ?? "a specialist"}: ${input?.description ?? "work in this phase"}.`;
-    case "Read": return `Reading ${file(input?.file_path)}.`;
-    case "Write": return `Writing ${file(input?.file_path)}.`;
-    case "Edit": return `Editing ${file(input?.file_path)}.`;
-    case "Bash": return `Running ${String(input?.command ?? "a command").slice(0, 120)}.`;
-    case "Glob":
-    case "Grep": return `Searching for ${String(input?.pattern ?? "something").slice(0, 80)}.`;
-    case "WebFetch":
-    case "WebSearch": return `Looking up ${String(input?.url ?? input?.query ?? "a reference").slice(0, 100)}.`;
+  switch (String(name ?? "").toLowerCase()) {
+    case "task":
+    case "agent": return `Handing over to ${input?.subagent_type ?? input?.agent ?? "a specialist"}: ${input?.description ?? "work in this phase"}.`;
+    case "read": return `Reading ${file(input?.file_path ?? input?.filePath)}.`;
+    case "write": return `Writing ${file(input?.file_path ?? input?.filePath)}.`;
+    case "edit": return `Editing ${file(input?.file_path ?? input?.filePath)}.`;
+    case "bash": return describeBash(input?.command);
+    case "glob":
+    case "grep": return "Searching the workspace.";
+    case "webfetch":
+    case "websearch": return "Looking up a reference.";
     default: return `Using ${String(name ?? "a tool")}.`;
   }
+}
+
+function isDelegationTool(name: unknown): boolean {
+  return ["task", "agent"].includes(String(name ?? "").toLowerCase());
+}
+
+function describeBash(command: unknown): string {
+  const text = String(command ?? "").trim();
+  if (/^(?:ls|dir)\b/i.test(text)) return "Checking workspace contents.";
+  if (/npm run validate:workflow/i.test(text)) return "Checking the workflow.";
+  if (/npm test/i.test(text)) return "Running the project tests.";
+  if (/npm run build/i.test(text)) return "Building the project.";
+  return "Running an approved project check.";
 }
 
 function flatten(content: unknown): string {

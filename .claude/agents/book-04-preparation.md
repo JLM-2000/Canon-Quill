@@ -81,3 +81,12 @@ If a required decision is unresolved, write a focused blocking question through
 the Studio rather than filling the gap with a trope. Do not draft prose in this
 phase. Do not mark preparation complete until the manifest proves every
 required artifact exists and the unresolved-risk register is explicit.
+
+Create or repair required artifacts one file at a time using workspace-relative
+paths such as `workspaces/<book>/artifacts/chapter-plan.md`. Never use an absolute
+filesystem path or a multi-file `apply_patch`; verify each artifact before editing
+the next one. If an edit does not return, stop with the exact artifact path and
+tool failure instead of retrying a larger patch.
+
+Never edit `workspaces/<book>/logs/**`; the Studio owns those logs. When
+preparation is complete, end the final response with `done: true`.
