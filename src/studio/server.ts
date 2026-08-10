@@ -2115,9 +2115,13 @@ export function createStudioApp() {
       : await cached();
     if (!text) throw new HttpError(404, "The selected draft text is not cached.");
     const analysis = analyseManuscript(text);
-    const section = analysis.chapters[index - 1];
+    const storySections = analysis.chapters.filter((candidate) => isManuscriptStoryHeading(candidate.heading));
+    const section = analysis.chapters.find((candidate) => candidate.index === index && isManuscriptStoryHeading(candidate.heading))
+      ?? storySections[index - 1];
     if (!section) throw new HttpError(404, "That draft section is not available.");
-    const nextSectionOffset = analysis.chapters[index]?.offset ?? analysis.epilogue?.offset ?? analysis.backMatter?.offset ?? analysis.storyEndOffset;
+    const rawIndex = analysis.chapters.indexOf(section);
+    const nextSection = analysis.chapters.slice(rawIndex + 1).find((candidate) => isManuscriptStoryHeading(candidate.heading));
+    const nextSectionOffset = nextSection?.offset ?? analysis.epilogue?.offset ?? analysis.backMatter?.offset ?? analysis.storyEndOffset;
     return { heading: section.heading, markdown: text.slice(section.offset, nextSectionOffset).trim() };
   }
 
@@ -2715,6 +2719,10 @@ function classifyManuscriptSection(heading: string): ExistingManuscriptSection["
   if (/^\s*#{0,3}\s*prologue\b/i.test(heading)) return "prologue";
   if (/^\s*#{0,3}\s*chapter\b/i.test(heading)) return "chapter";
   return "section";
+}
+
+function isManuscriptStoryHeading(heading: string): boolean {
+  return /^\s*#{0,3}\s*(?:prologue|chapter|chapitre|capítulo|kapitel|part|epilogue|interlude)\b/i.test(heading);
 }
 
 interface FlatNode {

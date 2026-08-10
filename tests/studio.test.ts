@@ -278,12 +278,14 @@ describe("studio api", () => {
     };
     await save(state);
     await mkdir(workspacePaths("test-book").driveCache, { recursive: true });
-    await writeFile(path.join(workspacePaths("test-book").driveCache, "draft-source.json"), JSON.stringify({ text: "CHAPTER I\n\n**Already written.**\n\n*The thought stayed.*" }), "utf8");
+    await writeFile(path.join(workspacePaths("test-book").driveCache, "draft-source.json"), JSON.stringify({ text: "# Why We Braved\n\n— His Golden Heart —\n\nBook 3\n\nAlicia J. Veru\n\nCHAPTER I\n\n**Already written.**\n\n*The thought stayed.*" }), "utf8");
 
     const view = await fetch(`${base}/api/manuscript/sections/1/view`);
     expect(view.status).toBe(200);
     const viewText = await view.text();
     expect(viewText).toContain("Already written.");
+    expect(viewText).toContain("CHAPTER I");
+    expect(viewText).not.toContain("Why We Braved");
     expect(viewText).toContain("<strong>Already written.</strong>");
     expect(viewText).toContain("<em>The thought stayed.</em>");
     expect(viewText).toContain(">Download</a>");
