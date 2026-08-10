@@ -437,6 +437,20 @@ export function createStudioApp() {
     path: string;
   }
 
+  function formattingFollowsDirections(state: StudioState, number: number, markdown: string): boolean {
+    const directions = state.directions
+      .filter((direction) => direction.scope === "book" || direction.chapter === number)
+      .map((direction) => direction.text.toLowerCase());
+    const requiresBoldDialogue = directions.some((text) => /bold.*dialog|dialog.*bold/.test(text));
+    const requiresItalicThoughts = directions.some((text) => /italic.*thought|thought.*italic/.test(text));
+    if (!requiresBoldDialogue && !requiresItalicThoughts) return true;
+
+    const observation = measureFormatting([{ source: `chapter-${number}`, text: markdown }])[0];
+    if (requiresBoldDialogue && observation.dialogueCount > 0 && observation.boldDialogueCount < observation.dialogueCount) return false;
+    if (requiresItalicThoughts && observation.italicCount === 0) return false;
+    return true;
+  }
+
   async function finalChapterMarkdownPath(slug: string, state: StudioState, number: number): Promise<string | null> {
     const chapterDirectory = workspacePaths(slug).chapters;
     const padded = String(number).padStart(2, "0");
@@ -450,6 +464,8 @@ export function createStudioApp() {
       .find((candidate) => existsSync(candidate));
     if (!validationPath) return null;
 
+    const markdown = await readFile(markdownPath, "utf8");
+    if (!formattingFollowsDirections(state, number, markdown)) return null;
     const validation = await readFile(validationPath, "utf8");
     let passed = /(?:^|\n)\s*Transition:\s*pass_(?:chapter_by_chapter|whole_book)\b/i.test(validation);
     if (!passed && validationPath.endsWith(".json")) {

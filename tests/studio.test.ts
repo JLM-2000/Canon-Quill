@@ -226,6 +226,7 @@ describe("studio api", () => {
     const { loadState: load, saveState: save } = await import("../src/studio/state.js");
     const state = await load("test-book");
     state.draftingMode = "whole_book";
+    state.directions = [{ id: "formatting", text: "Thoughts in italics and dialogues in bold, please.", scope: "book", createdAt: new Date().toISOString() }];
     await save(state);
     await mkdir(workspacePaths("test-book").final, { recursive: true });
     await writeFile(workspacePaths("test-book").final + "/manuscript.md", "# Chapter 2\n\nThe finished book.", "utf8");
@@ -254,7 +255,7 @@ describe("studio api", () => {
     await mkdir(workspacePaths("test-book").final, { recursive: true });
     await mkdir(workspacePaths("test-book").chapters, { recursive: true });
     await writeFile(path.join(workspacePaths("test-book").final, "manuscript.md"), "# Final\n\nBook.", "utf8");
-    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-01-edited.md"), "# Chapter 1\n\nFirst.", "utf8");
+    await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-01-edited.md"), "# Chapter 1\n\n**“Hello.”**\n\n*The thought stayed.*", "utf8");
     await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-02-edited.md"), "# Chapter 2\n\nSecond.", "utf8");
     await writeFile(path.join(workspacePaths("test-book").chapters, "chapter-01-validation.md"), "Transition: pass_chapter_by_chapter\n", "utf8");
 
