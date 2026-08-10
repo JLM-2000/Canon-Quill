@@ -210,6 +210,8 @@ describe("studio api", () => {
     expect(html).toContain('preparation: S.writingConfirmed ? "chapters"');
     expect(html).toContain("function enterPreparation()");
     expect(html).toContain("output-icon-button");
+    expect(html).toContain("modal-actions");
+    expect(html).toContain("setModalBusy");
     expect(html).toContain("const plannedChapter");
     expect(html).toContain('const started = await api("/api/run/start"');
     expect(html).toContain("Redo started for Chapter");

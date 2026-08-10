@@ -91,6 +91,7 @@
   .modal.writing-modal { max-width: min(820px, 96vw); max-height: none; overflow: visible; padding: 24px 28px; }
   .modal.writing-modal .estimate { margin: 8px 0; padding: 10px; }
   .modal.writing-modal .estimate h4 { margin-bottom: 5px; }
+  .modal-actions[aria-busy="true"] button, .modal-actions[aria-busy="true"] a { pointer-events: none; }
   .modal h3 { margin: 0 0 4px; font-size: 16px; }
   .commit { border-left: 2px solid var(--border); padding: 4px 0 4px 10px; margin: 6px 0; font-size: 12.5px; }
   .commit code { font-size: 11px; }
@@ -580,13 +581,55 @@ function showModal({ title, body, actions, onOpen, dismissable = true, size = ""
   wrap.innerHTML = `<div class="modal ${size}">
     <h3>${title}</h3>
     ${body}
-    <div class="row" style="margin-top:18px">${actions}</div>
+    <div class="row modal-actions" style="margin-top:18px">${actions}</div>
   </div>`;
   document.body.appendChild(wrap);
+  wrap.querySelector(".modal-actions")?.addEventListener("click", (event) => {
+    const target = event.target.closest("button, a");
+    if (!target) return;
+    queueMicrotask(() => { if (target.isConnected) setModalBusy(target); });
+  });
   if (dismissable) {
     document.addEventListener("keydown", escClose);
   }
   onOpen?.();
+}
+
+const modalBusyObservers = new WeakMap();
+
+function setModalBusy(btn) {
+  const actions = btn?.closest(".modal-actions");
+  if (!actions || actions.getAttribute("aria-busy") === "true") return;
+  actions.setAttribute("aria-busy", "true");
+  actions.querySelectorAll("button, a").forEach((control) => {
+    control.dataset.modalWasDisabled = control.disabled ? "true" : "false";
+    control.setAttribute("aria-disabled", "true");
+    if ("disabled" in control) control.disabled = true;
+  });
+  btn.dataset.modalOriginalHtml = btn.innerHTML;
+  btn.innerHTML = `<span class="spin"></span> ${btn.textContent?.trim() || "Working…"}`;
+  const observer = new MutationObserver(() => {
+    if (!btn.disabled) clearModalBusy(btn);
+  });
+  observer.observe(btn, { attributes: true, attributeFilter: ["disabled"] });
+  modalBusyObservers.set(actions, observer);
+}
+
+function clearModalBusy(btn) {
+  const actions = btn?.closest(".modal-actions");
+  if (!actions) return;
+  modalBusyObservers.get(actions)?.disconnect();
+  modalBusyObservers.delete(actions);
+  actions.removeAttribute("aria-busy");
+  actions.querySelectorAll("button, a").forEach((control) => {
+    control.removeAttribute("aria-disabled");
+    if ("disabled" in control) control.disabled = control.dataset.modalWasDisabled === "true";
+    delete control.dataset.modalWasDisabled;
+  });
+  if (btn.dataset.modalOriginalHtml) {
+    btn.innerHTML = btn.dataset.modalOriginalHtml;
+    delete btn.dataset.modalOriginalHtml;
+  }
 }
 function escClose(e) { if (e.key === "Escape") closeModal(); }
 function closeModal() {
