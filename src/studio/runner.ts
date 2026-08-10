@@ -569,8 +569,14 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
     if (runtime === "opencode") translate(runtime, line);
     else emit("error", line);
   });
-  child.stdout?.on("data", (chunk: Buffer) => stdout(chunk.toString("utf8")));
-  child.stderr?.on("data", (chunk: Buffer) => stderr(chunk.toString("utf8")));
+  child.stdout?.on("data", (chunk: Buffer) => {
+    noteRuntimeActivity();
+    stdout(chunk.toString("utf8"));
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    noteRuntimeActivity();
+    stderr(chunk.toString("utf8"));
+  });
 
   child.on("error", (error: Error) => {
     emit("error", error.message);
@@ -786,6 +792,10 @@ function lineReader(onLine: (line: string) => void): (chunk: string) => void {
     buffer = lines.pop() ?? "";
     for (const line of lines) if (line.trim()) onLine(line);
   };
+}
+
+function noteRuntimeActivity(): void {
+  if (active) active.lastOutputAt = Date.now();
 }
 
 function translate(runtime: RuntimeId, line: string): void {
