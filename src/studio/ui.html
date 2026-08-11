@@ -3880,7 +3880,7 @@ function viewChapters() {
   const packageReviewed = Boolean(PREPARATION?.ready && S.preparationReviewed);
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
-  const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? `${haltCard}${runPanel(run)}` : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
+  const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? runPanel(run) : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   // A file can appear before the orchestrator has finished its writing and
   // editing passes. Keep it out of the author-facing output until the run ends.
   const finishedOutput = run.status === "running" ? "" : outputCard();
