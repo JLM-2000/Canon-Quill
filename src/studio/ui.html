@@ -964,8 +964,12 @@ function go(r) {
 
 function toggleNavGroup(group) {
   collapsedGroups[group] = !collapsedGroups[group];
-  try { localStorage.setItem("canon-quill-nav-groups", JSON.stringify(collapsedGroups)); } catch { /* storage is optional */ }
+  saveCollapsedGroups();
   renderNav();
+}
+
+function saveCollapsedGroups() {
+  try { localStorage.setItem("canon-quill-nav-groups", JSON.stringify(collapsedGroups)); } catch { /* storage is optional */ }
 }
 
 function readCollapsedGroups() {
@@ -2851,6 +2855,7 @@ async function continueToChapters(btn) {
       stopQuestionPolling();
       collapsedGroups["Set up"] = true;
       collapsedGroups.Prepare = true;
+      saveCollapsedGroups();
       route = "chapters";
     }
     render();
@@ -3875,7 +3880,7 @@ function viewChapters() {
   const packageReviewed = Boolean(PREPARATION?.ready && S.preparationReviewed);
   const preparationReadyForReview = run.status !== "running" && Boolean(PREPARATION?.ready && !S.preparationReviewed);
   const nextChapter = cs.find((chapter) => chapter.status !== "approved")?.number ?? null;
-  const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? "" : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
+  const writingCard = preparationReadyForReview ? preparationReviewCard() : live ? runPanel(run) : haltCard ? `${haltCard}${runPanel(run)}` : packageReviewed ? startCard(cs.length > 0, mode, nextChapter) : preparationCard();
   // A file can appear before the orchestrator has finished its writing and
   // editing passes. Keep it out of the author-facing output until the run ends.
   const finishedOutput = run.status === "running" ? "" : outputCard();
