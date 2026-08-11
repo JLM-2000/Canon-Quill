@@ -38,6 +38,7 @@ import {
   startRun,
   stopRun,
   type RunOutcome,
+  type RunEvent,
   type RunProgress,
   type RuntimeId
 } from "./runner.js";
@@ -64,7 +65,7 @@ import {
   touchProject
 } from "../workspace/registry.js";
 import { workspacePaths } from "../workspace/paths.js";
-import { appendLog, logError, resolveErrors } from "../project/logs.js";
+import { appendLog, logError, readLog, resolveErrors } from "../project/logs.js";
 import { checkCredentials, defaultModels, loadCatalog, type ProviderId } from "./engine.js";
 import { estimateWriting } from "./estimate.js";
 import { applyUpdate, getVersionInfo } from "./updates.js";
@@ -382,7 +383,7 @@ export function createStudioApp() {
             agent: "book-orchestrator",
             event: "runtime_message",
             message: event.text,
-            data: { seq: event.seq, kind: event.kind }
+            data: { seq: event.seq, kind: event.kind, sessionId: event.sessionId, agent: event.agent, depth: event.depth }
           })).catch(() => undefined);
         },
         onExit: (outcome) => {
@@ -2375,6 +2376,33 @@ export function createStudioApp() {
       pendingOutcome = null;
     }
     res.json(runSnapshot(Number(_req.query.since) || 0));
+  }));
+
+  app.get("/api/run/history", route(async (_req, res) => {
+    const slug = await requireSlug();
+    const entries = await readLog(slug, "phase");
+    const events: RunEvent[] = [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object" || (entry as any).event !== "runtime_message") continue;
+      const data = (entry as any).data;
+      const kind = data?.kind;
+      if (!["system", "step", "note", "error"].includes(kind)) continue;
+      events.push({
+        seq: Number(data.seq) || events.length + 1,
+        at: typeof (entry as any).timestamp === "string" ? (entry as any).timestamp : new Date().toISOString(),
+        kind,
+        text: typeof (entry as any).message === "string" ? (entry as any).message : "",
+        sessionId: typeof data.sessionId === "string" ? data.sessionId : undefined,
+        agent: typeof data.agent === "string" ? data.agent : undefined,
+        depth: Number.isFinite(data.depth) ? data.depth : undefined
+      });
+    }
+    const agents = new Map<string, { key: string; agent: string; depth: number; status: "done"; done: true }>();
+    for (const event of events) {
+      const key = event.sessionId ?? "orchestrator";
+      agents.set(key, { key, agent: event.agent ?? (key === "orchestrator" ? "Orchestrator" : "Subagent"), depth: event.depth ?? 0, status: "done", done: true });
+    }
+    res.json({ active: false, runtime: null, command: null, startedAt: null, events, agents: [...agents.values()], providerSessionId: (await loadState(slug)).run.providerSessionId, delegatedSessions: [], latest: events.at(-1)?.seq ?? 0, progress: null, historical: true });
   }));
 
   app.post("/api/run/stop", route(async (_req, res) => {

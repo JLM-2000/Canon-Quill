@@ -462,7 +462,7 @@ let questionSnapshot = null;
 let chapterSnapshot = null;
 let projectAnalysisLoading = false;
 let seriesDragId = null;
-let collapsedGroups = { "Set up": false, Prepare: false, Write: false };
+let collapsedGroups = readCollapsedGroups();
 let chapterChat = null;
 let runProgress = null;
 let runAgents = [];
@@ -964,7 +964,17 @@ function go(r) {
 
 function toggleNavGroup(group) {
   collapsedGroups[group] = !collapsedGroups[group];
+  try { localStorage.setItem("canon-quill-nav-groups", JSON.stringify(collapsedGroups)); } catch { /* storage is optional */ }
   renderNav();
+}
+
+function readCollapsedGroups() {
+  const defaults = { "Set up": false, Prepare: false, Write: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem("canon-quill-nav-groups") || "null");
+    for (const group of Object.keys(defaults)) if (typeof saved?.[group] === "boolean") defaults[group] = saved[group];
+  } catch { /* storage is optional */ }
+  return defaults;
 }
 
 // --- views -----------------------------------------------------------------
@@ -3455,7 +3465,7 @@ function runPanel(run) {
         ${runtimeInfo?.label ? `<span class="pill">${esc(runtimeInfo.label)}</span>` : ""}
          ${runtimeInfo?.model ? `<span class="pill">${esc(runtimeInfo.model)}</span>` : ""}
        </div>
-       ${running ? `<div class="row" style="gap:6px"><span id="run-status-dot" class="run-status-dot ${activity.className}" title="${activity.label}" aria-label="${activity.label}"></span><span id="run-elapsed" class="pill" aria-label="Elapsed time">${formatElapsed(elapsed)}</span><button class="ghost sm" onclick="stopWriting(this)">Stop</button></div>` : ""}
+        ${running ? `<div class="row" style="gap:6px"><span id="run-status-dot" class="run-status-dot ${activity.className}" title="${activity.label}" aria-label="${activity.label}"></span><span id="run-elapsed" class="pill" aria-label="Elapsed time">${formatElapsed(elapsed)}</span><button class="ghost sm" onclick="stopWriting(this)">Stop</button></div>` : `<button class="ghost sm" onclick="loadRunHistory()">View last run trace</button>`}
     </div>
     <div class="run-progress" aria-live="polite">
        <div class="run-progress-head"><b id="run-progress-label">${esc(phaseLabel)}</b><span id="run-progress-percent">${Math.round(renderedPercent)}%</span></div>
@@ -3468,6 +3478,16 @@ function runPanel(run) {
       <div id="runlog" class="runlog" onscroll="rememberRunConsolePosition(this)">${runLogHtml()}</div>
     ${running ? '<div class="hint" style="margin-top:8px">Leave this open or close it: the runtime keeps going either way, and the board updates as chapters land.</div>' : ""}
   </div>`;
+}
+
+async function loadRunHistory() {
+  try {
+    const snapshot = await api("/api/run/history");
+    runEvents = snapshot.events || [];
+    runAgents = snapshot.agents || [];
+    runLatest = snapshot.latest || 0;
+    renderRunLog();
+  } catch (e) { toast(e.message, "error"); }
 }
 
 function preparationProgressDetail(progress) {
