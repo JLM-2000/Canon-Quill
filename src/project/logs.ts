@@ -31,6 +31,8 @@ const logFiles: Record<LogKind, string> = {
   error: "errors-log.json"
 };
 
+let logWriteQueue = Promise.resolve();
+
 export function logPath(slug: string, kind: LogKind): string {
   return path.join(workspacePaths(slug).logs, logFiles[kind]);
 }
@@ -45,11 +47,15 @@ export async function initializeLogs(slug: string): Promise<void> {
 }
 
 export async function appendLog(slug: string, kind: LogKind, entry: BaseLogEntry | ErrorLogEntry): Promise<void> {
-  await initializeLogs(slug);
   const filePath = logPath(slug, kind);
-  const entries = await readJsonArray(filePath);
-  entries.push({ ...entry, timestamp: entry.timestamp || new Date().toISOString() });
-  await writeFile(filePath, JSON.stringify(entries, null, 2));
+  const operation = logWriteQueue.catch(() => undefined).then(async () => {
+    await initializeLogs(slug);
+    const entries = await readJsonArray(filePath);
+    entries.push({ ...entry, timestamp: entry.timestamp || new Date().toISOString() });
+    await writeFile(filePath, JSON.stringify(entries, null, 2));
+  });
+  logWriteQueue = operation.catch(() => undefined);
+  await operation;
 }
 
 export async function readLog(slug: string, kind: LogKind): Promise<unknown[]> {
@@ -96,7 +102,17 @@ async function ensureJsonArray(filePath: string): Promise<void> {
 async function readJsonArray(filePath: string): Promise<unknown[]> {
   if (!existsSync(filePath)) return [];
   const text = await readFile(filePath, "utf8");
-  const parsed = JSON.parse(text) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch (error) {
+    // A pre-queue runtime could have appended a second JSON value after the array.
+    // Keep the valid history and let the next append rewrite the file cleanly.
+    const position = Number(/position (\d+)/.exec(String(error))?.[1] ?? -1);
+    const boundary = position >= 0 ? text.lastIndexOf("]", position) : -1;
+    if (boundary < 0) throw error;
+    parsed = JSON.parse(text.slice(0, boundary + 1)) as unknown;
+  }
   if (!Array.isArray(parsed)) throw new Error(`${filePath} must contain a JSON array.`);
   return parsed;
 }
