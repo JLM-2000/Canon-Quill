@@ -84,6 +84,28 @@ describe("runtime command", () => {
     expect(buildPrompt({ projectName: "The Tide House", slug: "the-tide-house", resumeSessionId: "session-123" }))
       .toContain("resuming the provider conversation");
   });
+
+  it("carries unfinished delegated conversations into a resumed prompt", () => {
+    const prompt = buildPrompt({
+      projectName: "The Tide House",
+      slug: "the-tide-house",
+      resumeSessionId: "session-123",
+      resumeDelegatedSessions: [{
+        sessionId: "handoff-1",
+        conversationId: "agent-1",
+        agent: "book-08-chapter-editing",
+        depth: 1,
+        status: "working",
+        runtime: "claude-code"
+      }]
+    });
+    expect(prompt).toContain("agent-1");
+    expect(prompt).toContain("Continue those conversations");
+  });
+
+  it("forbids delegated scratch files outside the workspace", () => {
+    expect(buildPrompt({ projectName: "The Tide House", slug: "the-tide-house" })).toContain("Never write scratch files to /tmp");
+  });
 });
 
 describe("reading the runtime stream", () => {

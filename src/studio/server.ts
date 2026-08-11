@@ -330,7 +330,7 @@ export function createStudioApp() {
     );
   }
 
-  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string; role?: "analysis" | "drafting"; resumeSessionId?: string | null; authMethod?: "subscription" | "api_key" | null }) {
+  async function launchRuntime(slug: string, state: StudioState, options: { chapter: number | null; note?: string; role?: "analysis" | "drafting"; resumeSessionId?: string | null; resumeDelegatedSessions?: import("./state.js").DelegatedSession[]; authMethod?: "subscription" | "api_key" | null }) {
     if (isRunning()) throw new HttpError(409, "A run is already in progress.");
     if (pendingOutcome) {
       await pendingOutcome;
@@ -362,6 +362,7 @@ export function createStudioApp() {
         chapter,
         note: options.note,
         resumeSessionId: options.resumeSessionId,
+        resumeDelegatedSessions: options.resumeDelegatedSessions,
         onProgress: (progress) => {
           phaseLogQueue = phaseLogQueue.then(() => appendLog(slug, "phase", {
             timestamp: new Date().toISOString(),
@@ -403,7 +404,8 @@ export function createStudioApp() {
         detail: null,
         haltedAt: null,
         startedAt: new Date().toISOString(),
-        providerSessionId: options.resumeSessionId ?? null
+        providerSessionId: options.resumeSessionId ?? null,
+        delegatedSessions: options.resumeDelegatedSessions ?? []
       };
     });
     await appendLog(slug, "audit", {
@@ -580,7 +582,8 @@ export function createStudioApp() {
         status: "halted",
         reason: "cancelled",
         detail: "The Studio restarted while this run was going, so the run ended with it.",
-        haltedAt: new Date().toISOString()
+        haltedAt: new Date().toISOString(),
+        delegatedSessions: current.run.delegatedSessions
       };
     });
   }
@@ -606,14 +609,15 @@ export function createStudioApp() {
     try {
       await updateState(slug, (current) => {
         current.run = outcome.ok
-          ? { ...current.run, status: "complete", reason: null, detail: null, haltedAt: null, providerSessionId: outcome.providerSessionId }
+          ? { ...current.run, status: "complete", reason: null, detail: null, haltedAt: null, providerSessionId: outcome.providerSessionId, delegatedSessions: outcome.delegatedSessions }
           : {
             ...current.run,
             status: "halted",
             reason: outcome.reason ?? "other",
             detail: outcome.detail ? redactSensitiveText(outcome.detail).slice(0, 2000) : null,
             haltedAt: new Date().toISOString(),
-            providerSessionId: outcome.providerSessionId
+            providerSessionId: outcome.providerSessionId,
+            delegatedSessions: outcome.delegatedSessions
           };
       });
     } catch { /* the run is over either way; the board reloads from disk */ }
@@ -2305,7 +2309,8 @@ export function createStudioApp() {
         detail,
         haltedAt: new Date().toISOString(),
         startedAt: current.run?.startedAt ?? null,
-        providerSessionId: current.run?.providerSessionId ?? null
+        providerSessionId: current.run?.providerSessionId ?? null,
+        delegatedSessions: current.run?.delegatedSessions ?? []
       };
     });
 
@@ -2563,7 +2568,8 @@ export function createStudioApp() {
       chapter: preparationRun ? null : next?.number ?? null,
       role: preparationRun ? "analysis" : "drafting",
       note: preparationRun ? "PREPARATION_REPAIR: continue preparing the package. Do not draft prose." : undefined,
-      resumeSessionId: state.run.providerSessionId
+      resumeSessionId: state.run.providerSessionId,
+      resumeDelegatedSessions: state.run.delegatedSessions
     });
 
     res.json({ resumed: true, resumeAt: next?.number ?? null, state: updated, runtime: updated.runtime, runtimeLabel: updated.runtimeLabel, model: updated.model });

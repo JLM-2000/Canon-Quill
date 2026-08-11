@@ -3,9 +3,11 @@
 // the runtime uses its own login, as it does when started by hand.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { redactSensitiveText } from "./redact.js";
+import type { DelegatedSession } from "./state.js";
 
 export type RuntimeId = "claude-code" | "opencode";
 export type ProviderId = "anthropic" | "openai";
@@ -29,6 +31,7 @@ export interface RunSnapshot {
   events: RunEvent[];
   agents: RunAgentSnapshot[];
   providerSessionId: string | null;
+  delegatedSessions: DelegatedSession[];
   latest: number;
   progress: RunProgress | null;
 }
@@ -71,6 +74,7 @@ export interface StartOptions {
   chapter?: number | null;
   note?: string;
   resumeSessionId?: string | null;
+  resumeDelegatedSessions?: DelegatedSession[];
   cwd?: string;
   onExit: (outcome: RunOutcome) => void;
   onProgress?: (progress: RunProgress) => void;
@@ -87,6 +91,7 @@ export interface RunOutcome {
   trace: RunEvent[];
   progress: RunProgress | null;
   providerSessionId: string | null;
+  delegatedSessions: DelegatedSession[];
 }
 
 const AGENT = "book-orchestrator";
@@ -117,9 +122,11 @@ interface NestedMonitor {
 interface ActiveRun {
   slug: string;
   child: ChildProcess | null;
+  cwd: string;
   heartbeat?: NodeJS.Timeout;
   watchdog?: NodeJS.Timeout;
   nested?: NestedMonitor;
+  claudeTranscript?: ClaudeTranscriptMonitor;
   runtime: RuntimeId;
   command: string;
   startedAt: string;
@@ -132,6 +139,13 @@ interface ActiveRun {
   repeatedLookup: { text: string; since: number } | null;
 }
 
+interface ClaudeTranscriptMonitor {
+  timer: NodeJS.Timeout;
+  root: string;
+  startedAt: number;
+  offsets: Map<string, number>;
+}
+
 let active: ActiveRun | null = null;
 let events: RunEvent[] = [];
 let seq = 0;
@@ -142,6 +156,7 @@ let progress: RunProgress | null = null;
 let agentStates = new Map<string, RunAgentSnapshot>();
 let claudeTaskAgents = new Map<string, { agent: string; depth: number }>();
 let providerSessionId: string | null = null;
+let delegatedSessions = new Map<string, DelegatedSession>();
 let runAuthMethod: AuthMethod | null = null;
 
 /** Tests and dry runs record the command without starting anything. */
@@ -162,6 +177,7 @@ export function runSnapshot(since = 0): RunSnapshot {
     events: events.filter((event) => event.seq > since),
     agents: [...agentStates.values()],
     providerSessionId,
+    delegatedSessions: [...delegatedSessions.values()],
     latest: seq,
     progress
   };
@@ -222,6 +238,8 @@ function setAgentStatus(key: string, status: RunAgentStatus): void {
   if (agent.done && status !== "done") return;
   agent.status = status;
   agent.done = status === "done";
+  const delegated = delegatedSessions.get(key);
+  if (delegated) delegated.status = status;
 }
 
 function isRepeatedLookup(text: string): boolean {
@@ -373,7 +391,7 @@ function onPath(binary: string): boolean {
   return dirs.some((dir) => names.some((name) => existsSync(path.join(dir, name))));
 }
 
-export function buildPrompt(options: { projectName: string; slug: string; note?: string; resumeSessionId?: string | null }): string {
+export function buildPrompt(options: { projectName: string; slug: string; note?: string; resumeSessionId?: string | null; resumeDelegatedSessions?: DelegatedSession[] }): string {
   const lines = [
     `Continue the Canon Quill book "${options.projectName}" (workspace ${options.slug}).`,
     `Read workspaces/${options.slug}/project.json first, then carry the book forward from whatever`,
@@ -385,11 +403,12 @@ export function buildPrompt(options: { projectName: string; slug: string; note?:
     "When the run note begins PREPARATION_REPAIR, missing preparation artifacts are expected work, not errors: continue from the existing source records and delegate the repair.",
     "Read any preparation notes in project.json alongside those documents; treat them as author instructions for what must be corrected or preserved.",
     "The Studio owns workspaces/<book>/logs/**. Never edit or write anything under logs; it records runtime and phase history itself.",
+    "Never write scratch files to /tmp or any path outside this book workspace. Put temporary measurements under workspaces/<book>/artifacts/ if needed, and remove them when finished.",
     "Use every question and author answer as authoritative preparation input.",
     `Read workspaces/${options.slug}/logs/phase-log.json, audit-log.json, and errors-log.json when they exist;`,
     "use them as the execution history, including recorded messages from earlier runtime sessions, and stop if they expose an unresolved failure.",
     options.resumeSessionId
-      ? "This run is resuming the provider conversation identified by the saved session. Keep using that conversation while treating the workspace and its recorded artifacts as authoritative."
+      ? `This run is resuming the provider conversation identified by the saved session. Keep using that conversation while treating the workspace and its recorded artifacts as authoritative. ${options.resumeDelegatedSessions?.length ? `The previous run also had these delegated conversations: ${options.resumeDelegatedSessions.map((session) => `${session.agent} (${session.conversationId ?? session.sessionId}, ${session.status})`).join(", ")}. Continue those conversations when the provider supports it; do not silently restart completed work or create a duplicate delegation.` : "If delegated work was already recorded, inspect its saved artifacts before delegating it again."}`
       : "If no saved provider session is available, this is a new provider conversation. Continue from the recorded workspace, decisions, artifacts, and runtime conversation.",
     "The author approved the preparation gate in the Studio. Honour every author gate that remains:",
     "do not approve a chapter on their behalf, and stop with a clear report if an input is missing.",
@@ -509,6 +528,12 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
   };
   agentStates = new Map([["orchestrator", { key: "orchestrator", agent: "Orchestrator", depth: 0, status: "working", done: false }]]);
   claudeTaskAgents = new Map();
+  delegatedSessions = new Map((options.resumeDelegatedSessions ?? []).map((session) => [session.sessionId, { ...session }]));
+  for (const session of options.resumeDelegatedSessions ?? []) {
+    claudeTaskAgents.set(session.sessionId, { agent: session.agent, depth: session.depth });
+    ensureAgent(session.sessionId, session.agent, session.depth);
+    setAgentStatus(session.sessionId, session.status);
+  }
   providerSessionId = options.resumeSessionId ?? null;
   runAuthMethod = options.authMethod ?? null;
   lastRuntime = runtime;
@@ -518,6 +543,7 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
   active = {
     slug: options.slug,
     child: null,
+    cwd,
     runtime,
     command,
     startedAt: lastStartedAt,
@@ -543,7 +569,8 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   const child = spawn(file, args, { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   active.child = child;
-  if (runtime === "opencode") startNestedMonitor(cwd, Date.parse(active.startedAt));
+  if (runtime === "opencode") startNestedMonitor(cwd, Date.parse(active.startedAt), options.resumeDelegatedSessions ?? []);
+  if (runtime === "claude-code") startClaudeTranscriptMonitor(cwd, Date.parse(active.startedAt));
   active.heartbeat = setInterval(() => {
     if (!active || active.child !== child || !progress) return;
     if (progress.activity !== "waiting") setProgress({ ...progress, activity: "waiting" });
@@ -580,7 +607,7 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
 
   child.on("error", (error: Error) => {
     emit("error", error.message);
-    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events], progress, providerSessionId }, options.onExit);
+    finish({ ok: false, code: null, signal: null, reason: "other", detail: error.message, trace: [...events], progress, providerSessionId, delegatedSessions: [...delegatedSessions.values()] }, options.onExit);
   });
 
   child.on("close", (code, signal) => {
@@ -596,7 +623,8 @@ export function startRun(options: StartOptions): { runtime: RuntimeId; command: 
       detail: ok ? null : recentText().slice(-1500) || null,
       trace: [...events],
       progress,
-      providerSessionId
+      providerSessionId,
+      delegatedSessions: [...delegatedSessions.values()]
     }, options.onExit);
   });
 
@@ -608,7 +636,7 @@ export function stopRun(reason: "cancelled" | "stalled" = "cancelled"): boolean 
   active.stopping = true;
   active.stopReason = reason;
   if (!active.child) {
-    finish({ ok: false, code: null, signal: null, reason, detail: null, trace: [...events], progress, providerSessionId }, () => undefined);
+    finish({ ok: false, code: null, signal: null, reason, detail: null, trace: [...events], progress, providerSessionId, delegatedSessions: [...delegatedSessions.values()] }, () => undefined);
     return true;
   }
   active.child.kill("SIGTERM");
@@ -620,12 +648,13 @@ function finish(outcome: RunOutcome, onExit: (outcome: RunOutcome) => void): voi
   if (active.heartbeat) clearInterval(active.heartbeat);
   if (active.watchdog) clearInterval(active.watchdog);
   stopNestedMonitor(active.nested);
+  stopClaudeTranscriptMonitor(active.claudeTranscript);
   for (const agent of agentStates.values()) setAgentStatus(agent.key, "done");
   active = null;
   onExit(outcome);
 }
 
-function startNestedMonitor(cwd: string, startedAt: number): void {
+function startNestedMonitor(cwd: string, startedAt: number, resumeSessions: DelegatedSession[]): void {
   if (!active) return;
   const port = 45000 + (process.pid % 1000);
   const child = spawn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1", "--pure"], {
@@ -638,7 +667,12 @@ function startNestedMonitor(cwd: string, startedAt: number): void {
     timer: setInterval(() => void pollNestedSessions(monitor), NESTED_POLL_MS),
     url: `http://127.0.0.1:${port}`,
     startedAt,
-    sessions: new Map(),
+    sessions: new Map(resumeSessions.map((session) => [session.sessionId, {
+      agent: session.agent,
+      depth: session.depth,
+      status: session.status,
+      lastActivityAt: Date.now()
+    }])),
     parts: new Map(),
     lastNestedUpdateAt: 0,
     lastParentEventAt: Date.now(),
@@ -656,6 +690,70 @@ function stopNestedMonitor(monitor: NestedMonitor | undefined): void {
   if (monitor.child.exitCode === null && !monitor.child.killed) monitor.child.kill("SIGTERM");
 }
 
+function startClaudeTranscriptMonitor(cwd: string, startedAt: number): void {
+  if (!active) return;
+  const root = path.join(os.homedir(), ".claude", "projects", cwd.replace(/[\\/]/g, "-"));
+  const monitor: ClaudeTranscriptMonitor = {
+    timer: setInterval(() => pollClaudeTranscripts(monitor), NESTED_POLL_MS),
+    root,
+    startedAt,
+    offsets: new Map()
+  };
+  monitor.timer.unref();
+  active.claudeTranscript = monitor;
+  void pollClaudeTranscripts(monitor);
+}
+
+function stopClaudeTranscriptMonitor(monitor: ClaudeTranscriptMonitor | undefined): void {
+  if (monitor) clearInterval(monitor.timer);
+}
+
+function pollClaudeTranscripts(monitor: ClaudeTranscriptMonitor): void {
+  if (!active || active.claudeTranscript !== monitor || !providerSessionId) return;
+  const directory = path.join(monitor.root, providerSessionId, "subagents");
+  let names: string[];
+  try { names = readdirSync(directory).filter((name) => name.endsWith(".jsonl")); } catch { return; }
+
+  for (const name of names) {
+    const file = path.join(directory, name);
+    let content: string;
+    try { content = readFileSync(file, "utf8"); } catch { continue; }
+    const previous = monitor.offsets.get(file) ?? 0;
+    monitor.offsets.set(file, content.length);
+    let offset = 0;
+    for (const line of content.split("\n")) {
+      const nextOffset = offset + line.length + 1;
+      if (nextOffset <= previous || !line.trim()) { offset = nextOffset; continue; }
+      offset = nextOffset;
+      let entry: Record<string, any>;
+      try { entry = JSON.parse(line); } catch { continue; }
+      const timestamp = Date.parse(String(entry.timestamp ?? ""));
+      if (timestamp && timestamp < monitor.startedAt - 2_000) continue;
+      const agent = typeof entry.attributionAgent === "string" ? entry.attributionAgent : "Subagent";
+      const conversationId = typeof entry.agentId === "string" ? entry.agentId : path.basename(name, ".jsonl");
+      const handoff = [...claudeTaskAgents.entries()].find(([, task]) => task.agent === agent)?.[0];
+      const sessionId = handoff ?? conversationId;
+      delegatedSessions.set(sessionId, delegatedSessions.get(sessionId) ?? { sessionId, conversationId, agent, depth: 1, status: "working", runtime: "claude-code" });
+      ensureAgent(sessionId, agent, 1);
+      const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
+      for (const block of blocks) {
+        if (block?.type === "tool_use") emit("step", describeTool(block.name, block.input), { sessionId, agent, depth: 1 });
+        if (block?.type === "tool_result" && block.is_error) {
+          const detail = flatten(block.content);
+          emit("error", /permission|approval|outside.*workspace|not allowed/i.test(detail)
+            ? "A delegated step was blocked by workspace permissions."
+            : "A delegated step failed.", { sessionId, agent, depth: 1 });
+        }
+        if (block?.type === "text" && typeof block.text === "string") {
+          const text = block.text.replace(/\s+/g, " ").trim();
+          if (text) emit("note", text, { sessionId, agent, depth: 1 });
+        }
+      }
+      if (entry.type === "result" || entry.message?.stop_reason) setAgentStatus(sessionId, "done");
+    }
+  }
+}
+
 async function pollNestedSessions(monitor: NestedMonitor): Promise<void> {
   if (!active || active.nested !== monitor) return;
   try {
@@ -665,7 +763,8 @@ async function pollNestedSessions(monitor: NestedMonitor): Promise<void> {
       .map((session) => [session.id, session]));
     const nested = sessions.filter((session) => {
       const created = Number(session.time?.created ?? 0);
-      return typeof session.id === "string" && Boolean(session.parentID) && created >= monitor.startedAt - 2_000;
+      return typeof session.id === "string" && Boolean(session.parentID)
+        && (created >= monitor.startedAt - 2_000 || monitor.sessions.has(session.id));
     });
     const latestNestedUpdate = nested.reduce((latest, session) => Math.max(latest, Number(session.time?.updated ?? session.time?.created ?? 0)), 0);
     if (latestNestedUpdate > monitor.lastNestedUpdateAt) monitor.lastNestedUpdateAt = latestNestedUpdate;
@@ -686,6 +785,7 @@ async function pollNestedSessions(monitor: NestedMonitor): Promise<void> {
         ensureAgent(session.id, agent, depth);
         setAgentStatus("orchestrator", "waiting");
         emit("step", `${agent} started.`, { sessionId: session.id, agent, depth });
+        delegatedSessions.set(session.id, { sessionId: session.id, agent, depth, status: "working", runtime: "opencode" });
       }
 
       const messages = await fetchJson<Array<Record<string, any>>>(`${monitor.url}/session/${encodeURIComponent(session.id)}/message`);
@@ -815,7 +915,9 @@ function translate(runtime: RuntimeId, line: string): void {
   if (raw.type === "assistant" && Array.isArray(raw.message?.content)) {
     for (const block of raw.message.content) {
       if (block?.type === "tool_use" && isDelegationTool(block.name) && typeof block.id === "string") {
-        claudeTaskAgents.set(block.id, { agent: String(block.input?.subagent_type ?? "Subagent"), depth: 1 });
+        const agent = String(block.input?.subagent_type ?? "Subagent");
+        claudeTaskAgents.set(block.id, { agent, depth: 1 });
+        delegatedSessions.set(block.id, { sessionId: block.id, agent, depth: 1, status: "working", runtime: "claude-code" });
       }
     }
   }

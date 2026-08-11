@@ -143,6 +143,17 @@ export interface RunState {
   startedAt: string | null;
   /** Provider-native conversation session, when the runtime exposes one. */
   providerSessionId: string | null;
+  /** Delegated conversations that were in flight when the run stopped. */
+  delegatedSessions: DelegatedSession[];
+}
+
+export interface DelegatedSession {
+  sessionId: string;
+  conversationId?: string;
+  agent: string;
+  depth: number;
+  status: "working" | "waiting" | "done";
+  runtime: "claude-code" | "opencode";
 }
 
 /** Author instruction for the drafting agent. */
@@ -339,7 +350,7 @@ export function emptyState(slug: string, projectName = "Untitled Book"): StudioS
     preparationReviewed: false,
     preparationNotes: {},
     directions: [],
-    run: { status: "idle", role: null, chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null, providerSessionId: null },
+    run: { status: "idle", role: null, chapter: null, reason: null, detail: null, haltedAt: null, startedAt: null, providerSessionId: null, delegatedSessions: [] },
     ledger: emptyLedger(projectName, 0),
     styleCorpus: { built: false, label: "", passageCount: 0, wordCount: 0, builtAt: null, continuedAt: null, excluded: [], notes: "", documentStats: [] },
     createdAt: now,
@@ -384,12 +395,15 @@ export async function loadState(slug: string): Promise<StudioState> {
         findings: { ...base.projectAnalysis.findings, ...(parsed.projectAnalysis?.findings ?? {}) }
       },
       chapterChats: parsed.chapterChats ?? {},
-       run: {
-         ...base.run,
-         ...(parsed.run ?? {}),
-         role: parsed.run?.role === "analysis" ? "analysis" as const : parsed.run?.role === "drafting" ? "drafting" as const : null,
-         providerSessionId: typeof parsed.run?.providerSessionId === "string" ? parsed.run.providerSessionId : null
-       },
+      run: {
+        ...base.run,
+        ...(parsed.run ?? {}),
+        role: parsed.run?.role === "analysis" ? "analysis" as const : parsed.run?.role === "drafting" ? "drafting" as const : null,
+        providerSessionId: typeof parsed.run?.providerSessionId === "string" ? parsed.run.providerSessionId : null,
+        delegatedSessions: Array.isArray(parsed.run?.delegatedSessions)
+          ? parsed.run.delegatedSessions.filter((session): session is DelegatedSession => Boolean(session && typeof session.sessionId === "string" && typeof session.agent === "string"))
+          : []
+      },
       manuscriptReviewed: parsed.manuscriptReviewed ?? Boolean(parsed.manuscript),
       writingConfirmed: parsed.writingConfirmed ?? Boolean(parsed.chapters?.length),
       preparationReviewed: parsed.preparationReviewed ?? false,
